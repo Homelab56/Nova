@@ -181,12 +181,14 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
     Checkt of een titel beschikbaar is in de RD bibliotheek zonder te unrestricten.
     """
     candidates = await _candidate_queries(q, tmdb_id, media_type)
+    base_year = _candidate_year(q)
+    is_movie = (media_type == "movie")
+    if is_movie and base_year:
+        candidates = [c for c in candidates if _candidate_year(c) == base_year]
     word_sets = [(_words(c), c) for c in candidates]
     word_sets = [(w, c) for (w, c) in word_sets if w]
     if not word_sets:
         return {"available": False}
-    base_year = _candidate_year(q)
-    is_movie = (media_type == "movie")
     word_sets = _filter_candidates_for_year(word_sets, base_year)
 
     async with httpx.AsyncClient() as client:
@@ -236,11 +238,14 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
     5. Controleert RD instant availability (cache) voor gevonden torrents.
     """
     candidates = await _candidate_queries(q, tmdb_id, media_type)
+    base_year = _candidate_year(q)
+    is_movie = (media_type == "movie")
+    if is_movie and base_year:
+        candidates = [c for c in candidates if _candidate_year(c) == base_year]
     word_sets = [(_words(c), c) for c in candidates]
     word_sets = [(w, c) for (w, c) in word_sets if w]
     if not word_sets:
         return {"stream_url": None, "message": "Ongeldige zoekopdracht."}
-    is_movie = (media_type == "movie")
 
     # --- STAP 0: Zoek op lokale Dumbarr mount ---
     from .library import find_file
@@ -383,9 +388,9 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
             break
 
     if not external_torrents:
-        # Probeer nog een keer zonder jaartal indien aanwezig
+        # Probeer nog een keer zonder jaartal indien aanwezig (niet voor films, om foute matches te vermijden)
         q_no_year = re.sub(r"\s\d{4}$", "", q).strip()
-        if q_no_year != q:
+        if (media_type != "movie") and q_no_year != q:
             return await search_and_stream(q_no_year, tmdb_id=tmdb_id, media_type=media_type)
         return {"stream_url": None, "message": f"Geen streams gevonden voor '{q}' op het internet."}
 
@@ -414,7 +419,7 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
     external_torrents = filtered_external
     if not external_torrents:
         q_no_year = re.sub(r"\s\d{4}$", "", q).strip()
-        if q_no_year != q:
+        if (media_type != "movie") and q_no_year != q:
             return await search_and_stream(q_no_year, tmdb_id=tmdb_id, media_type=media_type)
         return {"stream_url": None, "message": f"Geen streams gevonden voor '{q}' op het internet."}
 

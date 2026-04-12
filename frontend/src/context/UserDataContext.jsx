@@ -77,6 +77,7 @@ export function UserDataProvider({ children }) {
     if (!item) return;
     const isSeries = item.media_type === "tv" || item.media_type === "tv_episode";
     if (!isSeries) {
+      setProgress(prev => prev.filter(p => String(p.id) !== String(item.id)));
       await fetch(`/api/user/progress/${encodeURIComponent(String(item.id))}`, { method: "DELETE" });
       refreshProgress();
       return;
@@ -94,6 +95,14 @@ export function UserDataProvider({ children }) {
         return false;
       })
       .map(p => String(p.id));
+
+    setProgress(prev => prev.filter(p => {
+      const pid = String(p.id);
+      if (p.show_id != null && String(p.show_id) === showIdStr) return false;
+      if (String(p.id) === showIdStr) return false;
+      if (pid.startsWith(`tv:${showIdStr}:`)) return false;
+      return true;
+    }));
 
     await Promise.all(ids.map(id => fetch(`/api/user/progress/${encodeURIComponent(id)}`, { method: "DELETE" })));
     refreshProgress();
