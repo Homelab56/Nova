@@ -84,7 +84,13 @@ export function UserDataProvider({ children }) {
 
     const showId = item.show_id ?? item.id;
     const ids = progress
-      .filter(p => p.show_id === showId)
+      .filter(p => {
+        const pid = String(p.id);
+        if (p.show_id === showId) return true;
+        if (p.id === showId) return true;
+        if (pid.startsWith(`tv:${showId}:`)) return true;
+        return false;
+      })
       .map(p => String(p.id));
 
     await Promise.all(ids.map(id => fetch(`/api/user/progress/${encodeURIComponent(id)}`, { method: "DELETE" })));

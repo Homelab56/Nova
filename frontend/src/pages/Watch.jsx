@@ -86,6 +86,26 @@ export default function Watch() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!media?.id) return;
+    if (pollRef.current) clearInterval(pollRef.current);
+    if (searchAbortRef.current) searchAbortRef.current.abort();
+    requestKeyRef.current = null;
+    setStreamUrl(null);
+    setLoading(false);
+    setStatus("");
+    setRequestStatus(null);
+    setRequestMessage("");
+    setStartAt(0);
+    setDurationHint(0);
+    setProgressItem(null);
+    if (!isMovie) {
+      setSelectedSeason(1);
+      setSelectedEpisode(null);
+      setSeasonData(null);
+    }
+  }, [media?.id]);
+
   // Laad seizoendata als serie
   useEffect(() => {
     if (isMovie || !media) return;
