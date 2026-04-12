@@ -165,6 +165,7 @@ export default function Watch() {
       setRequestStatus(null);
       setRequestMessage("");
     }
+    requestKeyRef.current = reqKey;
     setLoading(true);
     const searchTitle = episodeInfo
       ? `${title} S${String(targetSeason).padStart(2,"0")}E${String(episodeInfo.episode_number).padStart(2,"0")}`
@@ -190,15 +191,15 @@ export default function Watch() {
         const startedAt = Date.now();
         const poll = async () => {
           try {
-            const ms = await fetch(`/api/seerr/media-status?tmdb_id=${media.id}&media_type=${type}`).then(r => r.json());
-            if (ms.ok) {
+            const ms = await fetch(`/api/seerr/media-status?tmdb_id=${media.id}&media_type=${type}`, { signal: searchAbortRef.current.signal }).then(r => r.json());
+            if (ms.ok && requestKeyRef.current === reqKey) {
               const dl = ms.download_status ? ` · ${ms.download_status}` : "";
               setRequestMessage(`${ms.status_label || "Seerr status"}${dl}`);
             }
           } catch {}
 
           try {
-            const rr = await fetch(`/api/debrid/search?q=${encodeURIComponent(searchTitle)}&tmdb_id=${encodeURIComponent(media.id)}&media_type=${encodeURIComponent(type)}`).then(r => r.json());
+            const rr = await fetch(`/api/debrid/search?q=${encodeURIComponent(searchTitle)}&tmdb_id=${encodeURIComponent(media.id)}&media_type=${encodeURIComponent(type)}`, { signal: searchAbortRef.current.signal }).then(r => r.json());
             if (rr.stream_url) {
               let finalUrl = rr.stream_url;
               if (finalUrl.startsWith("/")) finalUrl = window.location.origin + finalUrl;
@@ -228,29 +229,38 @@ export default function Watch() {
               const urlWithStart = doResume
                 ? `${finalUrl}${finalUrl.includes("?") ? "&" : "?"}start=${encodeURIComponent(resumeTime)}`
                 : finalUrl;
-              setStartAt(doResume ? resumeTime : 0);
-              setDurationHint(resumeDuration || 0);
-              setStreamUrl(urlWithStart);
-              setProgressItem(nextProgressItem);
-              setStatus("");
-              setLoading(false);
-              if (pollRef.current) clearInterval(pollRef.current);
-            } else {
-              const minutes = Math.floor((Date.now() - startedAt) / 60000);
-              setStatus(`Wachten op download... (${minutes} min)`);
-              if (Date.now() - startedAt > 45 * 60000) {
-                setStatus(rr.message || "Duurt langer dan verwacht. Probeer later opnieuw.");
+              
+              if (requestKeyRef.current === reqKey) {
+                setStartAt(doResume ? resumeTime : 0);
+                setDurationHint(resumeDuration || 0);
+                setStreamUrl(urlWithStart);
+                setProgressItem(nextProgressItem);
+                setStatus("");
                 setLoading(false);
                 if (pollRef.current) clearInterval(pollRef.current);
+              }
+            } else {
+              if (requestKeyRef.current === reqKey) {
+                const minutes = Math.floor((Date.now() - startedAt) / 60000);
+                setStatus(`Wachten op download... (${minutes} min)`);
+                if (Date.now() - startedAt > 45 * 60000) {
+                  setStatus(rr.message || "Duurt langer dan verwacht. Probeer later opnieuw.");
+                  setLoading(false);
+                  if (pollRef.current) clearInterval(pollRef.current);
+                }
               }
             }
           } catch {}
         };
 
-        await poll();
-        pollRef.current = setInterval(poll, 8000);
+        if (requestKeyRef.current === reqKey) {
+          await poll();
+          pollRef.current = setInterval(poll, 8000);
+        }
         return;
       }
+
+      if (requestKeyRef.current !== reqKey) return;
 
       if (data.source === "scraper") {
         setStatus(`Gevonden op internet: ${data.title || searchTitle}. Laden...`);
