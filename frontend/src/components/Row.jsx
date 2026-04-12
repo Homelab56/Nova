@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useUserData } from "../context/UserDataContext";
 
@@ -69,10 +69,25 @@ function Card({ item, progressPct }) {
 
 export default function Row({ title, items = [], loading = false, progressMap = {} }) {
   const rowRef = useRef(null);
+  const [visibleCount, setVisibleCount] = useState(20);
+
+  useEffect(() => {
+    setVisibleCount(20);
+  }, [title, items?.length]);
 
   function scroll(dir) {
     rowRef.current?.scrollBy({ left: dir * 500, behavior: "smooth" });
   }
+
+  const onScroll = () => {
+    const el = rowRef.current;
+    if (!el) return;
+    const nearEnd = el.scrollLeft + el.clientWidth >= (el.scrollWidth - 320);
+    if (!nearEnd) return;
+    setVisibleCount((c) => Math.min(items.length, c + 20));
+  };
+
+  const visibleItems = items.slice(0, visibleCount);
 
   return (
     <div className="mb-10">
@@ -86,6 +101,7 @@ export default function Row({ title, items = [], loading = false, progressMap = 
         </button>
         <div
           ref={rowRef}
+          onScroll={onScroll}
           className="flex gap-3 md:gap-4 overflow-x-auto px-4 md:px-10 pb-3"
           style={{ scrollbarWidth: "none" }}
         >
@@ -93,7 +109,7 @@ export default function Row({ title, items = [], loading = false, progressMap = 
             ? Array.from({ length: 8 }).map((_, i) => (
                 <div key={i} className="flex-shrink-0 w-36 sm:w-40 md:w-44 aspect-[2/3] rounded-xl bg-nova-card animate-pulse" />
               ))
-            : items.map((item) => (
+            : visibleItems.map((item) => (
                 <Card
                   key={item.id}
                   item={item}

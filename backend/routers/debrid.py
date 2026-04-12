@@ -172,11 +172,14 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
         filename_raw = torrent.get("filename", "") or ""
         filename = _normalize_text(filename_raw)
         filename_years = _extract_years(filename_raw)
+        base_year = _candidate_year(q)
         best_score = 0
         best_min = 999
         for words, candidate_q in word_sets:
             cy = _candidate_year(candidate_q)
             if cy and filename_years and cy not in filename_years:
+                continue
+            if base_year and not cy and filename_years and base_year not in filename_years:
                 continue
             score = sum(1 for word in words if word in filename)
             min_score = min(2, len(words))
@@ -230,6 +233,7 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
             best_match = None
             best_score = 0
             best_q = q
+            base_year = _candidate_year(q)
             for torrent in torrents:
                 filename_years = _extract_years(torrent.get("filename", "") or "")
                 filename = _normalize_text(torrent.get("filename", "") or "")
@@ -239,6 +243,8 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                 for words, candidate_q in word_sets:
                     cy = _candidate_year(candidate_q)
                     if cy and filename_years and cy not in filename_years:
+                        continue
+                    if base_year and not cy and filename_years and base_year not in filename_years:
                         continue
                     score = sum(1 for word in words if word in filename)
                     min_score = min(2, len(words))
