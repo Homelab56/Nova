@@ -289,14 +289,6 @@ export default function Home() {
         <div className="pt-24 px-4 md:px-10 pb-16">
           <h1 className="text-2xl md:text-3xl font-black mb-2">Mijn Watchlist</h1>
           <p className="text-gray-500 text-sm mb-8">{watchlist.length} {watchlist.length === 1 ? "titel" : "titels"}</p>
-          {inProgress.length > 0 && (
-            <div className="mb-10">
-              <h2 className="text-xl font-bold mb-4 text-gray-100">Verder kijken</h2>
-              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
-                {inProgress.map(item => <MediaCard key={item.id} item={item} />)}
-              </div>
-            </div>
-          )}
           {watchlist.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24 text-center">
               <p className="text-5xl mb-4">🎬</p>
@@ -355,7 +347,7 @@ export default function Home() {
           <div className="relative z-10 -mt-6 pb-16">
             {/* Persoonlijke rijen bovenaan */}
             {inProgress.length > 0 && (
-              <Row title="Verder kijken" items={inProgress} progressMap={progressMap} />
+              <Row title="Verder kijken" items={inProgress} progressMap={progressMap} dismissable={true} />
             )}
 
             {/* Vaste rijen */}

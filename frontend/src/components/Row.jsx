@@ -4,9 +4,9 @@ import { useUserData } from "../context/UserDataContext";
 
 const TMDB_POSTER = "https://image.tmdb.org/t/p/w342";
 
-function Card({ item, progressPct }) {
+function Card({ item, progressPct, dismissable }) {
   const navigate = useNavigate();
-  const { toggleWatchlist, isInList } = useUserData();
+  const { toggleWatchlist, isInList, clearContinueWatching } = useUserData();
   const title = item.title || item.name;
   const year = (item.release_date || item.first_air_date || "").slice(0, 4);
   const rating = item.vote_average?.toFixed(1);
@@ -55,6 +55,16 @@ function Card({ item, progressPct }) {
         {inList ? "✓" : "+"}
       </button>
 
+      {dismissable && typeof clearContinueWatching === "function" && (
+        <button
+          onClick={(e) => { e.stopPropagation(); clearContinueWatching(item); }}
+          className="absolute top-2 left-2 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shadow-lg transition-all opacity-0 group-hover:opacity-100 bg-black/70 text-white hover:bg-white hover:text-black"
+          title="Verwijder uit verder kijken"
+        >
+          ✕
+        </button>
+      )}
+
       {/* Titel + info */}
       <div className="mt-2 px-0.5">
         <p className="text-sm font-semibold truncate leading-tight">{title}</p>
@@ -67,7 +77,7 @@ function Card({ item, progressPct }) {
   );
 }
 
-export default function Row({ title, items = [], loading = false, progressMap = {} }) {
+export default function Row({ title, items = [], loading = false, progressMap = {}, dismissable = false }) {
   const rowRef = useRef(null);
   const [visibleCount, setVisibleCount] = useState(20);
 
@@ -114,6 +124,7 @@ export default function Row({ title, items = [], loading = false, progressMap = 
                   key={item.id}
                   item={item}
                   progressPct={progressMap[item.id] ? Math.round((progressMap[item.id].current_time / progressMap[item.id].duration) * 100) : (item.current_time ? Math.round((item.current_time / item.duration) * 100) : 0)}
+                  dismissable={dismissable}
                 />
               ))}
         </div>

@@ -73,6 +73,24 @@ export function UserDataProvider({ children }) {
     refreshProgress();
   }
 
+  async function clearContinueWatching(item) {
+    if (!item) return;
+    const isSeries = item.media_type === "tv" || item.media_type === "tv_episode";
+    if (!isSeries) {
+      await fetch(`/api/user/progress/${encodeURIComponent(String(item.id))}`, { method: "DELETE" });
+      refreshProgress();
+      return;
+    }
+
+    const showId = item.show_id ?? item.id;
+    const ids = progress
+      .filter(p => p.show_id === showId)
+      .map(p => String(p.id));
+
+    await Promise.all(ids.map(id => fetch(`/api/user/progress/${encodeURIComponent(id)}`, { method: "DELETE" })));
+    refreshProgress();
+  }
+
   function isInList(id) {
     return watchlist.some(w => w.id === id);
   }
@@ -86,7 +104,7 @@ export function UserDataProvider({ children }) {
   return (
     <UserDataContext.Provider value={{
       watchlist, progress, progressMap,
-      toggleWatchlist, saveProgress,
+      toggleWatchlist, saveProgress, clearContinueWatching,
       isInList, getProgress,
     }}>
       {children}

@@ -31,9 +31,19 @@ def _normalize_text(s: str) -> str:
     s = re.sub(r"[^a-z0-9]+", " ", s)
     return re.sub(r"\s+", " ", s).strip()
 
+_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "de", "den", "der", "des",
+    "een", "en", "for", "het", "i", "in", "is", "la", "le", "les", "of", "on",
+    "or", "the", "to", "van", "von", "with",
+}
+
 def _words(s: str) -> list[str]:
     s = _normalize_text(s)
-    return [w for w in s.split() if len(w) >= 2]
+    raw = [w for w in s.split() if len(w) >= 2]
+    if not raw:
+        return []
+    filtered = [w for w in raw if w not in _STOPWORDS]
+    return filtered if filtered else raw
 
 def _strip_trailing_year(q: str) -> str:
     return re.sub(r"\s\d{4}$", "", q).strip()
@@ -66,7 +76,9 @@ def _min_score(words: list[str]) -> int:
     n = len(words)
     if n <= 0:
         return 0
-    return min(4, max(2, n))
+    if n == 1:
+        return 1
+    return min(4, n)
 
 def _filter_candidates_for_year(word_sets: list[tuple[list[str], str]], base_year: int | None) -> list[tuple[list[str], str]]:
     if not base_year:
@@ -365,6 +377,33 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
 
     if not external_torrents:
         # Probeer nog een keer zonder jaartal indien aanwezig
+        q_no_year = re.sub(r"\s\d{4}$", "", q).strip()
+        if q_no_year != q:
+            return await search_and_stream(q_no_year, tmdb_id=tmdb_id, media_type=media_type)
+        return {"stream_url": None, "message": f"Geen streams gevonden voor '{q}' op het internet."}
+
+    base_year = _candidate_year(q)
+    primary_word_sets = _filter_candidates_for_year(word_sets, base_year)
+    filtered_external = []
+    for t in external_torrents:
+        title_raw = t.get("title") or ""
+        title_norm = _normalize_text(title_raw)
+        title_years = _extract_years(title_raw)
+        best = 0
+        best_min = 999
+        for words, candidate_q in primary_word_sets:
+            cy = _candidate_year(candidate_q)
+            if cy and title_years and cy not in title_years:
+                continue
+            score = sum(1 for word in words if word in title_norm)
+            min_score = _min_score(words)
+            if score >= min_score and (score > best or (score == best and min_score < best_min)):
+                best = score
+                best_min = min_score
+        if best > 0:
+            filtered_external.append(t)
+    external_torrents = filtered_external
+    if not external_torrents:
         q_no_year = re.sub(r"\s\d{4}$", "", q).strip()
         if q_no_year != q:
             return await search_and_stream(q_no_year, tmdb_id=tmdb_id, media_type=media_type)
