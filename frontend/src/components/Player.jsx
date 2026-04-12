@@ -7,6 +7,7 @@ export default function Player({ url, media, onProgress }) {
   const [error, setError] = useState(null);
   const hlsRef = useRef(null);
   const resolveRef = useRef(null);
+  const fallbackTriedRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -27,20 +28,34 @@ export default function Player({ url, media, onProgress }) {
     if (!v || !url) return;
 
     setError(null);
+    fallbackTriedRef.current = false;
 
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
 
+    const tryPlay = async () => {
+      try {
+        await v.play();
+      } catch (e) {
+        if (e?.name === "NotAllowedError" && !v.muted) {
+          v.muted = true;
+          try { await v.play(); } catch {}
+        }
+      }
+    };
+
     const isHls = url.includes(".m3u8") || url.includes("/api/stream/hls") || url.includes("/stream/hls/");
     if (!isHls) {
       v.src = url;
+      tryPlay();
       return;
     }
 
     if (v.canPlayType("application/vnd.apple.mpegurl")) {
       v.src = url;
+      tryPlay();
       return;
     }
 
@@ -73,9 +88,7 @@ export default function Player({ url, media, onProgress }) {
       };
       boot();
       hls.on(Hls.Events.MANIFEST_PARSED, async () => {
-        try {
-          await v.play();
-        } catch {}
+        tryPlay();
       });
       hls.on(Hls.Events.ERROR, (_evt, data) => {
         const parts = [];
@@ -84,6 +97,18 @@ export default function Player({ url, media, onProgress }) {
         if (data?.response?.code) parts.push(`HTTP ${data.response.code}`);
         const msg = parts.length ? `Video fout: ${parts.join(" · ")}` : "Video fout.";
         if (data?.fatal) {
+          const canFallback = (url.includes("/api/stream/hls?") || url.includes("/stream/hls?")) && !fallbackTriedRef.current;
+          if (canFallback) {
+            fallbackTriedRef.current = true;
+            try { hls.destroy(); } catch {}
+            hlsRef.current = null;
+            const progressiveUrl = url.replace("/stream/hls", "/stream/play");
+            v.src = progressiveUrl;
+            setError(null);
+            tryPlay();
+            return;
+          }
+
           setError(msg);
           try { hls.destroy(); } catch {}
           hlsRef.current = null;
