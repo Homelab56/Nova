@@ -278,7 +278,7 @@ async def _ensure_hls_session(session_id: str, input_value: str):
 
     copy_video = v_codec == "h264"
     copy_audio = a_codec == "aac"
-    hls_flags = "delete_segments" if copy_video else "delete_segments+independent_segments"
+    hls_flags = "delete_segments+independent_segments"
 
     cmd = [
         "ffmpeg",
@@ -309,12 +309,15 @@ async def _ensure_hls_session(session_id: str, input_value: str):
         segment_pattern,
         playlist_path,
     ]
+    if copy_video:
+        insert_at = cmd.index("-f")
+        cmd[insert_at:insert_at] = ["-bsf:v", "h264_mp4toannexb"]
     if not copy_video:
         insert_at = cmd.index("-f")
-        cmd[insert_at:insert_at] = ["-preset", "veryfast", "-crf", "23"]
+        cmd[insert_at:insert_at] = ["-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p"]
     if not copy_audio:
         insert_at = cmd.index("-f")
-        cmd[insert_at:insert_at] = ["-b:a", "192k"]
+        cmd[insert_at:insert_at] = ["-b:a", "192k", "-ac", "2"]
     if _is_http_url(input_value):
         insert_at = cmd.index("-i")
         cmd[insert_at:insert_at] = [

@@ -119,6 +119,14 @@ export default function Player({ url, media, onProgress }) {
       return;
     }
 
+    if (url.includes("/api/stream/hls?") || url.includes("/stream/hls?")) {
+      const progressiveUrl = url.replace("/stream/hls", "/stream/play");
+      v.src = progressiveUrl;
+      setError(null);
+      tryPlay();
+      return;
+    }
+
     setError("Je browser ondersteunt HLS niet.");
   }, [url]);
 
