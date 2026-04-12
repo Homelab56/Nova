@@ -31,63 +31,66 @@ async def tmdb_get(path: str, params: dict = {}):
         r.raise_for_status()
         return r.json()
 
+async def tmdb_get_pages(path: str, pages: int = 5, params: dict = {}):
+    import asyncio
+    tasks = [tmdb_get(path, {**params, "page": p}) for p in range(1, pages + 1)]
+    results = await asyncio.gather(*tasks)
+    items, seen = [], set()
+    for data in results:
+        for it in data.get("results", []) or []:
+            it_id = it.get("id")
+            if it_id is None or it_id in seen:
+                continue
+            seen.add(it_id)
+            items.append(it)
+    return items
+
 
 # --- Trending & Popular ---
 
 @router.get("/trending")
 async def trending():
-    data = await tmdb_get("/trending/all/week")
-    return data.get("results", [])
+    return await tmdb_get_pages("/trending/all/week")
 
 @router.get("/trending/movies")
 async def trending_movies():
-    data = await tmdb_get("/trending/movie/week")
-    return data.get("results", [])
+    return await tmdb_get_pages("/trending/movie/week")
 
 @router.get("/trending/tv")
 async def trending_tv():
-    data = await tmdb_get("/trending/tv/week")
-    return data.get("results", [])
+    return await tmdb_get_pages("/trending/tv/week")
 
 @router.get("/popular/movies")
 async def popular_movies():
-    data = await tmdb_get("/movie/popular")
-    return data.get("results", [])
+    return await tmdb_get_pages("/movie/popular")
 
 @router.get("/popular/tv")
 async def popular_tv():
-    data = await tmdb_get("/tv/popular")
-    return data.get("results", [])
+    return await tmdb_get_pages("/tv/popular")
 
 @router.get("/toprated/movies")
 async def toprated_movies():
-    data = await tmdb_get("/movie/top_rated")
-    return data.get("results", [])
+    return await tmdb_get_pages("/movie/top_rated")
 
 @router.get("/toprated/tv")
 async def toprated_tv():
-    data = await tmdb_get("/tv/top_rated")
-    return data.get("results", [])
+    return await tmdb_get_pages("/tv/top_rated")
 
 @router.get("/nowplaying/movies")
 async def nowplaying_movies():
-    data = await tmdb_get("/movie/now_playing")
-    return data.get("results", [])
+    return await tmdb_get_pages("/movie/now_playing")
 
 @router.get("/upcoming/movies")
 async def upcoming_movies():
-    data = await tmdb_get("/movie/upcoming")
-    return data.get("results", [])
+    return await tmdb_get_pages("/movie/upcoming")
 
 @router.get("/onair/tv")
 async def onair_tv():
-    data = await tmdb_get("/tv/on_the_air")
-    return data.get("results", [])
+    return await tmdb_get_pages("/tv/on_the_air")
 
 @router.get("/airingtoday/tv")
 async def airingtoday_tv():
-    data = await tmdb_get("/tv/airing_today")
-    return data.get("results", [])
+    return await tmdb_get_pages("/tv/airing_today")
 
 
 # --- Genre discover ---

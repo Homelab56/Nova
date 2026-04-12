@@ -38,6 +38,30 @@ def _words(s: str) -> list[str]:
 def _strip_trailing_year(q: str) -> str:
     return re.sub(r"\s\d{4}$", "", q).strip()
 
+def _extract_years(s: str) -> set[int]:
+    if not s:
+        return set()
+    years = set()
+    for m in re.finditer(r"\b(19\d{2}|20\d{2})\b", s):
+        try:
+            y = int(m.group(1))
+            years.add(y)
+        except Exception:
+            pass
+    return years
+
+def _candidate_year(q: str) -> int | None:
+    years = _extract_years(q)
+    if not years:
+        return None
+    m = re.search(r"(19\d{2}|20\d{2})\s*$", q.strip())
+    if m:
+        try:
+            return int(m.group(1))
+        except Exception:
+            return None
+    return max(years)
+
 async def _tmdb_alt_titles(tmdb_id: int, media_type: str) -> list[str]:
     if not tmdb_id or media_type not in {"movie", "tv"}:
         return []
@@ -147,9 +171,13 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
     for torrent in torrents:
         filename_raw = torrent.get("filename", "") or ""
         filename = _normalize_text(filename_raw)
+        filename_years = _extract_years(filename_raw)
         best_score = 0
         best_min = 999
-        for words, _ in word_sets:
+        for words, candidate_q in word_sets:
+            cy = _candidate_year(candidate_q)
+            if cy and filename_years and cy not in filename_years:
+                continue
             score = sum(1 for word in words if word in filename)
             min_score = min(2, len(words))
             if score >= min_score and (score > best_score or (score == best_score and min_score < best_min)):
@@ -203,11 +231,15 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
             best_score = 0
             best_q = q
             for torrent in torrents:
+                filename_years = _extract_years(torrent.get("filename", "") or "")
                 filename = _normalize_text(torrent.get("filename", "") or "")
                 torrent_best = 0
                 torrent_min = 999
                 torrent_q = q
                 for words, candidate_q in word_sets:
+                    cy = _candidate_year(candidate_q)
+                    if cy and filename_years and cy not in filename_years:
+                        continue
                     score = sum(1 for word in words if word in filename)
                     min_score = min(2, len(words))
                     if score >= min_score and (score > torrent_best or (score == torrent_best and min_score < torrent_min)):
