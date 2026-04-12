@@ -9,7 +9,7 @@ function formatTime(sec) {
   return `${m}:${String(r).padStart(2, "0")}`;
 }
 
-export default function Player({ url, media, onProgress, startAt = 0, durationHint = 0 }) {
+export default function Player({ url, media, onProgress, startAt = 0, durationHint = 0, onEnded, onNext }) {
   const containerRef = useRef(null);
   const videoRef = useRef(null);
   const saveTimer = useRef(null);
@@ -166,6 +166,11 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       const code = v?.error?.code;
       setError(code ? `Video fout (code ${code}).` : "Video fout.");
     };
+    const onEndedEvent = () => {
+      setPlaying(false);
+      reportProgress();
+      if (onEnded) onEnded();
+    };
     v.addEventListener("play", onPlay);
     v.addEventListener("pause", onPause);
     v.addEventListener("timeupdate", onTime);
@@ -176,6 +181,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     v.addEventListener("seeked", onSeeked);
     v.addEventListener("canplay", onCanPlay);
     v.addEventListener("error", onErr);
+    v.addEventListener("ended", onEndedEvent);
     return () => {
       v.removeEventListener("play", onPlay);
       v.removeEventListener("pause", onPause);
@@ -187,6 +193,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       v.removeEventListener("seeked", onSeeked);
       v.removeEventListener("canplay", onCanPlay);
       v.removeEventListener("error", onErr);
+      v.removeEventListener("ended", onEndedEvent);
     };
   }, [media, onProgress, total]);
 
@@ -200,6 +207,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
 
   const progress = total > 0 ? Math.min(1, Math.max(0, absTime / total)) : 0;
   const sliderValue = dragValue !== null ? dragValue : Math.round(progress * 1000);
+  const showNextButton = onNext && total > 0 && (total - absTime) < 90;
 
   const commitSeek = async () => {
     if (total <= 0 || dragValue === null) return;
@@ -343,6 +351,17 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       {error && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/70 text-white text-sm px-6 text-center">
           {error}
+        </div>
+      )}
+
+      {showNextButton && (
+        <div className="absolute bottom-24 right-8 z-50">
+          <button 
+            onClick={(e) => { e.stopPropagation(); onNext(); }} 
+            className="bg-white text-black font-bold px-6 py-3 rounded-xl shadow-2xl hover:scale-105 transition-transform flex items-center gap-2"
+          >
+            Volgende aflevering ▶
+          </button>
         </div>
       )}
     </div>

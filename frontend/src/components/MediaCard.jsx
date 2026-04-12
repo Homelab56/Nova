@@ -28,6 +28,14 @@ export default function MediaCard({ item }) {
             {title}
           </div>
         )}
+        
+        {/* Voortgangsbalk */}
+        {item.current_time > 0 && item.duration > 0 && (
+          <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-700 rounded-b-xl">
+            <div className="h-full bg-nova-accent rounded-b-xl" style={{ width: `${Math.round((item.current_time / item.duration) * 100)}%` }} />
+          </div>
+        )}
+
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors rounded-xl" />
       </div>
 

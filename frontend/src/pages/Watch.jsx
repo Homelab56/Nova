@@ -318,7 +318,7 @@ export default function Watch() {
   const runtime = detail?.runtime ? `${Math.floor(detail.runtime / 60)}u ${detail.runtime % 60}m` : null;
   const seasons = detail?.seasons?.filter(s => s.season_number > 0) || [];
 
-  const handleEnded = async () => {
+  const handleNext = async () => {
     if (isMovie || !seasonData || !selectedEpisode) return;
 
     const currentIdx = seasonData.episodes.findIndex(ep => ep.id === selectedEpisode.id);
@@ -353,6 +353,15 @@ export default function Watch() {
     }
   };
 
+  const handleEnded = async () => {
+    await handleNext();
+  };
+
+  const hasNext = !isMovie && seasonData && selectedEpisode && (
+    seasonData.episodes.findIndex(ep => ep.id === selectedEpisode.id) < seasonData.episodes.length - 1 ||
+    seasons.some(s => s.season_number === selectedSeason + 1)
+  );
+
   return (
     <div className="min-h-screen bg-nova-bg">
       {backdrop && !streamUrl && (
@@ -370,7 +379,7 @@ export default function Watch() {
 
         {streamUrl && (
           <div className="mb-10">
-            <Player url={streamUrl} media={progressItem || media} startAt={startAt} durationHint={durationHint} onProgress={(t, d) => saveProgress(progressItem || media, t, d)} onEnded={handleEnded} />
+            <Player url={streamUrl} media={progressItem || media} startAt={startAt} durationHint={durationHint} onProgress={(t, d) => saveProgress(progressItem || media, t, d)} onEnded={handleEnded} onNext={hasNext ? handleNext : null} />
             <div className="mt-4 flex flex-wrap items-center gap-4">
               <button onClick={() => { setStreamUrl(null); setStatus(""); setStartAt(0); setDurationHint(0); }} className="text-sm text-gray-500 hover:text-white flex items-center gap-1">
                 ← Terug naar info
@@ -407,7 +416,8 @@ export default function Watch() {
                   <div className="space-y-2">
                     {(seasonData?.episodes || []).map(ep => {
                       const epProg = getEpisodeProgress(selectedSeason, ep.episode_number);
-                      const watched = !!epProg && epProg.duration > 0 && (epProg.current_time / epProg.duration) >= 0.95;
+                      const progressPct = epProg && epProg.duration > 0 ? (epProg.current_time / epProg.duration) * 100 : 0;
+                      const watched = progressPct >= 95;
                       return (
                         <div
                           key={ep.id}
@@ -420,11 +430,16 @@ export default function Watch() {
                             {watched ? "✓" : ep.episode_number}
                           </div>
 
-                          <div className="flex-shrink-0 w-36 aspect-video rounded-lg overflow-hidden bg-nova-bg">
+                          <div className="flex-shrink-0 w-36 aspect-video rounded-lg overflow-hidden bg-nova-bg relative">
                             {ep.still_path ? (
                               <img src={`${TMDB_STILL}${ep.still_path}`} alt={ep.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center text-gray-700 text-2xl group-hover:text-nova-accent transition-colors">▶</div>
+                            )}
+                            {progressPct > 0 && (
+                              <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-700">
+                                <div className="h-full bg-nova-accent" style={{ width: `${progressPct}%` }} />
+                              </div>
                             )}
                           </div>
 
@@ -562,7 +577,8 @@ export default function Watch() {
                   <div className="space-y-2">
                     {(seasonData?.episodes || []).map(ep => {
                       const epProg = getEpisodeProgress(selectedSeason, ep.episode_number);
-                      const watched = !!epProg && epProg.duration > 0 && (epProg.current_time / epProg.duration) >= 0.95;
+                      const progressPct = epProg && epProg.duration > 0 ? (epProg.current_time / epProg.duration) * 100 : 0;
+                      const watched = progressPct >= 95;
                       return (
                       <div
                         key={ep.id}
@@ -575,11 +591,16 @@ export default function Watch() {
                         </div>
 
                         {/* Thumbnail */}
-                        <div className="flex-shrink-0 w-36 aspect-video rounded-lg overflow-hidden bg-nova-bg">
+                        <div className="flex-shrink-0 w-36 aspect-video rounded-lg overflow-hidden bg-nova-bg relative">
                           {ep.still_path ? (
                             <img src={`${TMDB_STILL}${ep.still_path}`} alt={ep.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center text-gray-700 text-2xl group-hover:text-nova-accent transition-colors">▶</div>
+                          )}
+                          {progressPct > 0 && (
+                            <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-700">
+                              <div className="h-full bg-nova-accent" style={{ width: `${progressPct}%` }} />
+                            </div>
                           )}
                         </div>
 

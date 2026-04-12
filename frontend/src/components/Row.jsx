@@ -97,7 +97,7 @@ export default function Row({ title, items = [], loading = false, progressMap = 
                 <Card
                   key={item.id}
                   item={item}
-                  progressPct={progressMap[item.id] ? Math.round((progressMap[item.id].current_time / progressMap[item.id].duration) * 100) : 0}
+                  progressPct={progressMap[item.id] ? Math.round((progressMap[item.id].current_time / progressMap[item.id].duration) * 100) : (item.current_time ? Math.round((item.current_time / item.duration) * 100) : 0)}
                 />
               ))}
         </div>
