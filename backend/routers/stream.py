@@ -195,13 +195,13 @@ async def _ffmpeg_stream(input_value: str, is_path: bool):
         "-f",
         "mp4",
         "-movflags",
-        "frag_keyframe+empty_moov+default_base_moof+faststart",
+        "frag_keyframe+empty_moov+default_base_moof",
         "pipe:1"
     ]
     
     if copy_video:
         # Verwijder de transcode flags als we copy gebruiken
-        cmd = [x for x in cmd if x not in ["-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p"]]
+        cmd = [x for x in cmd if x not in ["-preset", "ultrafast", "-threads", "0", "-crf", "23", "-pix_fmt", "yuv420p"]]
         insert_at = cmd.index("-f")
         cmd[insert_at:insert_at] = ["-bsf:v", "h264_mp4toannexb"]
         
