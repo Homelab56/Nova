@@ -47,6 +47,16 @@ export default function Player({ url, media, onProgress }) {
     };
 
     const isHls = url.includes(".m3u8") || url.includes("/api/stream/hls") || url.includes("/stream/hls/");
+    
+    // Altijd de progressive fallback gebruiken i.p.v. HLS
+    const progressiveUrl = isHls ? url.replace("/stream/hls", "/stream/play") : url;
+    v.src = progressiveUrl;
+    setError(null);
+    tryPlay();
+    return;
+    
+    // Onderstaande HLS logica wordt nu genegeerd
+    /*
     if (!isHls) {
       v.src = url;
       tryPlay();
@@ -131,6 +141,7 @@ export default function Player({ url, media, onProgress }) {
     }
 
     setError("Je browser ondersteunt HLS niet.");
+    */
   }, [url]);
 
   function handleTimeUpdate() {
