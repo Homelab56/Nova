@@ -72,8 +72,17 @@ export default function Player({ url, media, onProgress }) {
         hls.attachMedia(v);
       };
       boot();
+      hls.on(Hls.Events.MANIFEST_PARSED, async () => {
+        try {
+          await v.play();
+        } catch {}
+      });
       hls.on(Hls.Events.ERROR, (_evt, data) => {
-        const msg = data?.details ? `Video fout: ${data.details}` : "Video fout.";
+        const parts = [];
+        if (data?.type) parts.push(data.type);
+        if (data?.details) parts.push(data.details);
+        if (data?.response?.code) parts.push(`HTTP ${data.response.code}`);
+        const msg = parts.length ? `Video fout: ${parts.join(" · ")}` : "Video fout.";
         if (data?.fatal) {
           setError(msg);
           try { hls.destroy(); } catch {}
@@ -91,6 +100,7 @@ export default function Player({ url, media, onProgress }) {
   function handleTimeUpdate() {
     const v = videoRef.current;
     if (!v || !media || !onProgress) return;
+    if (!Number.isFinite(v.duration) || v.duration <= 0) return;
     // Sla elke 10 seconden op
     clearInterval(saveTimer.current);
     saveTimer.current = setTimeout(() => {
