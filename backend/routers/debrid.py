@@ -231,6 +231,8 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
     candidates = await _candidate_queries(q, tmdb_id, media_type)
     is_movie = (media_type == "movie")
     base_year = _infer_base_year(q, candidates, media_type)
+    if is_movie and not base_year:
+        return {"available": False}
     if is_movie and base_year:
         candidates = [c for c in candidates if _candidate_year(c) == base_year]
     word_sets = [(_words(c), c) for c in candidates]
@@ -288,6 +290,8 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
     candidates = await _candidate_queries(q, tmdb_id, media_type)
     is_movie = (media_type == "movie")
     base_year = _infer_base_year(q, candidates, media_type)
+    if is_movie and not base_year:
+        return {"stream_url": None, "message": f"Geen streams gevonden voor '{q}' op het internet."}
     if is_movie and base_year:
         candidates = [c for c in candidates if _candidate_year(c) == base_year]
     word_sets = [(_words(c), c) for c in candidates]
