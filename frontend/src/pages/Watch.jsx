@@ -73,7 +73,7 @@ export default function Watch() {
     
     // Check RD availability
     const searchTitle = `${title} ${year}`;
-    fetch(`/api/debrid/check?q=${encodeURIComponent(searchTitle)}`)
+    fetch(`/api/debrid/check?q=${encodeURIComponent(searchTitle)}&tmdb_id=${encodeURIComponent(media.id)}&media_type=${encodeURIComponent(type)}`)
       .then(r => r.json())
       .then(data => setIsAvailable(data.available))
       .catch(() => setIsAvailable(false));
@@ -154,7 +154,7 @@ export default function Watch() {
 
     try {
       // Stap 1: Zoek stream (Backend doet nu library + scraper check)
-      const r = await fetch(`/api/debrid/search?q=${encodeURIComponent(searchTitle)}`, { signal: searchAbortRef.current.signal });
+      const r = await fetch(`/api/debrid/search?q=${encodeURIComponent(searchTitle)}&tmdb_id=${encodeURIComponent(media.id)}&media_type=${encodeURIComponent(type)}`, { signal: searchAbortRef.current.signal });
       const data = await r.json();
       
       if (!data.stream_url) {
@@ -178,7 +178,7 @@ export default function Watch() {
           } catch {}
 
           try {
-            const rr = await fetch(`/api/debrid/search?q=${encodeURIComponent(searchTitle)}`).then(r => r.json());
+            const rr = await fetch(`/api/debrid/search?q=${encodeURIComponent(searchTitle)}&tmdb_id=${encodeURIComponent(media.id)}&media_type=${encodeURIComponent(type)}`).then(r => r.json());
             if (rr.stream_url) {
               let finalUrl = rr.stream_url;
               if (finalUrl.startsWith("/")) finalUrl = window.location.origin + finalUrl;

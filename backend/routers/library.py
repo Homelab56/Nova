@@ -18,6 +18,21 @@ class MediaFile(BaseModel):
 def is_video_file(filename: str) -> bool:
     return filename.lower().endswith(('.mp4', '.mkv', '.avi', '.mov', '.m4v'))
 
+def _normalize_text(s: str) -> str:
+    if not s:
+        return ""
+    s = s.lower()
+    s = (
+        s.replace("0", "o")
+        .replace("1", "i")
+        .replace("3", "e")
+        .replace("4", "a")
+        .replace("5", "s")
+        .replace("7", "t")
+    )
+    s = re.sub(r"[^a-z0-9]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
 @router.get("/all")
 async def all_library_files():
     """Scant recursief de /media directory voor alle videobestanden (max 100)."""
@@ -76,7 +91,7 @@ async def scan_library(path: str = ""):
 @router.get("/find")
 async def find_file(q: str):
     """Zoekt een specifiek bestand op de mount gebaseerd op een query (bijv. 'The Boys S01E01')."""
-    q_clean = q.lower().replace(":", "").replace("-", "")
+    q_clean = _normalize_text(q)
     words = [w for w in q_clean.split() if len(w) >= 2]
     
     if not words:
@@ -102,7 +117,7 @@ async def find_file(q: str):
             if not os.path.exists(candidate_path):
                 continue
 
-            file_lower = file.lower()
+            file_lower = _normalize_text(file)
             score = sum(1 for word in words if word in file_lower)
             
             # Bonus voor exacte match op SxxExx

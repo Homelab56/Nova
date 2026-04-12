@@ -5,15 +5,85 @@ import asyncio
 import urllib.parse
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from .config_loader import get_rd_token
+from .config_loader import get_rd_token, get_tmdb_key
 
 router = APIRouter()
 
 RD_BASE = "https://api.real-debrid.com/rest/1.0"
+TMDB_BASE = "https://api.themoviedb.org/3"
 
 
 def rd_headers():
     return {"Authorization": f"Bearer {get_rd_token()}"}
+
+def _normalize_text(s: str) -> str:
+    if not s:
+        return ""
+    s = s.lower()
+    s = (
+        s.replace("0", "o")
+        .replace("1", "i")
+        .replace("3", "e")
+        .replace("4", "a")
+        .replace("5", "s")
+        .replace("7", "t")
+    )
+    s = re.sub(r"[^a-z0-9]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+def _words(s: str) -> list[str]:
+    s = _normalize_text(s)
+    return [w for w in s.split() if len(w) >= 2]
+
+def _strip_trailing_year(q: str) -> str:
+    return re.sub(r"\s\d{4}$", "", q).strip()
+
+async def _tmdb_alt_titles(tmdb_id: int, media_type: str) -> list[str]:
+    if not tmdb_id or media_type not in {"movie", "tv"}:
+        return []
+    path = f"/{media_type}/{tmdb_id}/alternative_titles"
+    params = {"api_key": get_tmdb_key()}
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"{TMDB_BASE}{path}", params=params, timeout=10)
+            if r.status_code != 200:
+                return []
+            data = r.json()
+    except Exception:
+        return []
+
+    out = []
+    for item in (data.get("titles") or data.get("results") or []):
+        t = item.get("title")
+        if isinstance(t, str) and t.strip():
+            out.append(t.strip())
+    return out
+
+async def _candidate_queries(q: str, tmdb_id: int | None, media_type: str | None) -> list[str]:
+    base = q.strip()
+    if not base:
+        return []
+    candidates = [base]
+    no_year = _strip_trailing_year(base)
+    if no_year and no_year.lower() != base.lower():
+        candidates.append(no_year)
+    if tmdb_id and media_type:
+        alts = await _tmdb_alt_titles(tmdb_id, media_type)
+        for t in alts[:12]:
+            if t.lower() == base.lower() or t.lower() == no_year.lower():
+                continue
+            candidates.append(t)
+            if re.search(r"\s\d{4}$", base):
+                candidates.append(f"{t} {base.split()[-1]}")
+    seen = set()
+    out = []
+    for c in candidates:
+        k = _normalize_text(c)
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        out.append(c)
+    return out
 
 
 class MagnetRequest(BaseModel):
@@ -53,10 +123,16 @@ async def get_library():
 
 
 @router.get("/check")
-async def check_availability(q: str):
+async def check_availability(q: str, tmdb_id: int | None = None, media_type: str | None = None):
     """
     Checkt of een titel beschikbaar is in de RD bibliotheek zonder te unrestricten.
     """
+    candidates = await _candidate_queries(q, tmdb_id, media_type)
+    word_sets = [(_words(c), c) for c in candidates]
+    word_sets = [(w, c) for (w, c) in word_sets if w]
+    if not word_sets:
+        return {"available": False}
+
     async with httpx.AsyncClient() as client:
         r = await client.get(
             f"{RD_BASE}/torrents",
@@ -68,25 +144,25 @@ async def check_availability(q: str):
 
         torrents = r.json()
 
-    q_lower = q.lower().replace(":", "").replace("-", "")
-    words = [w for w in q_lower.split() if len(w) >= 2]
-    
-    if not words:
-        return {"available": False}
-
     for torrent in torrents:
-        filename = torrent.get("filename", "").lower()
-        score = sum(1 for word in words if word in filename)
-        min_score = min(2, len(words))
-        
-        if score >= min_score and torrent.get("status") == "downloaded":
-            return {"available": True, "filename": torrent["filename"]}
+        filename_raw = torrent.get("filename", "") or ""
+        filename = _normalize_text(filename_raw)
+        best_score = 0
+        best_min = 999
+        for words, _ in word_sets:
+            score = sum(1 for word in words if word in filename)
+            min_score = min(2, len(words))
+            if score >= min_score and (score > best_score or (score == best_score and min_score < best_min)):
+                best_score = score
+                best_min = min_score
+        if best_score > 0 and torrent.get("status") == "downloaded":
+            return {"available": True, "filename": filename_raw}
 
     return {"available": False}
 
 
 @router.get("/search")
-async def search_and_stream(q: str):
+async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str | None = None):
     """
     Zoekt automatisch naar een beschikbare stream voor een titel.
     1. Zoekt op de lokale Dumbarr mount (/media).
@@ -95,23 +171,24 @@ async def search_and_stream(q: str):
     4. Indien Jackett niet geconfigureerd, fallback naar SolidTorrents.
     5. Controleert RD instant availability (cache) voor gevonden torrents.
     """
-    q_lower = q.lower().replace(":", "").replace("-", "")
-    words = [w for w in q_lower.split() if len(w) >= 2]
-    
-    if not words:
+    candidates = await _candidate_queries(q, tmdb_id, media_type)
+    word_sets = [(_words(c), c) for c in candidates]
+    word_sets = [(w, c) for (w, c) in word_sets if w]
+    if not word_sets:
         return {"stream_url": None, "message": "Ongeldige zoekopdracht."}
 
     # --- STAP 0: Zoek op lokale Dumbarr mount ---
     from .library import find_file
-    local_check = await find_file(q)
-    if local_check.get("found"):
-        print(f"Match gevonden op lokale mount: {local_check['path']}")
-        encoded_path = urllib.parse.quote((local_check["path"] or "").replace("\\", "/"))
-        return {
-            "stream_url": f"/api/stream/hls?path={encoded_path}",
-            "source": "local", 
-            "title": os.path.basename(local_check["path"])
-        }
+    for candidate in candidates:
+        local_check = await find_file(candidate)
+        if local_check.get("found"):
+            print(f"Match gevonden op lokale mount: {local_check['path']}")
+            encoded_path = urllib.parse.quote((local_check["path"] or "").replace("\\", "/"))
+            return {
+                "stream_url": f"/api/stream/hls?path={encoded_path}",
+                "source": "local",
+                "title": os.path.basename(local_check["path"])
+            }
 
     # --- STAP 1: Zoek in eigen RD bibliotheek ---
     async with httpx.AsyncClient() as client:
@@ -124,21 +201,31 @@ async def search_and_stream(q: str):
             torrents = r.json()
             best_match = None
             best_score = 0
+            best_q = q
             for torrent in torrents:
-                filename = torrent.get("filename", "").lower()
-                score = sum(1 for word in words if word in filename)
-                min_score = min(2, len(words))
-                if score >= best_score and score >= min_score:
+                filename = _normalize_text(torrent.get("filename", "") or "")
+                torrent_best = 0
+                torrent_min = 999
+                torrent_q = q
+                for words, candidate_q in word_sets:
+                    score = sum(1 for word in words if word in filename)
+                    min_score = min(2, len(words))
+                    if score >= min_score and (score > torrent_best or (score == torrent_best and min_score < torrent_min)):
+                        torrent_best = score
+                        torrent_min = min_score
+                        torrent_q = candidate_q
+                if torrent_best >= best_score:
                     if torrent.get("status") == "downloaded" and torrent.get("links"):
-                        best_score = score
+                        best_score = torrent_best
                         best_match = torrent
+                        best_q = torrent_q
 
             if best_match:
                 info_r = await client.get(f"{RD_BASE}/torrents/info/{best_match['id']}", headers=rd_headers())
                 if info_r.status_code == 200:
                     info = info_r.json()
                     links = info.get("links", [])
-                    episode_match = re.search(r"s(\d+)e(\d+)", q_lower)
+                    episode_match = re.search(r"s(\d+)e(\d+)", _normalize_text(best_q))
                     best_file_idx = 0
                     if episode_match:
                         s, e = episode_match.groups()
@@ -164,60 +251,65 @@ async def search_and_stream(q: str):
     from .config_loader import get_jackett_config
     jackett = get_jackett_config()
     
-    if jackett.get("url") and jackett.get("api_key"):
-        print(f"Zoeken via Jackett voor: {q}...")
-        try:
-            async with httpx.AsyncClient() as client:
-                jr = await client.get(
-                    f"{jackett['url'].rstrip('/')}/api/v2.0/indexers/all/results",
-                    params={
-                        "apikey": jackett["api_key"],
-                        "Query": q,
-                        "Category[]": [2000, 5000] # Movies & TV
-                    },
-                    timeout=15
-                )
-                if jr.status_code == 200:
-                    results = jr.json().get("Results", [])
-                    for res in results:
-                        if res.get("InfoHash"):
-                            external_torrents.append({
-                                "title": res.get("Title"),
-                                "hash": res.get("InfoHash"),
-                                "magnet": res.get("MagnetUri"),
-                                "seeders": res.get("Seeders", 0),
-                                "size": res.get("Size")
+    async def _external_search(query: str) -> list[dict]:
+        out = []
+        if jackett.get("url") and jackett.get("api_key"):
+            try:
+                async with httpx.AsyncClient() as client:
+                    jr = await client.get(
+                        f"{jackett['url'].rstrip('/')}/api/v2.0/indexers/all/results",
+                        params={
+                            "apikey": jackett["api_key"],
+                            "Query": query,
+                            "Category[]": [2000, 5000]
+                        },
+                        timeout=15
+                    )
+                    if jr.status_code == 200:
+                        results = jr.json().get("Results", [])
+                        for res in results:
+                            if res.get("InfoHash"):
+                                out.append({
+                                    "title": res.get("Title"),
+                                    "hash": res.get("InfoHash"),
+                                    "magnet": res.get("MagnetUri"),
+                                    "seeders": res.get("Seeders", 0),
+                                    "size": res.get("Size")
+                                })
+            except Exception as e:
+                print(f"Jackett fout: {e}")
+        if not out:
+            try:
+                async with httpx.AsyncClient() as client:
+                    sr = await client.get(
+                        "https://solidtorrents.to/api/v1/search",
+                        params={"q": query, "category": "video", "sort": "seeders"},
+                        timeout=10
+                    )
+                    if sr.status_code == 200:
+                        results = sr.json().get("results", [])
+                        for res in results:
+                            out.append({
+                                "title": res.get("title"),
+                                "hash": res.get("infoHash"),
+                                "magnet": res.get("magnet"),
+                                "seeders": res.get("swarm", {}).get("seeders", 0),
+                                "size": res.get("size")
                             })
-        except Exception as e:
-            print(f"Jackett fout: {e}")
+            except Exception as e:
+                print(f"SolidTorrents fout: {e}")
+        return out
 
-    if not external_torrents:
-        print(f"Zoeken via SolidTorrents fallback voor: {q}...")
-        try:
-            async with httpx.AsyncClient() as client:
-                sr = await client.get(
-                    "https://solidtorrents.to/api/v1/search",
-                    params={"q": q, "category": "video", "sort": "seeders"},
-                    timeout=10
-                )
-                if sr.status_code == 200:
-                    results = sr.json().get("results", [])
-                    for res in results:
-                        external_torrents.append({
-                            "title": res.get("title"),
-                            "hash": res.get("infoHash"),
-                            "magnet": res.get("magnet"),
-                            "seeders": res.get("swarm", {}).get("seeders", 0),
-                            "size": res.get("size")
-                        })
-        except Exception as e:
-            print(f"SolidTorrents fout: {e}")
+    for candidate in candidates[:3]:
+        external_torrents = await _external_search(candidate)
+        if external_torrents:
+            break
 
     if not external_torrents:
         # Probeer nog een keer zonder jaartal indien aanwezig
         q_no_year = re.sub(r"\s\d{4}$", "", q).strip()
         if q_no_year != q:
-            return await search_and_stream(q_no_year)
+            return await search_and_stream(q_no_year, tmdb_id=tmdb_id, media_type=media_type)
         return {"stream_url": None, "message": f"Geen streams gevonden voor '{q}' op het internet."}
 
     # --- STAP 3: Controleer RD cache (Instant Availability) ---
