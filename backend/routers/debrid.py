@@ -16,6 +16,8 @@ TMDB_BASE = "https://api.themoviedb.org/3"
 def rd_headers():
     return {"Authorization": f"Bearer {get_rd_token()}"}
 
+_VIDEO_EXTS = (".mkv", ".mp4", ".m4v", ".avi", ".mov", ".webm", ".ts")
+
 def _normalize_text(s: str) -> str:
     if not s:
         return ""
@@ -109,6 +111,83 @@ def _filter_candidates_for_year(word_sets: list[tuple[list[str], str]], base_yea
         if cy == base_year:
             out.append((words, candidate_q))
     return out or word_sets
+
+def _is_video_path(path: str) -> bool:
+    p = (path or "").lower()
+    return any(p.endswith(ext) for ext in _VIDEO_EXTS)
+
+def _select_best_link_index(info: dict, q: str, media_type: str | None, base_year: int | None) -> int | None:
+    files = info.get("files") or []
+    links = info.get("links") or []
+    if not files or not links:
+        return None
+
+    selected = []
+    for f in files:
+        try:
+            if int(f.get("selected") or 0) == 1:
+                selected.append(f)
+        except Exception:
+            pass
+    if not selected:
+        selected = files[: len(links)]
+
+    episode_match = re.search(r"s(\d+)e(\d+)", _normalize_text(q or ""))
+    episode_token = None
+    if episode_match:
+        s, e = episode_match.groups()
+        episode_token = f"s{s}e{e}"
+
+    words = _words(q or "")
+    min_words = len(words)
+    if media_type == "movie":
+        min_words = 1 if len(words) <= 1 else 2
+    elif media_type == "tv":
+        min_words = 1 if len(words) <= 1 else 2
+
+    best_idx = None
+    best_score = -10_000
+    best_size = -1
+
+    link_count = min(len(selected), len(links))
+    for link_idx in range(link_count):
+        f = selected[link_idx] or {}
+        path = f.get("path") or ""
+        if not _is_video_path(path):
+            continue
+
+        norm = _normalize_text(path)
+        if "sample" in norm or "trailer" in norm:
+            continue
+
+        size = 0
+        try:
+            size = int(f.get("bytes") or 0)
+        except Exception:
+            size = 0
+        if size and size < 200 * 1024 * 1024:
+            continue
+
+        years = _extract_years(path)
+        if media_type == "movie" and base_year and years and base_year not in years:
+            continue
+
+        score = sum(1 for w in words if w in norm)
+        if episode_token:
+            if episode_token in norm:
+                score += 10
+            else:
+                score -= 5
+
+        if score < min_words:
+            continue
+
+        if score > best_score or (score == best_score and size > best_size):
+            best_score = score
+            best_size = size
+            best_idx = link_idx
+
+    return best_idx
 
 async def _tmdb_alt_titles(tmdb_id: int, media_type: str) -> list[str]:
     if not tmdb_id or media_type not in {"movie", "tv"}:
@@ -272,7 +351,16 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
                 best_score = score
                 best_min = min_score
         if best_score > 0 and torrent.get("status") == "downloaded":
-            return {"available": True, "filename": filename_raw}
+            try:
+                async with httpx.AsyncClient() as client:
+                    info_r = await client.get(f"{RD_BASE}/torrents/info/{torrent.get('id')}", headers=rd_headers(), timeout=10)
+                if info_r.status_code == 200:
+                    info = info_r.json()
+                    link_idx = _select_best_link_index(info, q, media_type, base_year)
+                    if link_idx is not None:
+                        return {"available": True, "filename": filename_raw}
+            except Exception:
+                pass
 
     return {"available": False}
 
@@ -359,17 +447,9 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                 if info_r.status_code == 200:
                     info = info_r.json()
                     links = info.get("links", [])
-                    episode_match = re.search(r"s(\d+)e(\d+)", _normalize_text(best_q))
-                    best_file_idx = 0
-                    if episode_match:
-                        s, e = episode_match.groups()
-                        pattern = f"s{s}e{e}"
-                        for idx, f in enumerate(info.get("files", [])):
-                            if pattern in f.get("path", "").lower():
-                                best_file_idx = idx
-                                break
-                    if links and best_file_idx < len(links):
-                        ur = await client.post(f"{RD_BASE}/unrestrict/link", headers=rd_headers(), data={"link": links[best_file_idx]})
+                    link_idx = _select_best_link_index(info, best_q, media_type, base_year)
+                    if links and link_idx is not None and link_idx < len(links):
+                        ur = await client.post(f"{RD_BASE}/unrestrict/link", headers=rd_headers(), data={"link": links[link_idx]})
                         if ur.status_code == 200:
                             download_url = ur.json().get("download")
                             if not download_url:
@@ -378,6 +458,7 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                                 "stream_url": f"/api/stream/hls?url={urllib.parse.quote(download_url)}",
                                 "source": "library",
                             }
+                    return {"stream_url": None, "message": "Match gevonden in bibliotheek, maar geen passende videofile gevonden."}
 
     # --- STAP 2: Zoek extern (Jackett of SolidTorrents) ---
     external_torrents = []
@@ -499,9 +580,11 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                         await asyncio.sleep(1.5) # lets give RD a bit more time
                         ir = await client.get(f"{RD_BASE}/torrents/info/{tid}", headers=rd_headers())
                         if ir.status_code == 200:
-                            links = ir.json().get("links", [])
-                            if links:
-                                ur = await client.post(f"{RD_BASE}/unrestrict/link", headers=rd_headers(), data={"link": links[0]})
+                            info = ir.json()
+                            links = info.get("links", [])
+                            link_idx = _select_best_link_index(info, q, media_type, base_year)
+                            if links and link_idx is not None and link_idx < len(links):
+                                ur = await client.post(f"{RD_BASE}/unrestrict/link", headers=rd_headers(), data={"link": links[link_idx]})
                                 if ur.status_code == 200:
                                     download_url = ur.json().get("download")
                                     if not download_url:
@@ -511,6 +594,10 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                                         "source": "scraper",
                                         "title": t["title"],
                                     }
+                            return {
+                                "stream_url": None,
+                                "message": "Er is wel een torrent gevonden, maar de bestanden erin lijken niet te matchen met de gekozen titel.",
+                            }
 
     return {
         "stream_url": None,
