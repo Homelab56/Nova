@@ -579,7 +579,7 @@ export default function Watch() {
                   >
                     {inList ? "✓ In watchlist" : "+ Watchlist"}
                   </button>
-                  {!isMovie && (
+                  {!isMovie && requestStatus !== "done" && (
                     <button
                       onClick={() => {
                         setRequestStatus("loading");
@@ -609,9 +609,10 @@ export default function Watch() {
                           setRequestMessage("Netwerkfout bij aanvragen.");
                         });
                       }}
-                      className="flex items-center gap-2 px-5 py-3 rounded-xl font-semibold border bg-nova-card border-gray-600 text-white hover:border-white transition-colors"
+                      disabled={requestStatus === "loading"}
+                      className={`flex items-center gap-2 px-5 py-3 rounded-xl font-semibold border bg-nova-card border-gray-600 text-white hover:border-white transition-colors ${requestStatus === "loading" ? "opacity-50 cursor-not-allowed" : ""}`}
                     >
-                      ↓ Download alle seizoenen
+                      {requestStatus === "loading" ? "Aanvragen..." : "↓ Download alle seizoenen"}
                     </button>
                   )}
                   {isMovie && savedProgress && (
