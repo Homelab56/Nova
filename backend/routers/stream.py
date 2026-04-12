@@ -6,7 +6,7 @@ import urllib.parse
 import hashlib
 import time
 import shutil
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse, FileResponse, RedirectResponse
 from pydantic import BaseModel
 from .config_loader import get_rd_token
@@ -144,6 +144,38 @@ async def _ffprobe_streams(input_value: str, is_path: bool) -> dict:
         return {}
 
 
+async def _ffprobe_duration_seconds(input_value: str, is_path: bool) -> float | None:
+    args = ["ffprobe", "-v", "error", "-show_format", "-of", "json", input_value]
+    if _is_http_url(input_value):
+        args.insert(4, "5000000")
+        args.insert(4, "-rw_timeout")
+
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        out, _err = await asyncio.wait_for(proc.communicate(), timeout=15)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        return None
+    if proc.returncode != 0 or not out:
+        return None
+    try:
+        data = json.loads(out.decode("utf-8", errors="ignore") or "{}")
+        fmt = data.get("format") or {}
+        dur = fmt.get("duration")
+        if dur is None:
+            return None
+        return float(dur)
+    except Exception:
+        return None
+
+
 def _choose_mode(probe: dict) -> str:
     streams = probe.get("streams") or []
     v = next((s for s in streams if s.get("codec_type") == "video"), None)
@@ -158,7 +190,7 @@ def _choose_mode(probe: dict) -> str:
     return "transcode"
 
 
-async def _ffmpeg_stream(input_value: str, is_path: bool):
+async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
     probe = await _ffprobe_streams(input_value, is_path=is_path)
     streams = (probe or {}).get("streams") or []
     v = next((s for s in streams if s.get("codec_type") == "video"), None) or {}
@@ -175,6 +207,10 @@ async def _ffmpeg_stream(input_value: str, is_path: bool):
         "-loglevel",
         "error",
         "-nostdin",
+    ]
+    if start and start > 0:
+        cmd += ["-ss", f"{start:.3f}"]
+    cmd += [
         "-i",
         input_value,
         "-map",
@@ -184,19 +220,25 @@ async def _ffmpeg_stream(input_value: str, is_path: bool):
         "-sn",
         "-c:v",
         "copy" if copy_video else "libx264",
-        "-preset", "ultrafast",
-        "-threads", "0",
-        "-crf", "23",
-        "-pix_fmt", "yuv420p",
+        "-preset",
+        "ultrafast",
+        "-threads",
+        "0",
+        "-crf",
+        "23",
+        "-pix_fmt",
+        "yuv420p",
         "-c:a",
         "copy" if copy_audio else "aac",
-        "-b:a", "192k",
-        "-ac", "2",
+        "-b:a",
+        "192k",
+        "-ac",
+        "2",
         "-f",
         "mp4",
         "-movflags",
         "frag_keyframe+empty_moov+default_base_moof",
-        "pipe:1"
+        "pipe:1",
     ]
     
     if copy_video:
@@ -238,8 +280,22 @@ async def _ffmpeg_stream(input_value: str, is_path: bool):
             pass
 
 
+@router.get("/meta")
+async def meta(url: str | None = None, path: str | None = None):
+    if not url and not path:
+        raise HTTPException(status_code=400, detail="url of path is verplicht")
+    is_path = path is not None
+    input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
+    dur = await _ffprobe_duration_seconds(input_value, is_path=is_path)
+    return {"duration": dur or 0.0}
+
+
 @router.get("/play")
-async def play(url: str | None = None, path: str | None = None):
+async def play(
+    url: str | None = None,
+    path: str | None = None,
+    start: float = Query(default=0.0, ge=0.0),
+):
     if not url and not path:
         raise HTTPException(status_code=400, detail="url of path is verplicht")
 
@@ -247,7 +303,7 @@ async def play(url: str | None = None, path: str | None = None):
     input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
 
     return StreamingResponse(
-        _ffmpeg_stream(input_value, is_path=is_path),
+        _ffmpeg_stream(input_value, is_path=is_path, start=start),
         media_type="video/mp4",
     )
 
@@ -319,21 +375,13 @@ async def hls(url: str | None = None, path: str | None = None):
     if not url and not path:
         raise HTTPException(status_code=400, detail="url of path is verplicht")
 
-    is_path = path is not None
-    input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
-    key = ("path:" + input_value) if is_path else ("url:" + input_value)
-    session_id = hashlib.sha1(key.encode("utf-8")).hexdigest()
-
-    _hls_cleanup()
-    s = _HLS_SESSIONS.get(session_id) or {}
-    s["input"] = input_value
-    s["is_path"] = is_path
-    s["last_access"] = time.time()
-    _HLS_SESSIONS[session_id] = s
-
-    # Belangrijk: frontend proxyt enkel /api/* naar de backend.
-    # Dus we moeten redirecten naar een pad dat ook met /api begint.
-    return RedirectResponse(url=f"/api/stream/hls/{session_id}/index.m3u8", status_code=302)
+    q = []
+    if path is not None:
+        q.append("path=" + urllib.parse.quote(path))
+    if url is not None:
+        q.append("url=" + urllib.parse.quote(url))
+    query = ("?" + "&".join(q)) if q else ""
+    return RedirectResponse(url=f"/api/stream/play{query}", status_code=302)
 
 
 @router.get("/hls/{session_id}/index.m3u8")

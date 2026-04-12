@@ -32,6 +32,8 @@ export default function Watch() {
   const [selectedEpisode, setSelectedEpisode] = useState(null);
   const [requestStatus, setRequestStatus] = useState(null); // null, "loading", "waiting", "done", "error"
   const [requestMessage, setRequestMessage] = useState("");
+  const [startAt, setStartAt] = useState(0);
+  const [durationHint, setDurationHint] = useState(0);
   const pollRef = useRef(null);
   const searchAbortRef = useRef(null);
   const requestKeyRef = useRef(null);
@@ -94,6 +96,20 @@ export default function Watch() {
       .catch(() => setLoadingSeason(false));
   }, [media?.id, selectedSeason, isMovie]);
 
+  useEffect(() => {
+    if (!streamUrl) return;
+    const metaUrl = streamUrl
+      .replace("/stream/hls", "/stream/meta")
+      .replace("/stream/play", "/stream/meta");
+    fetch(metaUrl)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        const d = Number(data?.duration) || 0;
+        if (d > 0) setDurationHint(d);
+      })
+      .catch(() => {});
+  }, [streamUrl]);
+
   if (!media) { navigate("/"); return null; }
 
   async function handlePlay(episodeInfo = null) {
@@ -143,7 +159,13 @@ export default function Watch() {
             if (rr.stream_url) {
               let finalUrl = rr.stream_url;
               if (finalUrl.startsWith("/")) finalUrl = window.location.origin + finalUrl;
-              setStreamUrl(finalUrl);
+              const resume = !episodeInfo && isMovie && savedProgress?.current_time && (savedProgress.current_time > 10);
+              const urlWithStart = resume
+                ? `${finalUrl}${finalUrl.includes("?") ? "&" : "?"}start=${encodeURIComponent(savedProgress.current_time)}`
+                : finalUrl;
+              setStartAt(resume ? savedProgress.current_time : 0);
+              setDurationHint(savedProgress?.duration || 0);
+              setStreamUrl(urlWithStart);
               setStatus("");
               setLoading(false);
               if (pollRef.current) clearInterval(pollRef.current);
@@ -177,8 +199,13 @@ export default function Watch() {
       if (finalUrl.startsWith("/")) {
         finalUrl = window.location.origin + finalUrl;
       }
-      
-      setStreamUrl(finalUrl);
+      const resume = !episodeInfo && isMovie && savedProgress?.current_time && (savedProgress.current_time > 10);
+      const urlWithStart = resume
+        ? `${finalUrl}${finalUrl.includes("?") ? "&" : "?"}start=${encodeURIComponent(savedProgress.current_time)}`
+        : finalUrl;
+      setStartAt(resume ? savedProgress.current_time : 0);
+      setDurationHint(savedProgress?.duration || 0);
+      setStreamUrl(urlWithStart);
       setStatus("");
     } catch (e) {
       console.error(e);
@@ -239,9 +266,9 @@ export default function Watch() {
 
         {streamUrl && (
           <div className="mb-10">
-            <Player url={streamUrl} media={media} onProgress={(t, d) => saveProgress(media, t, d)} />
+            <Player url={streamUrl} media={media} startAt={startAt} durationHint={durationHint} onProgress={(t, d) => saveProgress(media, t, d)} />
             <div className="mt-4 flex flex-wrap items-center gap-4">
-              <button onClick={() => { setStreamUrl(null); setStatus(""); }} className="text-sm text-gray-500 hover:text-white flex items-center gap-1">
+              <button onClick={() => { setStreamUrl(null); setStatus(""); setStartAt(0); setDurationHint(0); }} className="text-sm text-gray-500 hover:text-white flex items-center gap-1">
                 ← Terug naar info
               </button>
             </div>
