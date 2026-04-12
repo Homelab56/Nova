@@ -426,15 +426,20 @@ export default function Watch() {
                             selectedEpisode?.id === ep.id ? "border-nova-accent bg-nova-accent/10" : "border-transparent hover:border-gray-700 hover:bg-nova-card"
                           } ${watched ? "opacity-70" : ""}`}
                         >
-                          <div className="flex-shrink-0 w-10 flex items-center justify-center text-gray-500 font-bold text-lg group-hover:text-white transition-colors">
+                          <div className={`flex-shrink-0 w-10 flex items-center justify-center font-bold text-lg group-hover:text-white transition-colors ${watched ? "text-green-400" : "text-gray-500"}`}>
                             {watched ? "✓" : ep.episode_number}
                           </div>
 
                           <div className="flex-shrink-0 w-36 aspect-video rounded-lg overflow-hidden bg-nova-bg relative">
                             {ep.still_path ? (
-                              <img src={`${TMDB_STILL}${ep.still_path}`} alt={ep.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                              <img src={`${TMDB_STILL}${ep.still_path}`} alt={ep.name} className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${watched ? "grayscale" : ""}`} />
                             ) : (
-                              <div className="w-full h-full flex items-center justify-center text-gray-700 text-2xl group-hover:text-nova-accent transition-colors">▶</div>
+                              <div className={`w-full h-full flex items-center justify-center text-2xl group-hover:text-nova-accent transition-colors ${watched ? "text-gray-600" : "text-gray-700"}`}>▶</div>
+                            )}
+                            {watched && (
+                              <div className="absolute inset-0 bg-black/30 flex items-center justify-center pointer-events-none">
+                                <div className="text-green-400 text-5xl font-black drop-shadow">✓</div>
+                              </div>
                             )}
                             {progressPct > 0 && (
                               <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-700">
@@ -586,16 +591,21 @@ export default function Watch() {
                         className={`flex gap-4 p-3 rounded-xl cursor-pointer transition-all border group ${selectedEpisode?.id === ep.id ? "border-nova-accent bg-nova-accent/10" : "border-transparent hover:border-gray-700 hover:bg-nova-card"} ${watched ? "opacity-70" : ""}`}
                       >
                         {/* Nummer */}
-                        <div className="flex-shrink-0 w-10 flex items-center justify-center text-gray-500 font-bold text-lg group-hover:text-white transition-colors">
+                        <div className={`flex-shrink-0 w-10 flex items-center justify-center font-bold text-lg group-hover:text-white transition-colors ${watched ? "text-green-400" : "text-gray-500"}`}>
                           {watched ? "✓" : ep.episode_number}
                         </div>
 
                         {/* Thumbnail */}
                         <div className="flex-shrink-0 w-36 aspect-video rounded-lg overflow-hidden bg-nova-bg relative">
                           {ep.still_path ? (
-                            <img src={`${TMDB_STILL}${ep.still_path}`} alt={ep.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                            <img src={`${TMDB_STILL}${ep.still_path}`} alt={ep.name} className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${watched ? "grayscale" : ""}`} />
                           ) : (
-                            <div className="w-full h-full flex items-center justify-center text-gray-700 text-2xl group-hover:text-nova-accent transition-colors">▶</div>
+                            <div className={`w-full h-full flex items-center justify-center text-2xl group-hover:text-nova-accent transition-colors ${watched ? "text-gray-600" : "text-gray-700"}`}>▶</div>
+                          )}
+                          {watched && (
+                            <div className="absolute inset-0 bg-black/30 flex items-center justify-center pointer-events-none">
+                              <div className="text-green-400 text-5xl font-black drop-shadow">✓</div>
+                            </div>
                           )}
                           {progressPct > 0 && (
                             <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-700">
