@@ -10,23 +10,49 @@ async function fetchRow(path) {
   return r.json();
 }
 
+function _hashString(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function _shuffle(items, seed) {
+  const a = [...items];
+  let x = seed >>> 0;
+  for (let i = a.length - 1; i > 0; i--) {
+    x ^= x << 13;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    const j = x % (i + 1);
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function _isReleased(item) {
+  const dateStr = item?.release_date || item?.first_air_date;
+  if (!dateStr) return true;
+  const t = Date.parse(dateStr);
+  if (!Number.isFinite(t)) return true;
+  return t <= Date.now();
+}
+
 // Vaste rijen per mode (snel te laden)
 const FIXED_ROWS = {
   all: [
     { key: "trending",      title: "Trending deze week",      path: "/api/search/trending" },
     { key: "popularMovies", title: "Populaire films",         path: "/api/search/popular/movies" },
     { key: "popularTv",     title: "Populaire series",        path: "/api/search/popular/tv" },
-    { key: "nowPlaying",    title: "Nu in de bioscoop",       path: "/api/search/nowplaying/movies" },
     { key: "onAir",         title: "Nu op tv",                path: "/api/search/onair/tv" },
     { key: "topMovies",     title: "Best beoordeelde films",  path: "/api/search/toprated/movies" },
     { key: "topTv",         title: "Best beoordeelde series", path: "/api/search/toprated/tv" },
-    { key: "upcoming",      title: "Binnenkort",              path: "/api/search/upcoming/movies" },
   ],
   movie: [
     { key: "popularMovies", title: "Populaire films",         path: "/api/search/popular/movies" },
     { key: "trendMovies",   title: "Trending films",          path: "/api/search/trending/movies" },
-    { key: "nowPlaying",    title: "Nu in de bioscoop",       path: "/api/search/nowplaying/movies" },
-    { key: "upcoming",      title: "Binnenkort",              path: "/api/search/upcoming/movies" },
     { key: "topMovies",     title: "Best beoordeeld",         path: "/api/search/toprated/movies" },
   ],
   tv: [
@@ -48,8 +74,6 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [genreResults, setGenreResults] = useState(null);
   const [activeGenre, setActiveGenre] = useState(null);
-  const [libraryData, setLibraryData] = useState([]);
-  const [loadingLibrary, setLoadingLibrary] = useState(false);
   const [overlayPage, setOverlayPage] = useState(1);
   const [overlayTotalPages, setOverlayTotalPages] = useState(1);
   const [overlayTotal, setOverlayTotal] = useState(0);
@@ -57,48 +81,10 @@ export default function Home() {
   const overlayType = useRef(null); // "search" | "genre"
   const overlayMeta = useRef({});  // query of genre id+type
   const genreCache = useRef({});
+  const sessionSeed = useRef(Math.floor(Math.random() * 1e9));
 
   const { watchlist, progress, progressMap } = useUserData();
   const inProgress = progress.filter(p => p.duration > 0 && (p.current_time / p.duration) < 0.95);
-
-  // Laad RD bibliotheek & Lokale bibliotheek
-  useEffect(() => {
-    if (mode === "watchlist") return;
-    setLoadingLibrary(true);
-    
-    Promise.all([
-      fetch("/api/debrid/library").then(r => r.ok ? r.json() : []).catch(() => []),
-      fetch("/api/library/all").then(r => r.ok ? r.json() : []).catch(() => [])
-    ]).then(([rdData, localData]) => {
-      const mappedRd = rdData.map(t => ({
-        id: t.id || Math.random().toString(36).substr(2, 9),
-        title: t.filename,
-        name: t.filename,
-        media_type: "movie",
-        poster_path: null,
-        vote_average: 0,
-        is_library: true,
-        filename: t.filename,
-        source: "rd"
-      }));
-
-      const mappedLocal = localData.filter(t => t.is_video).map(t => ({
-        id: t.path || Math.random().toString(36).substr(2, 9),
-        title: t.name,
-        name: t.name,
-        media_type: "movie",
-        poster_path: null,
-        vote_average: 0,
-        is_library: true,
-        filename: t.name,
-        source: "local",
-        local_path: t.path
-      }));
-
-      setLibraryData([...mappedLocal, ...mappedRd]);
-      setLoadingLibrary(false);
-    });
-  }, [mode]);
 
   // Laad vaste rijen
   useEffect(() => {
@@ -353,8 +339,20 @@ export default function Home() {
             )}
 
             {/* Vaste rijen */}
-            {FIXED_ROWS[mode].map((row, i) => {
-              const items = rowData[row.key] || [];
+            {(() => {
+              const used = new Set();
+              return FIXED_ROWS[mode].map((row) => {
+                const raw = rowData[row.key] || [];
+                const shuffled = _shuffle(raw, sessionSeed.current ^ _hashString(`${mode}:${row.key}`));
+                const items = shuffled
+                  .filter(_isReleased)
+                  .filter(item => {
+                    const id = item?.id;
+                    if (id == null) return false;
+                    if (used.has(id)) return false;
+                    used.add(id);
+                    return true;
+                  });
               if (!loadingFixed && items.length === 0) return null;
               return (
                 <div key={row.key}>
@@ -364,32 +362,41 @@ export default function Home() {
                     loading={loadingFixed && !rowData[row.key]}
                     progressMap={progressMap}
                   />
-                  {/* Voeg de bibliotheek rij in na de eerste rij */}
-                  {i === 0 && libraryData.length > 0 && (
-                    <Row 
-                      title="Mijn Bibliotheek" 
-                      items={libraryData} 
-                      loading={loadingLibrary} 
-                      accentTitle
-                    />
-                  )}
                 </div>
               );
-            })}
+              });
+            })()}
 
             {/* Genre rijen */}
             {loadingGenre && !genreRows.length
               ? Array.from({ length: 4 }).map((_, i) => (
                   <Row key={`skel-${i}`} title="" items={[]} loading={true} />
                 ))
-              : genreRows.map(row => (
-                  <Row
-                    key={row.key}
-                    title={row.title}
-                    items={row.items}
-                    progressMap={progressMap}
-                  />
-                ))
+              : (() => {
+                  const used = new Set();
+                  FIXED_ROWS[mode].forEach(r => (rowData[r.key] || []).forEach(it => used.add(it?.id)));
+                  return genreRows.map(row => {
+                    const shuffled = _shuffle(row.items || [], sessionSeed.current ^ _hashString(`${mode}:genre:${row.key}`));
+                    const items = shuffled
+                      .filter(_isReleased)
+                      .filter(item => {
+                        const id = item?.id;
+                        if (id == null) return false;
+                        if (used.has(id)) return false;
+                        used.add(id);
+                        return true;
+                      });
+                    if (items.length === 0) return null;
+                    return (
+                      <Row
+                        key={row.key}
+                        title={row.title}
+                        items={items}
+                        progressMap={progressMap}
+                      />
+                    );
+                  });
+                })()
             }
           </div>
         </>
