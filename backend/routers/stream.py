@@ -209,15 +209,14 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         "-nostdin",
     ]
     transcode_any = not (copy_video and copy_audio)
-    if start and start > 0 and not transcode_any:
+    
+    # ALTIJD -ss voor -i (sneller zoeken), en met fast seek parameter
+    if start and start > 0:
         cmd += ["-ss", f"{start:.3f}"]
+        
     cmd += [
         "-i",
         input_value,
-    ]
-    if start and start > 0 and transcode_any:
-        cmd += ["-ss", f"{start:.3f}"]
-    cmd += [
         "-map",
         "0:v:0",
         "-map",
