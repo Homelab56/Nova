@@ -306,7 +306,7 @@ async def _ensure_hls_session(session_id: str, input_value: str):
         "-hls_list_size",
         "0",
         "-hls_playlist_type",
-        "vod",
+        "event",
         "-hls_segment_type",
         "fmp4",
         "-hls_fmp4_init_filename",
@@ -377,7 +377,7 @@ async def hls_index(session_id: str):
     await _ensure_hls_session(session_id, s.get("input"))
     playlist_path = _HLS_SESSIONS[session_id]["playlist"]
 
-    for _ in range(50):
+    for _ in range(300):
         if os.path.exists(playlist_path) and os.path.getsize(playlist_path) > 0:
             break
         await asyncio.sleep(0.1)
@@ -385,16 +385,24 @@ async def hls_index(session_id: str):
     if not os.path.exists(playlist_path) or os.path.getsize(playlist_path) == 0:
         proc = _HLS_SESSIONS[session_id].get("proc")
         err = b""
+        rc = None
+        if proc:
+            rc = proc.returncode
+            if rc is None:
+                try:
+                    rc = await asyncio.wait_for(proc.wait(), timeout=0.1)
+                except Exception:
+                    rc = proc.returncode
         if proc and proc.stderr:
             try:
-                err = await proc.stderr.read(4096)
+                err = await proc.stderr.read(65536)
             except Exception:
                 err = b""
         input_value = s.get("input") or ""
         msg = err.decode("utf-8", errors="ignore").strip()
         if not msg:
             msg = "Geen stderr output van ffmpeg."
-        detail = f"HLS start mislukt voor input: {input_value}\n{msg}"
+        detail = f"HLS start mislukt voor input: {input_value}\nreturncode={rc}\n{msg}"
         print(detail)
         raise HTTPException(status_code=502, detail=detail[:1800])
 

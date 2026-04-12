@@ -63,6 +63,9 @@ export default function Player({ url, media, onProgress }) {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
+        startPosition: 0,
+        liveDurationInfinity: false,
+        backBufferLength: 600,
       });
       hlsRef.current = hls;
       const boot = async () => {
