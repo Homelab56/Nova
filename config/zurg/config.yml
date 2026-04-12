@@ -1,0 +1,14 @@
+# Zurg configuratie
+# De API token wordt automatisch ingevuld via de omgevingsvariabele in docker-compose
+
+token: ${RD_API_TOKEN}
+port: 9999
+concurrent_workers: 20
+check_for_changes_every_secs: 10
+
+# Mappen die Zurg aanmaakt (zichtbaar via rclone mount)
+directories:
+  torrents:
+    group: 1
+    filters:
+      - regex: /.*/
