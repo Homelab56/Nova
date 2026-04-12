@@ -262,7 +262,8 @@ async def _ensure_hls_session(session_id: str, input_value: str):
     sess_dir = os.path.join(_HLS_ROOT, session_id)
     os.makedirs(sess_dir, exist_ok=True)
     playlist_path = os.path.join(sess_dir, "index.m3u8")
-    segment_pattern = os.path.join(sess_dir, "seg_%05d.ts")
+    segment_pattern = os.path.join(sess_dir, "seg_%05d.m4s")
+    init_name = "init.mp4"
 
     s = _HLS_SESSIONS.get(session_id)
     if s and s.get("proc") and s["proc"].returncode is None:
@@ -270,15 +271,6 @@ async def _ensure_hls_session(session_id: str, input_value: str):
         return
 
     probe = await _ffprobe_streams(input_value, is_path=not _is_http_url(input_value))
-    streams = (probe or {}).get("streams") or []
-    v = next((s for s in streams if s.get("codec_type") == "video"), None) or {}
-    a = next((s for s in streams if s.get("codec_type") == "audio"), None) or {}
-    v_codec = (v.get("codec_name") or "").lower()
-    a_codec = (a.get("codec_name") or "").lower()
-
-    copy_video = v_codec == "h264"
-    copy_audio = a_codec == "aac"
-    hls_flags = "delete_segments+independent_segments"
 
     cmd = [
         "ffmpeg",
@@ -294,9 +286,19 @@ async def _ensure_hls_session(session_id: str, input_value: str):
         "0:a:0?",
         "-sn",
         "-c:v",
-        "copy" if copy_video else "libx264",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-pix_fmt",
+        "yuv420p",
         "-c:a",
-        "copy" if copy_audio else "aac",
+        "aac",
+        "-b:a",
+        "192k",
+        "-ac",
+        "2",
         "-f",
         "hls",
         "-hls_time",
@@ -305,21 +307,16 @@ async def _ensure_hls_session(session_id: str, input_value: str):
         "0",
         "-hls_playlist_type",
         "event",
+        "-hls_segment_type",
+        "fmp4",
+        "-hls_fmp4_init_filename",
+        init_name,
         "-hls_flags",
         "independent_segments",
         "-hls_segment_filename",
         segment_pattern,
         playlist_path,
     ]
-    if copy_video:
-        insert_at = cmd.index("-f")
-        cmd[insert_at:insert_at] = ["-bsf:v", "h264_mp4toannexb"]
-    if not copy_video:
-        insert_at = cmd.index("-f")
-        cmd[insert_at:insert_at] = ["-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p"]
-    if not copy_audio:
-        insert_at = cmd.index("-f")
-        cmd[insert_at:insert_at] = ["-b:a", "192k", "-ac", "2"]
     if _is_http_url(input_value):
         insert_at = cmd.index("-i")
         cmd[insert_at:insert_at] = [
@@ -430,8 +427,18 @@ async def hls_segment(session_id: str, segment_name: str):
     if not os.path.exists(seg_path):
         raise HTTPException(status_code=404, detail="Segment niet gevonden")
 
+    lower = segment_name.lower()
+    if lower.endswith(".m4s"):
+        media_type = "video/iso.segment"
+    elif lower.endswith(".ts"):
+        media_type = "video/MP2T"
+    elif lower.endswith(".mp4"):
+        media_type = "video/mp4"
+    else:
+        media_type = "application/octet-stream"
+
     return FileResponse(
         seg_path,
-        media_type="video/MP2T",
+        media_type=media_type,
         headers={"Cache-Control": "no-cache"},
     )
