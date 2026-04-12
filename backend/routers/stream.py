@@ -302,9 +302,11 @@ async def _ensure_hls_session(session_id: str, input_value: str):
         "-hls_time",
         "4",
         "-hls_list_size",
-        "6",
+        "0",
+        "-hls_playlist_type",
+        "event",
         "-hls_flags",
-        hls_flags,
+        "independent_segments",
         "-hls_segment_filename",
         segment_pattern,
         playlist_path,
@@ -420,6 +422,11 @@ async def hls_segment(session_id: str, segment_name: str):
         raise HTTPException(status_code=400, detail="Ongeldig segment")
 
     seg_path = os.path.join(dir_path, segment_name)
+    if not os.path.exists(seg_path):
+        for _ in range(40):
+            if os.path.exists(seg_path):
+                break
+            await asyncio.sleep(0.05)
     if not os.path.exists(seg_path):
         raise HTTPException(status_code=404, detail="Segment niet gevonden")
 
