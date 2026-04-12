@@ -195,7 +195,7 @@ async def _ffmpeg_stream(input_value: str, is_path: bool):
         "-f",
         "mp4",
         "-movflags",
-        "frag_keyframe+empty_moov+default_base_moof",
+        "frag_keyframe+empty_moov+default_base_moof+faststart",
         "pipe:1"
     ]
     
