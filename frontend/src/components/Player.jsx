@@ -10,6 +10,7 @@ function formatTime(sec) {
 }
 
 export default function Player({ url, media, onProgress, startAt = 0, durationHint = 0 }) {
+  const containerRef = useRef(null);
   const videoRef = useRef(null);
   const saveTimer = useRef(null);
   const startOffsetRef = useRef(0);
@@ -18,6 +19,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const [playing, setPlaying] = useState(false);
   const [absTime, setAbsTime] = useState(0);
   const [dragValue, setDragValue] = useState(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const total = useMemo(() => {
     const hint = Number(durationHint) || 0;
@@ -133,16 +135,35 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     await tryPlay();
   };
 
+  const toggleFullscreen = async () => {
+    const el = containerRef.current;
+    if (!el) return;
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await el.requestFullscreen();
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    const onFs = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
+
   if (!url) return null;
 
   return (
-    <div className="w-full aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl relative">
+    <div ref={containerRef} className="w-full aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl relative">
       <video
         ref={videoRef}
         autoPlay
         playsInline
         preload="metadata"
         className="w-full h-full"
+        onDoubleClick={toggleFullscreen}
       >
         Je browser ondersteunt geen video afspelen.
       </video>
@@ -171,6 +192,14 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
             disabled={total <= 0}
             className="flex-1"
           />
+
+          <button
+            onClick={toggleFullscreen}
+            className="bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg px-3 py-1.5 text-sm font-semibold"
+            title="Fullscreen"
+          >
+            {isFullscreen ? "⤢" : "⤢"}
+          </button>
         </div>
       </div>
 

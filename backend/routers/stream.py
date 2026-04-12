@@ -208,16 +208,25 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         "error",
         "-nostdin",
     ]
-    if start and start > 0:
+    transcode_any = not (copy_video and copy_audio)
+    if start and start > 0 and not transcode_any:
         cmd += ["-ss", f"{start:.3f}"]
     cmd += [
         "-i",
         input_value,
+    ]
+    if start and start > 0 and transcode_any:
+        cmd += ["-ss", f"{start:.3f}"]
+    cmd += [
         "-map",
         "0:v:0",
         "-map",
         "0:a:0?",
         "-sn",
+        "-fflags",
+        "+genpts",
+        "-avoid_negative_ts",
+        "make_zero",
         "-c:v",
         "copy" if copy_video else "libx264",
         "-preset",
@@ -234,6 +243,8 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         "192k",
         "-ac",
         "2",
+        "-af",
+        "aresample=async=1:first_pts=0",
         "-f",
         "mp4",
         "-movflags",
@@ -244,11 +255,10 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
     if copy_video:
         # Verwijder de transcode flags als we copy gebruiken
         cmd = [x for x in cmd if x not in ["-preset", "ultrafast", "-threads", "0", "-crf", "23", "-pix_fmt", "yuv420p"]]
-        insert_at = cmd.index("-f")
-        cmd[insert_at:insert_at] = ["-bsf:v", "h264_mp4toannexb"]
         
     if copy_audio:
         cmd = [x for x in cmd if x not in ["-b:a", "192k", "-ac", "2"]]
+        cmd = [x for x in cmd if x not in ["-af", "aresample=async=1:first_pts=0"]]
 
     if _is_http_url(input_value):
         insert_at = cmd.index("-i")
