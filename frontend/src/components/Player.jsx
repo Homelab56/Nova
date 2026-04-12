@@ -13,13 +13,17 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const containerRef = useRef(null);
   const videoRef = useRef(null);
   const saveTimer = useRef(null);
+  const controlsTimer = useRef(null);
   const startOffsetRef = useRef(0);
   const baseUrlRef = useRef(null);
   const [error, setError] = useState(null);
   const [playing, setPlaying] = useState(false);
+  const [buffering, setBuffering] = useState(false);
   const [absTime, setAbsTime] = useState(0);
   const [dragValue, setDragValue] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showControls, setShowControls] = useState(true);
+  const [flashIcon, setFlashIcon] = useState(null);
 
   const total = useMemo(() => {
     const hint = Number(durationHint) || 0;
@@ -29,6 +33,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   useEffect(() => {
     return () => {
       clearTimeout(saveTimer.current);
+      clearTimeout(controlsTimer.current);
     };
   }, []);
 
@@ -71,6 +76,17 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     await tryPlay();
   };
 
+  const showControlsTemporarily = () => {
+    if (!isFullscreen) return;
+    setShowControls(true);
+    clearTimeout(controlsTimer.current);
+    if (playing) {
+      controlsTimer.current = setTimeout(() => {
+        setShowControls(false);
+      }, 2000);
+    }
+  };
+
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !url) return;
@@ -81,14 +97,24 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     v.src = src;
     v.load();
     setAbsTime(startOffsetRef.current);
+    setBuffering(true);
+    setShowControls(true);
     tryPlay();
   }, [url, startAt]);
 
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
-    const onPlay = () => setPlaying(true);
-    const onPause = () => setPlaying(false);
+    const onPlay = () => {
+      setPlaying(true);
+      setBuffering(false);
+      showControlsTemporarily();
+    };
+    const onPause = () => {
+      setPlaying(false);
+      setBuffering(false);
+      setShowControls(true);
+    };
     const onTime = () => {
       const t = startOffsetRef.current + (v.currentTime || 0);
       setAbsTime(t);
@@ -99,6 +125,12 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         onProgress(t, total);
       }, 5000);
     };
+    const onWaiting = () => setBuffering(true);
+    const onPlaying = () => setBuffering(false);
+    const onStalled = () => setBuffering(true);
+    const onSeeking = () => setBuffering(true);
+    const onSeeked = () => setBuffering(false);
+    const onCanPlay = () => setBuffering(false);
     const onErr = () => {
       const code = v?.error?.code;
       setError(code ? `Video fout (code ${code}).` : "Video fout.");
@@ -106,11 +138,23 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     v.addEventListener("play", onPlay);
     v.addEventListener("pause", onPause);
     v.addEventListener("timeupdate", onTime);
+    v.addEventListener("waiting", onWaiting);
+    v.addEventListener("playing", onPlaying);
+    v.addEventListener("stalled", onStalled);
+    v.addEventListener("seeking", onSeeking);
+    v.addEventListener("seeked", onSeeked);
+    v.addEventListener("canplay", onCanPlay);
     v.addEventListener("error", onErr);
     return () => {
       v.removeEventListener("play", onPlay);
       v.removeEventListener("pause", onPause);
       v.removeEventListener("timeupdate", onTime);
+      v.removeEventListener("waiting", onWaiting);
+      v.removeEventListener("playing", onPlaying);
+      v.removeEventListener("stalled", onStalled);
+      v.removeEventListener("seeking", onSeeking);
+      v.removeEventListener("seeked", onSeeked);
+      v.removeEventListener("canplay", onCanPlay);
       v.removeEventListener("error", onErr);
     };
   }, [media, onProgress, total]);
@@ -130,8 +174,14 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     if (!v) return;
     if (playing) {
       v.pause();
+      setFlashIcon("pause");
+      clearTimeout(controlsTimer.current);
+      controlsTimer.current = setTimeout(() => setFlashIcon(null), 600);
       return;
     }
+    setFlashIcon("play");
+    clearTimeout(controlsTimer.current);
+    controlsTimer.current = setTimeout(() => setFlashIcon(null), 600);
     await tryPlay();
   };
 
@@ -148,7 +198,15 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   };
 
   useEffect(() => {
-    const onFs = () => setIsFullscreen(!!document.fullscreenElement);
+    const onFs = () => {
+      const fs = !!document.fullscreenElement;
+      setIsFullscreen(fs);
+      setShowControls(true);
+      clearTimeout(controlsTimer.current);
+      if (fs && playing) {
+        controlsTimer.current = setTimeout(() => setShowControls(false), 2000);
+      }
+    };
     document.addEventListener("fullscreenchange", onFs);
     return () => document.removeEventListener("fullscreenchange", onFs);
   }, []);
@@ -156,7 +214,12 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   if (!url) return null;
 
   return (
-    <div ref={containerRef} className="w-full aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl relative">
+    <div
+      ref={containerRef}
+      className="w-full aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl relative"
+      onMouseMove={showControlsTemporarily}
+      onTouchStart={showControlsTemporarily}
+    >
       <video
         ref={videoRef}
         autoPlay
@@ -164,11 +227,16 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         preload="metadata"
         className="w-full h-full"
         onDoubleClick={toggleFullscreen}
+        onClick={toggle}
       >
         Je browser ondersteunt geen video afspelen.
       </video>
 
-      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-4 pb-4 pt-10">
+      {(showControls || !isFullscreen || !playing) && (
+      <div
+        className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-4 pb-4 pt-10"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center gap-3">
           <button
             onClick={toggle}
@@ -202,6 +270,36 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
           </button>
         </div>
       </div>
+      )}
+
+      {buffering && !error && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="bg-black/60 border border-white/10 rounded-2xl px-5 py-4 flex items-center gap-3">
+            <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            <div className="text-white text-sm font-semibold">Laden...</div>
+          </div>
+        </div>
+      )}
+
+      {!buffering && !error && !playing && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <button
+            onClick={(e) => { e.stopPropagation(); toggle(); }}
+            className="bg-black/50 hover:bg-black/60 border border-white/15 text-white rounded-full w-20 h-20 flex items-center justify-center text-3xl"
+            title="Afspelen"
+          >
+            ▶
+          </button>
+        </div>
+      )}
+
+      {!buffering && !error && playing && flashIcon && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="bg-black/45 border border-white/10 text-white rounded-full w-20 h-20 flex items-center justify-center text-3xl">
+            {flashIcon === "pause" ? "⏸" : "▶"}
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/70 text-white text-sm px-6 text-center">
