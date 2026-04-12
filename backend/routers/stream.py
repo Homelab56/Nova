@@ -158,8 +158,18 @@ def _choose_mode(probe: dict) -> str:
     return "transcode"
 
 
-async def _ffmpeg_stream(input_value: str, mode: str, is_path: bool):
-    base = [
+async def _ffmpeg_stream(input_value: str, is_path: bool):
+    probe = await _ffprobe_streams(input_value, is_path=is_path)
+    streams = (probe or {}).get("streams") or []
+    v = next((s for s in streams if s.get("codec_type") == "video"), None) or {}
+    a = next((s for s in streams if s.get("codec_type") == "audio"), None) or {}
+    v_codec = (v.get("codec_name") or "").lower()
+    a_codec = (a.get("codec_name") or "").lower()
+
+    copy_video = v_codec == "h264"
+    copy_audio = a_codec == "aac"
+
+    cmd = [
         "ffmpeg",
         "-hide_banner",
         "-loglevel",
@@ -172,43 +182,39 @@ async def _ffmpeg_stream(input_value: str, mode: str, is_path: bool):
         "-map",
         "0:a:0?",
         "-sn",
-        "-movflags",
-        "frag_keyframe+empty_moov+faststart",
+        "-c:v",
+        "copy" if copy_video else "libx264",
+        "-preset", "veryfast",
+        "-crf", "23",
+        "-pix_fmt", "yuv420p",
+        "-c:a",
+        "copy" if copy_audio else "aac",
+        "-b:a", "192k",
+        "-ac", "2",
         "-f",
         "mp4",
-        "pipe:1",
+        "-movflags",
+        "frag_keyframe+empty_moov+default_base_moof",
+        "pipe:1"
     ]
-    if _is_http_url(input_value):
-        insert_at = base.index("-i")
-        base[insert_at:insert_at] = [
-            "-rw_timeout",
-            "15000000",
-            "-reconnect",
-            "1",
-            "-reconnect_streamed",
-            "1",
-            "-reconnect_delay_max",
-            "2",
-        ]
+    
+    if copy_video:
+        # Verwijder de transcode flags als we copy gebruiken
+        cmd = [x for x in cmd if x not in ["-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p"]]
+        insert_at = cmd.index("-f")
+        cmd[insert_at:insert_at] = ["-bsf:v", "h264_mp4toannexb"]
+        
+    if copy_audio:
+        cmd = [x for x in cmd if x not in ["-b:a", "192k", "-ac", "2"]]
 
-    if mode == "copy":
-        cmd = base[:]
-        cmd.insert(cmd.index("-sn"), "-c:v")
-        cmd.insert(cmd.index("-sn") + 1, "copy")
-        cmd.insert(cmd.index("-sn"), "-c:a")
-        cmd.insert(cmd.index("-sn") + 1, "copy")
-    else:
-        cmd = base[:]
-        cmd.insert(cmd.index("-sn"), "-c:v")
-        cmd.insert(cmd.index("-sn") + 1, "libx264")
-        cmd.insert(cmd.index("-sn"), "-preset")
-        cmd.insert(cmd.index("-sn") + 1, "veryfast")
-        cmd.insert(cmd.index("-sn"), "-crf")
-        cmd.insert(cmd.index("-sn") + 1, "23")
-        cmd.insert(cmd.index("-sn"), "-c:a")
-        cmd.insert(cmd.index("-sn") + 1, "aac")
-        cmd.insert(cmd.index("-sn"), "-b:a")
-        cmd.insert(cmd.index("-sn") + 1, "192k")
+    if _is_http_url(input_value):
+        insert_at = cmd.index("-i")
+        cmd[insert_at:insert_at] = [
+            "-rw_timeout", "15000000",
+            "-reconnect", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "2",
+        ]
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -217,27 +223,18 @@ async def _ffmpeg_stream(input_value: str, mode: str, is_path: bool):
     )
 
     try:
-        first = await proc.stdout.read(1024 * 64)
-        if not first:
-            err = await proc.stderr.read(1024 * 64)
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=1)
-            except Exception:
-                pass
-            raise HTTPException(status_code=502, detail=f"Stream start mislukt: {err.decode('utf-8', errors='ignore')[:400]}")
-        yield first
         while True:
-            chunk = await proc.stdout.read(1024 * 128)
+            chunk = await proc.stdout.read(1024 * 1024)
             if not chunk:
                 break
             yield chunk
+    except asyncio.CancelledError:
+        pass
     finally:
-        if proc.returncode is None:
-            proc.terminate()
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=2)
-            except Exception:
-                proc.kill()
+        try:
+            proc.kill()
+        except OSError:
+            pass
 
 
 @router.get("/play")
@@ -248,11 +245,8 @@ async def play(url: str | None = None, path: str | None = None):
     is_path = path is not None
     input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
 
-    probe = await _ffprobe_streams(input_value, is_path=is_path)
-    mode = _choose_mode(probe) if probe else "transcode"
-
     return StreamingResponse(
-        _ffmpeg_stream(input_value, mode=mode, is_path=is_path),
+        _ffmpeg_stream(input_value, is_path=is_path),
         media_type="video/mp4",
     )
 
@@ -300,35 +294,10 @@ async def _ensure_hls_session(session_id: str, input_value: str):
         "-ac",
         "2",
         "-f",
-        "hls",
-        "-hls_time",
-        "4",
-        "-hls_list_size",
-        "0",
-        "-hls_playlist_type",
-        "event",
-        "-hls_segment_type",
-        "fmp4",
-        "-hls_fmp4_init_filename",
-        init_name,
-        "-hls_flags",
-        "independent_segments+append_list",
-        "-hls_segment_filename",
-        segment_pattern,
-        playlist_path,
+        "mp4",
+        "-movflags",
+        "frag_keyframe+empty_moov+default_base_moof",
     ]
-    if _is_http_url(input_value):
-        insert_at = cmd.index("-i")
-        cmd[insert_at:insert_at] = [
-            "-rw_timeout",
-            "15000000",
-            "-reconnect",
-            "1",
-            "-reconnect_streamed",
-            "1",
-            "-reconnect_delay_max",
-            "2",
-        ]
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
