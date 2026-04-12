@@ -319,37 +319,58 @@ export default function Watch() {
   const seasons = detail?.seasons?.filter(s => s.season_number > 0) || [];
 
   const handleNext = async () => {
-    if (isMovie || !seasonData || !selectedEpisode) return;
+    if (isMovie) return;
 
-    const currentIdx = seasonData.episodes.findIndex(ep => ep.id === selectedEpisode.id);
-    if (currentIdx >= 0 && currentIdx < seasonData.episodes.length - 1) {
-      // Volgende aflevering in hetzelfde seizoen
-      const nextEp = seasonData.episodes[currentIdx + 1];
-      setSelectedEpisode(nextEp);
-      handlePlay(nextEp, selectedSeason);
-    } else {
-      // Kijk of er een volgend seizoen is
-      const nextSeasonNum = selectedSeason + 1;
-      const hasNextSeason = seasons.some(s => s.season_number === nextSeasonNum);
-      if (hasNextSeason) {
-        setStatus("Volgende seizoen laden...");
-        setSelectedSeason(nextSeasonNum);
-        try {
-          const r = await fetch(`/api/search/tv/${media.id}/season/${nextSeasonNum}`);
-          const d = await r.json();
-          if (d.episodes && d.episodes.length > 0) {
-            const nextEp = d.episodes[0];
-            setSelectedEpisode(nextEp);
-            handlePlay(nextEp, nextSeasonNum);
-          } else {
-            setStreamUrl(null);
-          }
-        } catch (e) {
-          setStreamUrl(null);
-        }
-      } else {
-        setStreamUrl(null); // Einde van de serie
+    const currentSeasonNum = progressItem?.season_number ?? selectedSeason;
+    const currentEpisodeNum = progressItem?.episode_number ?? selectedEpisode?.episode_number;
+    if (!currentSeasonNum || !currentEpisodeNum) return;
+
+    let activeSeasonData = seasonData;
+    if (!activeSeasonData?.episodes?.length || selectedSeason !== currentSeasonNum) {
+      try {
+        const r = await fetch(`/api/search/tv/${media.id}/season/${currentSeasonNum}`);
+        const d = await r.json();
+        activeSeasonData = d;
+        setSeasonData(d);
+        setSelectedSeason(currentSeasonNum);
+      } catch (e) {
+        activeSeasonData = null;
       }
+    }
+
+    if (!activeSeasonData?.episodes?.length) return;
+
+    const currentIdx = activeSeasonData.episodes.findIndex(ep => ep.episode_number === currentEpisodeNum);
+    if (currentIdx >= 0 && currentIdx < activeSeasonData.episodes.length - 1) {
+      const nextEp = activeSeasonData.episodes[currentIdx + 1];
+      setSelectedSeason(currentSeasonNum);
+      setSelectedEpisode(nextEp);
+      handlePlay(nextEp, currentSeasonNum);
+      return;
+    }
+
+    const nextSeasonNum = currentSeasonNum + 1;
+    const hasNextSeason = seasons.some(s => s.season_number === nextSeasonNum);
+    if (!hasNextSeason) {
+      setStreamUrl(null);
+      return;
+    }
+
+    setStatus("Volgende seizoen laden...");
+    setSelectedSeason(nextSeasonNum);
+    try {
+      const r = await fetch(`/api/search/tv/${media.id}/season/${nextSeasonNum}`);
+      const d = await r.json();
+      if (d.episodes && d.episodes.length > 0) {
+        const nextEp = d.episodes[0];
+        setSeasonData(d);
+        setSelectedEpisode(nextEp);
+        handlePlay(nextEp, nextSeasonNum);
+      } else {
+        setStreamUrl(null);
+      }
+    } catch (e) {
+      setStreamUrl(null);
     }
   };
 
@@ -357,9 +378,15 @@ export default function Watch() {
     await handleNext();
   };
 
-  const hasNext = !isMovie && seasonData && selectedEpisode && (
-    seasonData.episodes.findIndex(ep => ep.id === selectedEpisode.id) < seasonData.episodes.length - 1 ||
-    seasons.some(s => s.season_number === selectedSeason + 1)
+  const currentSeasonNum = progressItem?.season_number ?? selectedSeason;
+  const currentEpisodeNum = progressItem?.episode_number ?? selectedEpisode?.episode_number;
+  const maxSeasonNum = seasons.reduce((m, s) => Math.max(m, s.season_number), 0);
+  const idxInSeason = (!isMovie && currentEpisodeNum && seasonData?.episodes?.length && selectedSeason === currentSeasonNum)
+    ? seasonData.episodes.findIndex(ep => ep.episode_number === currentEpisodeNum)
+    : -1;
+  const hasNext = !isMovie && !!currentSeasonNum && !!currentEpisodeNum && (
+    currentSeasonNum < maxSeasonNum ||
+    (idxInSeason >= 0 && idxInSeason < (seasonData?.episodes?.length || 0) - 1)
   );
 
   return (
