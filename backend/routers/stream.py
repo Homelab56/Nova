@@ -212,12 +212,11 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         "error",
         "-nostdin",
     ]
-    transcode_any = not (copy_video and copy_audio)
-    
-    # ALTIJD -ss voor -i (sneller zoeken), en met fast seek parameter
+
+    # ALTIJD -ss voor -i (sneller zoeken)
     if start and start > 0:
         cmd += ["-ss", f"{start:.3f}"]
-        
+
     cmd += [
         "-i",
         input_value,
@@ -230,46 +229,53 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         "+genpts",
         "-avoid_negative_ts",
         "make_zero",
-        "-c:v",
-        "copy" if copy_video else "libx264",
-        "-tune",
-        "zerolatency",
-        "-g",
-        "48",
-        "-keyint_min",
-        "48",
-        "-sc_threshold",
-        "0",
-        "-preset",
-        "ultrafast",
-        "-threads",
-        "0",
-        "-crf",
-        "23",
-        "-pix_fmt",
-        "yuv420p",
-        "-c:a",
-        "copy" if copy_audio else "aac",
-        "-b:a",
-        "192k",
-        "-ac",
-        "2",
-        "-af",
-        "aresample=async=1:first_pts=0",
+    ]
+
+    if copy_video:
+        cmd += ["-c:v", "copy"]
+    else:
+        cmd += [
+            "-c:v",
+            "libx264",
+            "-tune",
+            "zerolatency",
+            "-g",
+            "48",
+            "-keyint_min",
+            "48",
+            "-sc_threshold",
+            "0",
+            "-preset",
+            "ultrafast",
+            "-threads",
+            "0",
+            "-crf",
+            "23",
+            "-pix_fmt",
+            "yuv420p",
+        ]
+
+    if copy_audio:
+        cmd += ["-c:a", "copy"]
+    else:
+        cmd += [
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-ac",
+            "2",
+            "-af",
+            "aresample=async=1:first_pts=0",
+        ]
+
+    cmd += [
         "-f",
         "mp4",
         "-movflags",
         "frag_keyframe+empty_moov+default_base_moof",
         "pipe:1",
     ]
-    
-    if copy_video:
-        # Verwijder de transcode flags als we copy gebruiken
-        cmd = [x for x in cmd if x not in ["-preset", "ultrafast", "-threads", "0", "-crf", "23", "-pix_fmt", "yuv420p"]]
-        
-    if copy_audio:
-        cmd = [x for x in cmd if x not in ["-b:a", "192k", "-ac", "2"]]
-        cmd = [x for x in cmd if x not in ["-af", "aresample=async=1:first_pts=0"]]
 
     if _is_http_url(input_value):
         insert_at = cmd.index("-i")
