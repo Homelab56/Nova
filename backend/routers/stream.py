@@ -112,6 +112,134 @@ def _is_http_url(value: str) -> bool:
     v = (value or "").lower()
     return v.startswith("http://") or v.startswith("https://")
 
+async def _ffprobe_subtitle_streams(input_value: str, is_path: bool) -> list[dict]:
+    args = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "s",
+        "-show_entries",
+        "stream=index,codec_name:stream_tags=language,title",
+        "-of",
+        "json",
+        input_value,
+    ]
+    if _is_http_url(input_value):
+        args.insert(4, "5000000")
+        args.insert(4, "-rw_timeout")
+    if is_path:
+        args[-1] = input_value
+
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    out, _err = await proc.communicate()
+    if proc.returncode != 0:
+        return []
+    try:
+        data = json.loads(out.decode("utf-8", errors="ignore") or "{}")
+        streams = data.get("streams") or []
+        if not isinstance(streams, list):
+            return []
+        return [s for s in streams if isinstance(s, dict)]
+    except Exception:
+        return []
+
+async def _ffmpeg_subtitle_vtt(input_value: str, is_path: bool, stream_index: int):
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-i",
+        input_value,
+        "-map",
+        f"0:{int(stream_index)}",
+        "-c:s",
+        "webvtt",
+        "-f",
+        "webvtt",
+        "pipe:1",
+    ]
+    if _is_http_url(input_value):
+        insert_at = cmd.index("-i")
+        cmd[insert_at:insert_at] = [
+            "-rw_timeout",
+            "15000000",
+            "-reconnect",
+            "1",
+            "-reconnect_streamed",
+            "1",
+            "-reconnect_delay_max",
+            "2",
+        ]
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    stderr_buf = bytearray()
+
+    async def _drain_stderr():
+        if not proc.stderr:
+            return
+        try:
+            while True:
+                chunk = await proc.stderr.read(4096)
+                if not chunk:
+                    break
+                stderr_buf.extend(chunk)
+                if len(stderr_buf) > 128_000:
+                    del stderr_buf[:-128_000]
+        except Exception:
+            return
+
+    stderr_task = asyncio.create_task(_drain_stderr())
+    produced = 0
+    try:
+        while True:
+            chunk = await proc.stdout.read(64 * 1024)
+            if not chunk:
+                break
+            produced += len(chunk)
+            yield chunk
+    finally:
+        try:
+            if proc.returncode is None:
+                proc.kill()
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=0.5)
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(stderr_task, timeout=0.5)
+        except Exception:
+            try:
+                stderr_task.cancel()
+            except Exception:
+                pass
+
+        if produced == 0:
+            msg = (bytes(stderr_buf).decode("utf-8", errors="ignore") or "").strip()
+            if not msg:
+                msg = "Geen stderr output van ffmpeg."
+            print(
+                "FFMPEG subtitles gaf geen data terug\n"
+                f"input={input_value}\n"
+                f"stream_index={stream_index}\n"
+                f"returncode={proc.returncode}\n"
+                f"cmd={' '.join(cmd)}\n"
+                f"{msg[:1800]}"
+            )
+
 
 async def _ffprobe_streams(input_value: str, is_path: bool) -> dict:
     args = [
@@ -380,6 +508,54 @@ async def play(
     return StreamingResponse(
         _ffmpeg_stream(input_value, is_path=is_path, start=start),
         media_type="video/mp4",
+    )
+
+
+@router.get("/subtitles")
+async def subtitles(url: str | None = None, path: str | None = None):
+    if not url and not path:
+        raise HTTPException(status_code=400, detail="url of path is verplicht")
+    is_path = path is not None
+    input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
+    streams = await _ffprobe_subtitle_streams(input_value, is_path=is_path)
+    tracks = []
+    for s in streams:
+        idx = s.get("index")
+        codec = s.get("codec_name") or ""
+        tags = s.get("tags") or {}
+        if not isinstance(tags, dict):
+            tags = {}
+        lang = tags.get("language") or ""
+        title = tags.get("title") or ""
+        try:
+            idx_i = int(idx)
+        except Exception:
+            continue
+        tracks.append(
+            {
+                "stream_index": idx_i,
+                "language": str(lang),
+                "title": str(title),
+                "codec": str(codec),
+            }
+        )
+    return {"tracks": tracks}
+
+
+@router.get("/subtitle.vtt")
+async def subtitle_vtt(
+    stream_index: int,
+    url: str | None = None,
+    path: str | None = None,
+):
+    if not url and not path:
+        raise HTTPException(status_code=400, detail="url of path is verplicht")
+    is_path = path is not None
+    input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
+    return StreamingResponse(
+        _ffmpeg_subtitle_vtt(input_value, is_path=is_path, stream_index=stream_index),
+        media_type="text/vtt",
+        headers={"Cache-Control": "no-cache"},
     )
 
 

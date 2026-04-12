@@ -14,6 +14,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const videoRef = useRef(null);
   const saveTimer = useRef(null);
   const controlsTimer = useRef(null);
+  const subsAbortRef = useRef(null);
   const startOffsetRef = useRef(0);
   const baseUrlRef = useRef(null);
   const absTimeRef = useRef(0);
@@ -27,6 +28,9 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [flashIcon, setFlashIcon] = useState(null);
+  const [subtitleTracks, setSubtitleTracks] = useState([]);
+  const [subtitleSelected, setSubtitleSelected] = useState(null);
+  const [subtitleLabel, setSubtitleLabel] = useState("");
 
   const total = useMemo(() => {
     const hint = Number(durationHint) || 0;
@@ -56,9 +60,41 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     return () => {
       clearTimeout(saveTimer.current);
       clearTimeout(controlsTimer.current);
+      if (subsAbortRef.current) subsAbortRef.current.abort();
       reportProgress();
     };
   }, []);
+
+  const buildSubtitlesListUrl = () => {
+    const u = new URL(url, window.location.origin);
+    u.searchParams.delete("start");
+    if (u.pathname.endsWith("/api/stream/hls") || u.pathname.endsWith("/api/stream/play")) {
+      u.pathname = "/api/stream/subtitles";
+    } else {
+      u.pathname = "/api/stream/subtitles";
+    }
+    return u.toString();
+  };
+
+  const buildSubtitleVttUrl = (streamIndex) => {
+    const u = new URL(url, window.location.origin);
+    u.searchParams.delete("start");
+    u.pathname = "/api/stream/subtitle.vtt";
+    u.searchParams.set("stream_index", String(streamIndex));
+    return u.toString();
+  };
+
+  const chooseDefaultSubtitle = (tracks) => {
+    if (!tracks || tracks.length === 0) return null;
+    const prefer = ["nl", "nld", "dut", "vla", "nl-be", "nl_be"];
+    const norm = (s) => String(s || "").toLowerCase().trim().replace("_", "-");
+    const findByLang = (langs) => tracks.find(t => langs.includes(norm(t.language)));
+    const byLang = findByLang(prefer);
+    if (byLang) return byLang;
+    const byTitle = tracks.find(t => prefer.some(p => norm(t.title).includes(p)));
+    if (byTitle) return byTitle;
+    return tracks[0];
+  };
 
   const buildSrc = (startSeconds) => {
     const isHls = url.includes("/stream/hls") || url.includes(".m3u8");
@@ -127,6 +163,46 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     setShowControls(true);
     tryPlay();
   }, [url, startAt]);
+
+  useEffect(() => {
+    if (!url) return;
+    if (subsAbortRef.current) subsAbortRef.current.abort();
+    const ac = new AbortController();
+    subsAbortRef.current = ac;
+    setSubtitleTracks([]);
+    setSubtitleSelected(null);
+    setSubtitleLabel("");
+    fetch(buildSubtitlesListUrl(), { signal: ac.signal })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        const tracks = Array.isArray(data?.tracks) ? data.tracks : [];
+        if (ac.signal.aborted) return;
+        setSubtitleTracks(tracks);
+        const def = chooseDefaultSubtitle(tracks);
+        if (def) {
+          setSubtitleSelected(def.stream_index);
+          setSubtitleLabel(def.language || def.title || "Subtitles");
+        }
+      })
+      .catch(() => {});
+    return () => ac.abort();
+  }, [url]);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const apply = () => {
+      try {
+        const tracks = v.textTracks || [];
+        for (let i = 0; i < tracks.length; i++) tracks[i].mode = "disabled";
+        if (subtitleSelected !== null && tracks.length > 0) {
+          tracks[0].mode = "showing";
+        }
+      } catch {}
+    };
+    const t = setTimeout(apply, 500);
+    return () => clearTimeout(t);
+  }, [subtitleSelected, url]);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -209,6 +285,11 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const sliderValue = dragValue !== null ? dragValue : Math.round(progress * 1000);
   const showNextButton = onNext && total > 0 && (total - absTime) < 90;
 
+  const selectedTrackObj = subtitleSelected !== null
+    ? subtitleTracks.find(t => t.stream_index === subtitleSelected) || null
+    : null;
+  const vttSrc = selectedTrackObj ? buildSubtitleVttUrl(selectedTrackObj.stream_index) : null;
+
   const commitSeek = async () => {
     if (total <= 0 || dragValue === null) return;
     const target = (dragValue / 1000) * total;
@@ -276,6 +357,16 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         onDoubleClick={toggleFullscreen}
         onClick={toggle}
       >
+        {vttSrc && (
+          <track
+            key={vttSrc}
+            src={vttSrc}
+            kind="subtitles"
+            srcLang={(selectedTrackObj?.language || "und")}
+            label={(selectedTrackObj?.language || selectedTrackObj?.title || subtitleLabel || "Subtitles")}
+            default
+          />
+        )}
         Je browser ondersteunt geen video afspelen.
       </video>
 
@@ -307,6 +398,34 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
             disabled={total <= 0}
             className="flex-1"
           />
+
+          {subtitleTracks.length > 0 && (
+            <select
+              value={subtitleSelected === null ? "off" : String(subtitleSelected)}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "off") {
+                  setSubtitleSelected(null);
+                  setSubtitleLabel("");
+                  return;
+                }
+                const idx = Number(v);
+                if (!Number.isFinite(idx)) return;
+                const t = subtitleTracks.find(x => x.stream_index === idx) || null;
+                setSubtitleSelected(idx);
+                setSubtitleLabel(t?.language || t?.title || "Subtitles");
+              }}
+              className="bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg px-2 py-1.5 text-xs font-semibold max-w-28"
+              title="Subtitels"
+            >
+              <option value="off">CC uit</option>
+              {subtitleTracks.map((t) => (
+                <option key={t.stream_index} value={String(t.stream_index)}>
+                  {(t.language || t.title || `Track ${t.stream_index}`)}
+                </option>
+              ))}
+            </select>
+          )}
 
           <button
             onClick={toggleFullscreen}
