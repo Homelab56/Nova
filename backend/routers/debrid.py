@@ -37,13 +37,17 @@ _STOPWORDS = {
     "or", "the", "to", "van", "von", "with",
 }
 
+def _is_year_token(w: str) -> bool:
+    return bool(re.fullmatch(r"(19\d{2}|20\d{2})", w or ""))
+
 def _words(s: str) -> list[str]:
     s = _normalize_text(s)
     raw = [w for w in s.split() if len(w) >= 2]
     if not raw:
         return []
     filtered = [w for w in raw if w not in _STOPWORDS]
-    return filtered if filtered else raw
+    words = filtered if filtered else raw
+    return [w for w in words if not _is_year_token(w)]
 
 def _strip_trailing_year(q: str) -> str:
     return re.sub(r"\s\d{4}$", "", q).strip()
@@ -81,6 +85,21 @@ def _min_score(words: list[str], is_library: bool = False) -> int:
     # Library matching mag iets losser zijn (2-4), external strict (tot 5)
     return min(4 if is_library else 5, n)
 
+def _required_score(words: list[str], media_type: str | None, base_year: int | None, is_library: bool) -> int:
+    if media_type == "movie" and base_year:
+        return len(words)
+    return _min_score(words, is_library=is_library)
+
+def _infer_base_year(q: str, candidates: list[str], media_type: str | None) -> int | None:
+    y = _candidate_year(q)
+    if y:
+        return y
+    if media_type != "movie":
+        return None
+    years = [(_candidate_year(c) or 0) for c in candidates]
+    years = [yy for yy in years if yy > 0]
+    return max(years) if years else None
+
 def _filter_candidates_for_year(word_sets: list[tuple[list[str], str]], base_year: int | None) -> list[tuple[list[str], str]]:
     if not base_year:
         return word_sets
@@ -112,11 +131,39 @@ async def _tmdb_alt_titles(tmdb_id: int, media_type: str) -> list[str]:
             out.append(t.strip())
     return out
 
+async def _tmdb_year(tmdb_id: int, media_type: str) -> int | None:
+    if not tmdb_id or media_type not in {"movie", "tv"}:
+        return None
+    path = f"/{media_type}/{tmdb_id}"
+    params = {"api_key": get_tmdb_key()}
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"{TMDB_BASE}{path}", params=params, timeout=10)
+            if r.status_code != 200:
+                return None
+            data = r.json()
+    except Exception:
+        return None
+
+    date_str = data.get("release_date") if media_type == "movie" else data.get("first_air_date")
+    if not isinstance(date_str, str) or len(date_str) < 4:
+        return None
+    try:
+        return int(date_str[:4])
+    except Exception:
+        return None
+
 async def _candidate_queries(q: str, tmdb_id: int | None, media_type: str | None) -> list[str]:
     base = q.strip()
     if not base:
         return []
     candidates = [base]
+    base_year = _candidate_year(base)
+    tmdb_year = None
+    if not base_year and tmdb_id and media_type in {"movie", "tv"}:
+        tmdb_year = await _tmdb_year(tmdb_id, media_type)
+        if tmdb_year:
+            candidates.append(f"{base} {tmdb_year}")
     no_year = _strip_trailing_year(base)
     if no_year and no_year.lower() != base.lower():
         candidates.append(no_year)
@@ -126,8 +173,9 @@ async def _candidate_queries(q: str, tmdb_id: int | None, media_type: str | None
             if t.lower() == base.lower() or t.lower() == no_year.lower():
                 continue
             candidates.append(t)
-            if re.search(r"\s\d{4}$", base):
-                candidates.append(f"{t} {base.split()[-1]}")
+            y = base_year or tmdb_year
+            if y:
+                candidates.append(f"{t} {y}")
     seen = set()
     out = []
     for c in candidates:
@@ -181,8 +229,8 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
     Checkt of een titel beschikbaar is in de RD bibliotheek zonder te unrestricten.
     """
     candidates = await _candidate_queries(q, tmdb_id, media_type)
-    base_year = _candidate_year(q)
     is_movie = (media_type == "movie")
+    base_year = _infer_base_year(q, candidates, media_type)
     if is_movie and base_year:
         candidates = [c for c in candidates if _candidate_year(c) == base_year]
     word_sets = [(_words(c), c) for c in candidates]
@@ -217,7 +265,7 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
             if is_movie and base_year and (not filename_years or base_year not in filename_years):
                 continue
             score = sum(1 for word in words if word in filename)
-            min_score = _min_score(words, is_library=True)
+            min_score = _required_score(words, media_type, base_year, is_library=True)
             if score >= min_score and (score > best_score or (score == best_score and min_score < best_min)):
                 best_score = score
                 best_min = min_score
@@ -238,8 +286,8 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
     5. Controleert RD instant availability (cache) voor gevonden torrents.
     """
     candidates = await _candidate_queries(q, tmdb_id, media_type)
-    base_year = _candidate_year(q)
     is_movie = (media_type == "movie")
+    base_year = _infer_base_year(q, candidates, media_type)
     if is_movie and base_year:
         candidates = [c for c in candidates if _candidate_year(c) == base_year]
     word_sets = [(_words(c), c) for c in candidates]
@@ -273,7 +321,7 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
             best_score = 0
             best_min = 999
             best_q = q
-            base_year = _candidate_year(q)
+            base_year = _infer_base_year(q, candidates, media_type)
             primary_word_sets = _filter_candidates_for_year(word_sets, base_year)
             for torrent in torrents:
                 filename_years = _extract_years(torrent.get("filename", "") or "")
@@ -290,7 +338,7 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                     if is_movie and base_year and (not filename_years or base_year not in filename_years):
                         continue
                     score = sum(1 for word in words if word in filename)
-                    min_score = _min_score(words, is_library=True)
+                    min_score = _required_score(words, media_type, base_year, is_library=True)
                     if score >= min_score and (score > torrent_best or (score == torrent_best and min_score < torrent_min)):
                         torrent_best = score
                         torrent_min = min_score
@@ -394,7 +442,7 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
             return await search_and_stream(q_no_year, tmdb_id=tmdb_id, media_type=media_type)
         return {"stream_url": None, "message": f"Geen streams gevonden voor '{q}' op het internet."}
 
-    base_year = _candidate_year(q)
+    base_year = _infer_base_year(q, candidates, media_type)
     primary_word_sets = _filter_candidates_for_year(word_sets, base_year)
     filtered_external = []
     for t in external_torrents:
@@ -410,7 +458,7 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
             if is_movie and base_year and (not title_years or base_year not in title_years):
                 continue
             score = sum(1 for word in words if word in title_norm)
-            min_score = _min_score(words)
+            min_score = _required_score(words, media_type, base_year, is_library=False)
             if score >= min_score and (score > best or (score == best and min_score < best_min)):
                 best = score
                 best_min = min_score
