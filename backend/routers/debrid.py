@@ -72,13 +72,14 @@ def _candidate_year(q: str) -> int | None:
             return None
     return max(years)
 
-def _min_score(words: list[str]) -> int:
+def _min_score(words: list[str], is_library: bool = False) -> int:
     n = len(words)
     if n <= 0:
         return 0
     if n == 1:
         return 1
-    return min(4, n)
+    # Library matching mag iets losser zijn (2-4), external strict (tot 5)
+    return min(4 if is_library else 5, n)
 
 def _filter_candidates_for_year(word_sets: list[tuple[list[str], str]], base_year: int | None) -> list[tuple[list[str], str]]:
     if not base_year:
@@ -211,7 +212,7 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
             if base_year and not cy and filename_years and base_year not in filename_years:
                 continue
             score = sum(1 for word in words if word in filename)
-            min_score = _min_score(words)
+            min_score = _min_score(words, is_library=True)
             if score >= min_score and (score > best_score or (score == best_score and min_score < best_min)):
                 best_score = score
                 best_min = min_score
@@ -278,7 +279,7 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                     if base_year and not cy and filename_years and base_year not in filename_years:
                         continue
                     score = sum(1 for word in words if word in filename)
-                    min_score = _min_score(words)
+                    min_score = _min_score(words, is_library=True)
                     if score >= min_score and (score > torrent_best or (score == torrent_best and min_score < torrent_min)):
                         torrent_best = score
                         torrent_min = min_score
