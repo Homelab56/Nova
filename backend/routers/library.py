@@ -22,14 +22,6 @@ def _normalize_text(s: str) -> str:
     if not s:
         return ""
     s = s.lower()
-    s = (
-        s.replace("0", "o")
-        .replace("1", "i")
-        .replace("3", "e")
-        .replace("4", "a")
-        .replace("5", "s")
-        .replace("7", "t")
-    )
     s = re.sub(r"[^a-z0-9]+", " ", s)
     return re.sub(r"\s+", " ", s).strip()
 
@@ -92,7 +84,25 @@ async def scan_library(path: str = ""):
 async def find_file(q: str):
     """Zoekt een specifiek bestand op de mount gebaseerd op een query (bijv. 'The Boys S01E01')."""
     q_clean = _normalize_text(q)
+    raw = (q or "").lower()
+    ep = None
+    m = re.search(r"\bs(\d{1,2})e(\d{1,2})\b", raw)
+    if m:
+        ss, ee = m.groups()
+        ep = (int(ss), int(ee))
+    else:
+        m = re.search(r"\b(\d{1,2})x(\d{1,2})\b", raw)
+        if m:
+            ss, ee = m.groups()
+            ep = (int(ss), int(ee))
+
+    ep_tokens = set()
+    if ep:
+        ss, ee = ep
+        ep_tokens = {f"s{ss:02d}e{ee:02d}", f"{ss}x{ee:02d}", f"{ss:02d}x{ee:02d}"}
+
     words = [w for w in q_clean.split() if len(w) >= 2]
+    words = [w for w in words if not re.fullmatch(r"s\d{2}e\d{2}", w) and not re.fullmatch(r"\d{1,2}x\d{2}", w)]
     
     if not words:
         return {"found": False}
@@ -118,11 +128,12 @@ async def find_file(q: str):
                 continue
 
             file_lower = _normalize_text(file)
+            if ep_tokens and not any(t in file_lower for t in ep_tokens):
+                continue
             score = sum(1 for word in words if word in file_lower)
             
             # Bonus voor exacte match op SxxExx
-            episode_match = re.search(r"s(\d+)e(\d+)", q_clean)
-            if episode_match and episode_match.group(0) in file_lower:
+            if ep_tokens and any(t in file_lower for t in ep_tokens):
                 score += 5
 
             if score > best_score and score >= len(words):

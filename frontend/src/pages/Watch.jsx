@@ -158,10 +158,10 @@ export default function Watch() {
   }, [media?.id]);
 
   useEffect(() => {
-    if (!isMovie || !media?.id) return;
+    if (!media?.id) return;
     if (streamUrl) return;
-    const reqKey = `${type}:${media.id}`;
-    if (!isLocked(reqKey)) return;
+    const lockKey = `${type}:${media.id}`;
+    if (!isLocked(lockKey)) return;
     setRequestStatus("waiting");
     setRequestMessage("Download loopt al. Wachten tot hij beschikbaar is...");
     handlePlay();
@@ -246,8 +246,9 @@ export default function Watch() {
       }
     }
 
-    const reqKey = episodeInfo ? `${type}:${media.id}:S${targetSeason}` : `${type}:${media.id}`;
-    const hasLock = isLocked(reqKey);
+    const reqKey = episodeInfo ? `${type}:${media.id}:S${targetSeason}E${episodeInfo.episode_number}` : `${type}:${media.id}`;
+    const lockKey = `${type}:${media.id}`;
+    const hasLock = isLocked(lockKey);
     if (requestKeyRef.current !== reqKey) {
       if (!hasLock) {
         setRequestStatus(null);
@@ -270,7 +271,7 @@ export default function Watch() {
       if (!data.stream_url) {
         setStatus("Niet meteen beschikbaar. Ik vraag dit automatisch aan en wacht tot het klaar is...");
         const alreadyRequesting = (requestStatus === "loading" || requestStatus === "waiting") && requestKeyRef.current === reqKey;
-        const requested = alreadyRequesting ? true : await handleRequest(reqKey, targetSeason);
+        const requested = alreadyRequesting ? true : await handleRequest(reqKey, lockKey);
         if (!requested) {
           setStatus(data.message || "Geen stream gevonden.");
           setLoading(false);
@@ -320,7 +321,9 @@ export default function Watch() {
                 : finalUrl;
               
               if (requestKeyRef.current === reqKey) {
-                clearLock(reqKey);
+                clearLock(lockKey);
+                setRequestStatus(null);
+                setRequestMessage("");
                 setStartAt(doResume ? resumeTime : 0);
                 setDurationHint(resumeDuration || 0);
                 setStreamUrl(urlWithStart);
@@ -391,7 +394,9 @@ export default function Watch() {
       const urlWithStart = doResume
         ? `${finalUrl}${finalUrl.includes("?") ? "&" : "?"}start=${encodeURIComponent(resumeTime)}`
         : finalUrl;
-      clearLock(reqKey);
+      clearLock(lockKey);
+      setRequestStatus(null);
+      setRequestMessage("");
       setStartAt(doResume ? resumeTime : 0);
       setDurationHint(resumeDuration || 0);
       setStreamUrl(urlWithStart);
@@ -404,8 +409,8 @@ export default function Watch() {
     setLoading(false);
   }
 
-  async function handleRequest(reqKey, seasonNumber = null) {
-    if (isLocked(reqKey)) {
+  async function handleRequest(reqKey, lockKey) {
+    if (isLocked(lockKey)) {
       setRequestStatus("waiting");
       setRequestMessage("Download loopt al. Wachten tot hij beschikbaar is...");
       requestKeyRef.current = reqKey || null;
@@ -418,8 +423,11 @@ export default function Watch() {
       const payload = {
         media_id: media.id,
         media_type: type,
-        seasons: !isMovie ? [Number(seasonNumber ?? selectedSeason)] : []
+        seasons: !isMovie ? ((seasons || []).map(s => s.season_number).filter(Boolean)) : []
       };
+      if (!isMovie && (!payload.seasons || payload.seasons.length === 0)) {
+        payload.seasons = [Number(selectedSeason)];
+      }
       const r = await fetch("/api/seerr/request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -427,18 +435,18 @@ export default function Watch() {
       });
       const data = await r.json();
       if (data.ok) {
-        setLock(reqKey);
+        setLock(lockKey);
         setRequestStatus("waiting");
         setRequestMessage(data.message || "Aangevraagd. Download start binnenkort...");
         return true;
       } else {
-        clearLock(reqKey);
+        clearLock(lockKey);
         setRequestStatus("error");
         setRequestMessage(data.message || "Fout bij indienen verzoek.");
         return false;
       }
     } catch (e) {
-      clearLock(reqKey);
+      clearLock(lockKey);
       setRequestStatus("error");
       setRequestMessage("Kon geen verbinding maken met Seerr.");
       return false;

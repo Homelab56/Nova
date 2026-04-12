@@ -22,14 +22,6 @@ def _normalize_text(s: str) -> str:
     if not s:
         return ""
     s = s.lower()
-    s = (
-        s.replace("0", "o")
-        .replace("1", "i")
-        .replace("3", "e")
-        .replace("4", "a")
-        .replace("5", "s")
-        .replace("7", "t")
-    )
     s = re.sub(r"[^a-z0-9]+", " ", s)
     return re.sub(r"\s+", " ", s).strip()
 
@@ -116,6 +108,18 @@ def _is_video_path(path: str) -> bool:
     p = (path or "").lower()
     return any(p.endswith(ext) for ext in _VIDEO_EXTS)
 
+def _episode_token(raw: str) -> str | None:
+    s = (raw or "").lower()
+    m = re.search(r"\bs(\d{1,2})e(\d{1,2})\b", s)
+    if m:
+        ss, ee = m.groups()
+        return f"s{int(ss):02d}e{int(ee):02d}"
+    m = re.search(r"\b(\d{1,2})x(\d{1,2})\b", s)
+    if m:
+        ss, ee = m.groups()
+        return f"s{int(ss):02d}e{int(ee):02d}"
+    return None
+
 def _select_best_link_index(info: dict, q: str, media_type: str | None, base_year: int | None) -> int | None:
     files = info.get("files") or []
     links = info.get("links") or []
@@ -132,18 +136,29 @@ def _select_best_link_index(info: dict, q: str, media_type: str | None, base_yea
     if not selected:
         selected = files[: len(links)]
 
-    episode_match = re.search(r"s(\d+)e(\d+)", _normalize_text(q or ""))
-    episode_token = None
-    if episode_match:
-        s, e = episode_match.groups()
-        episode_token = f"s{s}e{e}"
+    episode_token = _episode_token(q or "")
 
     words = _words(q or "")
+    words_for_score = [w for w in words if not re.fullmatch(r"s\d{2}e\d{2}", w or "")]
     min_words = len(words)
     if media_type == "movie":
         min_words = 1 if len(words) <= 1 else 2
     elif media_type == "tv":
         min_words = 1 if len(words) <= 1 else 2
+    min_words = min(min_words, len(words_for_score)) if words_for_score else min_words
+
+    ep_variants = None
+    if episode_token:
+        mm = re.fullmatch(r"s(\d{2})e(\d{2})", episode_token)
+        if mm:
+            ss, ee = mm.groups()
+            ssi = int(ss)
+            eei = int(ee)
+            ep_variants = {
+                episode_token,
+                f"{ssi}x{eei:02d}",
+                f"{ssi:02d}x{eei:02d}",
+            }
 
     best_idx = None
     best_score = -10_000
@@ -172,12 +187,11 @@ def _select_best_link_index(info: dict, q: str, media_type: str | None, base_yea
         if media_type == "movie" and base_year and years and base_year not in years:
             continue
 
-        score = sum(1 for w in words if w in norm)
-        if episode_token:
-            if episode_token in norm:
-                score += 10
-            else:
-                score -= 5
+        score = sum(1 for w in words_for_score if w in norm)
+        if ep_variants:
+            if not any(t in norm for t in ep_variants):
+                continue
+            score += 10
 
         if score < min_words:
             continue
@@ -447,7 +461,7 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                 if info_r.status_code == 200:
                     info = info_r.json()
                     links = info.get("links", [])
-                    link_idx = _select_best_link_index(info, best_q, media_type, base_year)
+                    link_idx = _select_best_link_index(info, q, media_type, base_year)
                     if links and link_idx is not None and link_idx < len(links):
                         ur = await client.post(f"{RD_BASE}/unrestrict/link", headers=rd_headers(), data={"link": links[link_idx]})
                         if ur.status_code == 200:
