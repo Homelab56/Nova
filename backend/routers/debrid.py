@@ -62,6 +62,22 @@ def _candidate_year(q: str) -> int | None:
             return None
     return max(years)
 
+def _min_score(words: list[str]) -> int:
+    n = len(words)
+    if n <= 0:
+        return 0
+    return min(4, max(2, n))
+
+def _filter_candidates_for_year(word_sets: list[tuple[list[str], str]], base_year: int | None) -> list[tuple[list[str], str]]:
+    if not base_year:
+        return word_sets
+    out = []
+    for words, candidate_q in word_sets:
+        cy = _candidate_year(candidate_q)
+        if cy == base_year:
+            out.append((words, candidate_q))
+    return out or word_sets
+
 async def _tmdb_alt_titles(tmdb_id: int, media_type: str) -> list[str]:
     if not tmdb_id or media_type not in {"movie", "tv"}:
         return []
@@ -156,6 +172,8 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
     word_sets = [(w, c) for (w, c) in word_sets if w]
     if not word_sets:
         return {"available": False}
+    base_year = _candidate_year(q)
+    word_sets = _filter_candidates_for_year(word_sets, base_year)
 
     async with httpx.AsyncClient() as client:
         r = await client.get(
@@ -172,7 +190,6 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
         filename_raw = torrent.get("filename", "") or ""
         filename = _normalize_text(filename_raw)
         filename_years = _extract_years(filename_raw)
-        base_year = _candidate_year(q)
         best_score = 0
         best_min = 999
         for words, candidate_q in word_sets:
@@ -182,7 +199,7 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
             if base_year and not cy and filename_years and base_year not in filename_years:
                 continue
             score = sum(1 for word in words if word in filename)
-            min_score = min(2, len(words))
+            min_score = _min_score(words)
             if score >= min_score and (score > best_score or (score == best_score and min_score < best_min)):
                 best_score = score
                 best_min = min_score
@@ -232,29 +249,32 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
             torrents = r.json()
             best_match = None
             best_score = 0
+            best_min = 999
             best_q = q
             base_year = _candidate_year(q)
+            primary_word_sets = _filter_candidates_for_year(word_sets, base_year)
             for torrent in torrents:
                 filename_years = _extract_years(torrent.get("filename", "") or "")
                 filename = _normalize_text(torrent.get("filename", "") or "")
                 torrent_best = 0
                 torrent_min = 999
                 torrent_q = q
-                for words, candidate_q in word_sets:
+                for words, candidate_q in primary_word_sets:
                     cy = _candidate_year(candidate_q)
                     if cy and filename_years and cy not in filename_years:
                         continue
                     if base_year and not cy and filename_years and base_year not in filename_years:
                         continue
                     score = sum(1 for word in words if word in filename)
-                    min_score = min(2, len(words))
+                    min_score = _min_score(words)
                     if score >= min_score and (score > torrent_best or (score == torrent_best and min_score < torrent_min)):
                         torrent_best = score
                         torrent_min = min_score
                         torrent_q = candidate_q
-                if torrent_best >= best_score:
-                    if torrent.get("status") == "downloaded" and torrent.get("links"):
+                if torrent_best > 0 and torrent.get("status") == "downloaded" and torrent.get("links"):
+                    if torrent_best > best_score or (torrent_best == best_score and torrent_min < best_min):
                         best_score = torrent_best
+                        best_min = torrent_min
                         best_match = torrent
                         best_q = torrent_q
 
