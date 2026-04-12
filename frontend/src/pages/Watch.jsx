@@ -9,6 +9,9 @@ const TMDB_PROFILE = "https://image.tmdb.org/t/p/w185";
 const TMDB_BACKDROP = "https://image.tmdb.org/t/p/original";
 const TMDB_STILL = "https://image.tmdb.org/t/p/w300";
 
+const SEERR_LOCKS_KEY = "nova_seerr_request_locks";
+const SEERR_LOCK_TTL_MS = 24 * 60 * 60 * 1000;
+
 export default function Watch() {
   const { state } = useLocation();
   const navigate = useNavigate();
@@ -47,6 +50,54 @@ export default function Watch() {
   const year = (media?.release_date || media?.first_air_date || "").slice(0, 4);
   const rating = media?.vote_average?.toFixed(1);
   const backdrop = media?.backdrop_path ? `${TMDB_BACKDROP}${media.backdrop_path}` : null;
+
+  const readLocks = () => {
+    try {
+      const raw = localStorage.getItem(SEERR_LOCKS_KEY);
+      const data = raw ? JSON.parse(raw) : {};
+      return data && typeof data === "object" ? data : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const writeLocks = (locks) => {
+    try {
+      localStorage.setItem(SEERR_LOCKS_KEY, JSON.stringify(locks || {}));
+    } catch {}
+  };
+
+  const isLocked = (reqKey) => {
+    if (!reqKey) return false;
+    const locks = readLocks();
+    const it = locks?.[reqKey];
+    const ts = Number(it?.ts) || 0;
+    if (!ts) return false;
+    if ((Date.now() - ts) > SEERR_LOCK_TTL_MS) {
+      try {
+        delete locks[reqKey];
+        writeLocks(locks);
+      } catch {}
+      return false;
+    }
+    return true;
+  };
+
+  const setLock = (reqKey) => {
+    if (!reqKey) return;
+    const locks = readLocks();
+    locks[reqKey] = { ts: Date.now() };
+    writeLocks(locks);
+  };
+
+  const clearLock = (reqKey) => {
+    if (!reqKey) return;
+    const locks = readLocks();
+    if (locks && typeof locks === "object" && locks[reqKey]) {
+      delete locks[reqKey];
+      writeLocks(locks);
+    }
+  };
 
   useEffect(() => {
     if (!media) return;
@@ -106,6 +157,16 @@ export default function Watch() {
     }
   }, [media?.id]);
 
+  useEffect(() => {
+    if (!isMovie || !media?.id) return;
+    if (streamUrl) return;
+    const reqKey = `${type}:${media.id}`;
+    if (!isLocked(reqKey)) return;
+    setRequestStatus("waiting");
+    setRequestMessage("Download loopt al. Wachten tot hij beschikbaar is...");
+    handlePlay();
+  }, [media?.id]);
+
   // Laad seizoendata als serie
   useEffect(() => {
     if (isMovie || !media) return;
@@ -161,9 +222,12 @@ export default function Watch() {
     const targetSeason = overrideSeason !== null ? overrideSeason : selectedSeason;
 
     const reqKey = episodeInfo ? `${type}:${media.id}:S${targetSeason}` : `${type}:${media.id}`;
+    const hasLock = isMovie && !episodeInfo && isLocked(reqKey);
     if (requestKeyRef.current !== reqKey) {
-      setRequestStatus(null);
-      setRequestMessage("");
+      if (!hasLock) {
+        setRequestStatus(null);
+        setRequestMessage("");
+      }
     }
     requestKeyRef.current = reqKey;
     setLoading(true);
@@ -231,6 +295,7 @@ export default function Watch() {
                 : finalUrl;
               
               if (requestKeyRef.current === reqKey) {
+                if (isMovie && !episodeInfo) clearLock(reqKey);
                 setStartAt(doResume ? resumeTime : 0);
                 setDurationHint(resumeDuration || 0);
                 setStreamUrl(urlWithStart);
@@ -301,6 +366,7 @@ export default function Watch() {
       const urlWithStart = doResume
         ? `${finalUrl}${finalUrl.includes("?") ? "&" : "?"}start=${encodeURIComponent(resumeTime)}`
         : finalUrl;
+      if (isMovie && !episodeInfo) clearLock(reqKey);
       setStartAt(doResume ? resumeTime : 0);
       setDurationHint(resumeDuration || 0);
       setStreamUrl(urlWithStart);
@@ -314,6 +380,12 @@ export default function Watch() {
   }
 
   async function handleRequest(reqKey) {
+    if (isMovie && isLocked(reqKey)) {
+      setRequestStatus("waiting");
+      setRequestMessage("Download loopt al. Wachten tot hij beschikbaar is...");
+      requestKeyRef.current = reqKey || null;
+      return true;
+    }
     setRequestStatus("loading");
     setRequestMessage("Aanvragen via Seerr...");
     requestKeyRef.current = reqKey || null;
@@ -330,15 +402,18 @@ export default function Watch() {
       });
       const data = await r.json();
       if (data.ok) {
+        if (isMovie) setLock(reqKey);
         setRequestStatus("waiting");
         setRequestMessage(data.message || "Aangevraagd. Download start binnenkort...");
         return true;
       } else {
+        if (isMovie) clearLock(reqKey);
         setRequestStatus("error");
         setRequestMessage(data.message || "Fout bij indienen verzoek.");
         return false;
       }
     } catch (e) {
+      if (isMovie) clearLock(reqKey);
       setRequestStatus("error");
       setRequestMessage("Kon geen verbinding maken met Seerr.");
       return false;
@@ -418,6 +493,8 @@ export default function Watch() {
     currentSeasonNum < maxSeasonNum ||
     (idxInSeason >= 0 && idxInSeason < (seasonData?.episodes?.length || 0) - 1)
   );
+  const movieBusy = isMovie && (requestStatus === "loading" || requestStatus === "waiting");
+  const playBusy = loading || movieBusy;
 
   return (
     <div className="min-h-screen bg-nova-bg">
@@ -566,11 +643,11 @@ export default function Watch() {
                           }
                         }
                       }}
-                      disabled={loading}
+                      disabled={playBusy}
                       className={`flex items-center gap-3 font-bold px-8 py-3 rounded-xl transition-all disabled:opacity-60 ${isAvailable || !isMovie ? "bg-nova-accent text-white shadow-lg shadow-nova-accent/20" : "bg-white text-black hover:bg-gray-200"}`}
                     >
-                      {loading ? <span className="animate-spin">⟳</span> : "▶"}
-                      {loading ? "Laden..." : (isMovie ? (savedProgress ? "Hervatten" : "Afspelen") : `Hervatten S${getLatestEpisode()?.season_number}E${getLatestEpisode()?.episode_number}`)}
+                      {playBusy ? <span className="animate-spin">⟳</span> : "▶"}
+                      {playBusy ? "Laden..." : (isMovie ? (savedProgress ? "Hervatten" : "Afspelen") : `Hervatten S${getLatestEpisode()?.season_number}E${getLatestEpisode()?.episode_number}`)}
                     </button>
                   )}
                   <button
