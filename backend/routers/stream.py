@@ -292,17 +292,65 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         stderr=asyncio.subprocess.PIPE,
     )
 
+    stderr_buf = bytearray()
+
+    async def _drain_stderr():
+        if not proc.stderr:
+            return
+        try:
+            while True:
+                chunk = await proc.stderr.read(4096)
+                if not chunk:
+                    break
+                stderr_buf.extend(chunk)
+                if len(stderr_buf) > 256_000:
+                    del stderr_buf[:-256_000]
+        except Exception:
+            return
+
+    stderr_task = asyncio.create_task(_drain_stderr())
+    produced = 0
     try:
         while True:
             chunk = await proc.stdout.read(1024 * 1024)
             if not chunk:
                 break
+            produced += len(chunk)
             yield chunk
     except asyncio.CancelledError:
         pass
     finally:
         try:
-            proc.kill()
+            if proc.returncode is None:
+                proc.kill()
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=0.5)
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(stderr_task, timeout=0.5)
+        except Exception:
+            try:
+                stderr_task.cancel()
+            except Exception:
+                pass
+
+        if produced == 0:
+            msg = (bytes(stderr_buf).decode("utf-8", errors="ignore") or "").strip()
+            if not msg:
+                msg = "Geen stderr output van ffmpeg."
+            print(
+                "FFMPEG stream gaf geen data terug\n"
+                f"input={input_value}\n"
+                f"returncode={proc.returncode}\n"
+                f"cmd={' '.join(cmd)}\n"
+                f"{msg[:1800]}"
+            )
+        try:
+            if proc.returncode is None:
+                proc.kill()
         except OSError:
             pass
 
