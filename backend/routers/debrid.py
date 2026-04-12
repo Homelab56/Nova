@@ -186,6 +186,7 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
     if not word_sets:
         return {"available": False}
     base_year = _candidate_year(q)
+    is_movie = (media_type == "movie")
     word_sets = _filter_candidates_for_year(word_sets, base_year)
 
     async with httpx.AsyncClient() as client:
@@ -210,6 +211,8 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
             if cy and filename_years and cy not in filename_years:
                 continue
             if base_year and not cy and filename_years and base_year not in filename_years:
+                continue
+            if is_movie and base_year and (not filename_years or base_year not in filename_years):
                 continue
             score = sum(1 for word in words if word in filename)
             min_score = _min_score(words, is_library=True)
@@ -237,6 +240,7 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
     word_sets = [(w, c) for (w, c) in word_sets if w]
     if not word_sets:
         return {"stream_url": None, "message": "Ongeldige zoekopdracht."}
+    is_movie = (media_type == "movie")
 
     # --- STAP 0: Zoek op lokale Dumbarr mount ---
     from .library import find_file
@@ -277,6 +281,8 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                     if cy and filename_years and cy not in filename_years:
                         continue
                     if base_year and not cy and filename_years and base_year not in filename_years:
+                        continue
+                    if is_movie and base_year and (not filename_years or base_year not in filename_years):
                         continue
                     score = sum(1 for word in words if word in filename)
                     min_score = _min_score(words, is_library=True)
@@ -395,6 +401,8 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
         for words, candidate_q in primary_word_sets:
             cy = _candidate_year(candidate_q)
             if cy and title_years and cy not in title_years:
+                continue
+            if is_movie and base_year and (not title_years or base_year not in title_years):
                 continue
             score = sum(1 for word in words if word in title_norm)
             min_score = _min_score(words)

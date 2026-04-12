@@ -83,12 +83,14 @@ export function UserDataProvider({ children }) {
     }
 
     const showId = item.show_id ?? item.id;
+    const showIdStr = String(showId);
     const ids = progress
       .filter(p => {
         const pid = String(p.id);
-        if (p.show_id === showId) return true;
-        if (p.id === showId) return true;
+        if (p.show_id != null && String(p.show_id) === showIdStr) return true;
+        if (String(p.id) === showIdStr) return true;
         if (pid.startsWith(`tv:${showId}:`)) return true;
+        if (pid.startsWith(`tv:${showIdStr}:`)) return true;
         return false;
       })
       .map(p => String(p.id));
