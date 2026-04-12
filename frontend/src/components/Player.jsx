@@ -16,6 +16,9 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const controlsTimer = useRef(null);
   const startOffsetRef = useRef(0);
   const baseUrlRef = useRef(null);
+  const absTimeRef = useRef(0);
+  const totalRef = useRef(0);
+  const lastReportRef = useRef({ t: 0, d: 0, ts: 0 });
   const [error, setError] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [buffering, setBuffering] = useState(false);
@@ -31,9 +34,29 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   }, [durationHint]);
 
   useEffect(() => {
+    totalRef.current = total;
+  }, [total]);
+
+  const reportProgress = (tOverride = null) => {
+    if (!media || !onProgress) return;
+    const d = totalRef.current;
+    if (!Number.isFinite(d) || d <= 0) return;
+    const t = Number.isFinite(tOverride) ? tOverride : absTimeRef.current;
+    if (!Number.isFinite(t) || t < 0) return;
+
+    const now = Date.now();
+    const last = lastReportRef.current;
+    if (Math.abs((last.t || 0) - t) < 0.5 && (now - (last.ts || 0)) < 2000) return;
+
+    lastReportRef.current = { t, d, ts: now };
+    onProgress(t, d);
+  };
+
+  useEffect(() => {
     return () => {
       clearTimeout(saveTimer.current);
       clearTimeout(controlsTimer.current);
+      reportProgress();
     };
   }, []);
 
@@ -67,12 +90,14 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     if (!v) return;
     const t = Math.max(0, Number(seconds) || 0);
     startOffsetRef.current = t;
+    absTimeRef.current = t;
     const src = buildSrc(t);
     baseUrlRef.current = src;
     v.src = src;
     v.load();
     setError(null);
     setAbsTime(t);
+    reportProgress(t);
     await tryPlay();
   };
 
@@ -97,6 +122,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     v.src = src;
     v.load();
     setAbsTime(startOffsetRef.current);
+    absTimeRef.current = startOffsetRef.current;
     setBuffering(true);
     setShowControls(true);
     tryPlay();
@@ -114,22 +140,27 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       setPlaying(false);
       setBuffering(false);
       setShowControls(true);
+      reportProgress();
     };
     const onTime = () => {
       const t = startOffsetRef.current + (v.currentTime || 0);
       setAbsTime(t);
+      absTimeRef.current = t;
       if (!media || !onProgress) return;
       if (total <= 0) return;
       clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
-        onProgress(t, total);
+        reportProgress(t);
       }, 5000);
     };
     const onWaiting = () => setBuffering(true);
     const onPlaying = () => setBuffering(false);
     const onStalled = () => setBuffering(true);
     const onSeeking = () => setBuffering(true);
-    const onSeeked = () => setBuffering(false);
+    const onSeeked = () => {
+      setBuffering(false);
+      reportProgress();
+    };
     const onCanPlay = () => setBuffering(false);
     const onErr = () => {
       const code = v?.error?.code;
@@ -158,6 +189,14 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       v.removeEventListener("error", onErr);
     };
   }, [media, onProgress, total]);
+
+  useEffect(() => {
+    const onVis = () => {
+      if (document.hidden) reportProgress();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
 
   const progress = total > 0 ? Math.min(1, Math.max(0, absTime / total)) : 0;
   const sliderValue = dragValue !== null ? dragValue : Math.round(progress * 1000);
