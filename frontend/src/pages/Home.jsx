@@ -84,7 +84,27 @@ export default function Home() {
   const sessionSeed = useRef(Math.floor(Math.random() * 1e9));
 
   const { watchlist, progress, progressMap } = useUserData();
-  const inProgress = progress.filter(p => p.duration > 0 && p.media_type !== "tv_episode" && (p.current_time / p.duration) < 0.95);
+  const inProgressRaw = progress.filter(p => p.duration > 0 && (p.current_time / p.duration) < 0.95);
+  const inProgressMap = new Map();
+  // Reverse to ensure newer overwrites older (if multiple episodes of same show are present)
+  [...inProgressRaw].reverse().forEach(p => {
+    if (p.media_type === "tv_episode") {
+      if (p.show_id && !inProgressMap.has(p.show_id)) {
+        inProgressMap.set(p.show_id, {
+          ...p,
+          id: p.show_id,
+          media_type: "tv",
+          name: p.title.split(" S")[0],
+          title: undefined
+        });
+      }
+    } else {
+      if (!inProgressMap.has(p.id)) {
+        inProgressMap.set(p.id, p);
+      }
+    }
+  });
+  const inProgress = Array.from(inProgressMap.values()).reverse();
 
   // Laad vaste rijen
   useEffect(() => {

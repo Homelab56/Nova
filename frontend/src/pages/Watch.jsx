@@ -14,8 +14,8 @@ export default function Watch() {
   const navigate = useNavigate();
   const media = state?.media;
 
-  const isMovie = media?.media_type === "movie" || !!media?.title;
-  const type = isMovie ? "movie" : "tv";
+  const type = media?.media_type || (media?.name ? "tv" : "movie");
+  const isMovie = type === "movie";
 
   const [streamUrl, setStreamUrl] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -116,19 +116,38 @@ export default function Watch() {
   const episodeKey = (seasonNumber, episodeNumber) => `tv:${media.id}:S${seasonNumber}E${episodeNumber}`;
   const getEpisodeProgress = (seasonNumber, episodeNumber) => progressMap?.[episodeKey(seasonNumber, episodeNumber)] || null;
 
-  async function handlePlay(episodeInfo = null) {
+  const getLatestEpisode = () => {
+    if (isMovie) return null;
+    const eps = progress.filter(p => p.show_id === media.id && p.media_type === "tv_episode");
+    if (eps.length === 0) return null;
+    const latest = eps[eps.length - 1]; // Assume last is the most recent
+    if ((latest.current_time / latest.duration) >= 0.95) {
+      // Return next episode theoretically, but we don't know it here without seasonData.
+      // So let's just return it or nothing.
+      return null;
+    }
+    return {
+      season_number: latest.season_number,
+      episode_number: latest.episode_number,
+      episode: { id: latest.id, episode_number: latest.episode_number } // Minimal object needed for handlePlay
+    };
+  };
+
+  async function handlePlay(episodeInfo = null, overrideSeason = null) {
     if (pollRef.current) clearInterval(pollRef.current);
     if (searchAbortRef.current) searchAbortRef.current.abort();
     searchAbortRef.current = new AbortController();
 
-    const reqKey = episodeInfo ? `${type}:${media.id}:S${selectedSeason}` : `${type}:${media.id}`;
+    const targetSeason = overrideSeason !== null ? overrideSeason : selectedSeason;
+
+    const reqKey = episodeInfo ? `${type}:${media.id}:S${targetSeason}` : `${type}:${media.id}`;
     if (requestKeyRef.current !== reqKey) {
       setRequestStatus(null);
       setRequestMessage("");
     }
     setLoading(true);
     const searchTitle = episodeInfo
-      ? `${title} S${String(selectedSeason).padStart(2,"0")}E${String(episodeInfo.episode_number).padStart(2,"0")}`
+      ? `${title} S${String(targetSeason).padStart(2,"0")}E${String(episodeInfo.episode_number).padStart(2,"0")}`
       : `${title} ${year}`;
     
     setStatus(`Zoeken naar "${searchTitle}"...`);
@@ -167,17 +186,17 @@ export default function Watch() {
               let resumeDuration = 0;
               let nextProgressItem = media;
               if (!isMovie && episodeInfo) {
-                const epProg = getEpisodeProgress(selectedSeason, episodeInfo.episode_number);
+                const epProg = getEpisodeProgress(targetSeason, episodeInfo.episode_number);
                 resumeTime = epProg?.current_time || 0;
                 resumeDuration = epProg?.duration || 0;
                 nextProgressItem = {
                   ...media,
-                  id: episodeKey(selectedSeason, episodeInfo.episode_number),
+                  id: episodeKey(targetSeason, episodeInfo.episode_number),
                   media_type: "tv_episode",
                   show_id: media.id,
-                  season_number: selectedSeason,
+                  season_number: targetSeason,
                   episode_number: episodeInfo.episode_number,
-                  title: `${title} S${String(selectedSeason).padStart(2,"0")}E${String(episodeInfo.episode_number).padStart(2,"0")}`,
+                  title: `${title} S${String(targetSeason).padStart(2,"0")}E${String(episodeInfo.episode_number).padStart(2,"0")}`,
                 };
               } else if (isMovie) {
                 resumeTime = savedProgress?.current_time || 0;
@@ -230,17 +249,17 @@ export default function Watch() {
       let resumeDuration = 0;
       let nextProgressItem = media;
       if (!isMovie && episodeInfo) {
-        const epProg = getEpisodeProgress(selectedSeason, episodeInfo.episode_number);
+        const epProg = getEpisodeProgress(targetSeason, episodeInfo.episode_number);
         resumeTime = epProg?.current_time || 0;
         resumeDuration = epProg?.duration || 0;
         nextProgressItem = {
           ...media,
-          id: episodeKey(selectedSeason, episodeInfo.episode_number),
+          id: episodeKey(targetSeason, episodeInfo.episode_number),
           media_type: "tv_episode",
           show_id: media.id,
-          season_number: selectedSeason,
+          season_number: targetSeason,
           episode_number: episodeInfo.episode_number,
-          title: `${title} S${String(selectedSeason).padStart(2,"0")}E${String(episodeInfo.episode_number).padStart(2,"0")}`,
+          title: `${title} S${String(targetSeason).padStart(2,"0")}E${String(episodeInfo.episode_number).padStart(2,"0")}`,
         };
       } else if (isMovie) {
         resumeTime = savedProgress?.current_time || 0;
@@ -299,6 +318,41 @@ export default function Watch() {
   const runtime = detail?.runtime ? `${Math.floor(detail.runtime / 60)}u ${detail.runtime % 60}m` : null;
   const seasons = detail?.seasons?.filter(s => s.season_number > 0) || [];
 
+  const handleEnded = async () => {
+    if (isMovie || !seasonData || !selectedEpisode) return;
+
+    const currentIdx = seasonData.episodes.findIndex(ep => ep.id === selectedEpisode.id);
+    if (currentIdx >= 0 && currentIdx < seasonData.episodes.length - 1) {
+      // Volgende aflevering in hetzelfde seizoen
+      const nextEp = seasonData.episodes[currentIdx + 1];
+      setSelectedEpisode(nextEp);
+      handlePlay(nextEp, selectedSeason);
+    } else {
+      // Kijk of er een volgend seizoen is
+      const nextSeasonNum = selectedSeason + 1;
+      const hasNextSeason = seasons.some(s => s.season_number === nextSeasonNum);
+      if (hasNextSeason) {
+        setStatus("Volgende seizoen laden...");
+        setSelectedSeason(nextSeasonNum);
+        try {
+          const r = await fetch(`/api/search/tv/${media.id}/season/${nextSeasonNum}`);
+          const d = await r.json();
+          if (d.episodes && d.episodes.length > 0) {
+            const nextEp = d.episodes[0];
+            setSelectedEpisode(nextEp);
+            handlePlay(nextEp, nextSeasonNum);
+          } else {
+            setStreamUrl(null);
+          }
+        } catch (e) {
+          setStreamUrl(null);
+        }
+      } else {
+        setStreamUrl(null); // Einde van de serie
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-nova-bg">
       {backdrop && !streamUrl && (
@@ -316,7 +370,7 @@ export default function Watch() {
 
         {streamUrl && (
           <div className="mb-10">
-            <Player url={streamUrl} media={progressItem || media} startAt={startAt} durationHint={durationHint} onProgress={(t, d) => saveProgress(progressItem || media, t, d)} />
+            <Player url={streamUrl} media={progressItem || media} startAt={startAt} durationHint={durationHint} onProgress={(t, d) => saveProgress(progressItem || media, t, d)} onEnded={handleEnded} />
             <div className="mt-4 flex flex-wrap items-center gap-4">
               <button onClick={() => { setStreamUrl(null); setStatus(""); setStartAt(0); setDurationHint(0); }} className="text-sm text-gray-500 hover:text-white flex items-center gap-1">
                 ← Terug naar info
@@ -419,30 +473,41 @@ export default function Watch() {
                 </div>
                 <p className="text-gray-300 text-sm md:text-base leading-relaxed mb-6 max-w-2xl">{media.overview}</p>
 
-                {/* Knoppen voor films */}
-                {isMovie && (
-                  <div className="flex flex-wrap gap-3 items-center">
+                {/* Knoppen voor films en series */}
+                <div className="flex flex-wrap gap-3 items-center">
+                  {(isMovie || getLatestEpisode()) && (
                     <button
-                      onClick={() => handlePlay()}
+                      onClick={() => {
+                        if (isMovie) {
+                          handlePlay();
+                        } else {
+                          const latest = getLatestEpisode();
+                          if (latest) {
+                            setSelectedSeason(latest.season_number);
+                            setSelectedEpisode(latest.episode);
+                            handlePlay(latest.episode, latest.season_number);
+                          }
+                        }
+                      }}
                       disabled={loading}
-                      className={`flex items-center gap-3 font-bold px-8 py-3 rounded-xl transition-all disabled:opacity-60 ${isAvailable ? "bg-nova-accent text-white shadow-lg shadow-nova-accent/20" : "bg-white text-black hover:bg-gray-200"}`}
+                      className={`flex items-center gap-3 font-bold px-8 py-3 rounded-xl transition-all disabled:opacity-60 ${isAvailable || !isMovie ? "bg-nova-accent text-white shadow-lg shadow-nova-accent/20" : "bg-white text-black hover:bg-gray-200"}`}
                     >
                       {loading ? <span className="animate-spin">⟳</span> : "▶"}
-                      {loading ? "Laden..." : savedProgress ? "Hervatten" : "Afspelen"}
+                      {loading ? "Laden..." : (isMovie ? (savedProgress ? "Hervatten" : "Afspelen") : `Hervatten S${getLatestEpisode()?.season_number}E${getLatestEpisode()?.episode_number}`)}
                     </button>
-                    <button
-                      onClick={() => toggleWatchlist(media)}
-                      className={`flex items-center gap-2 px-5 py-3 rounded-xl font-semibold border transition-colors ${inList ? "bg-nova-accent/20 border-nova-accent text-nova-accent" : "bg-nova-card border-gray-600 text-white hover:border-white"}`}
-                    >
-                      {inList ? "✓ In watchlist" : "+ Watchlist"}
-                    </button>
-                    {savedProgress && (
-                      <span className="text-sm text-gray-400">
-                        Gestopt op {Math.floor(savedProgress.current_time / 60)}:{String(Math.floor(savedProgress.current_time % 60)).padStart(2, "0")}
-                      </span>
-                    )}
-                  </div>
-                )}
+                  )}
+                  <button
+                    onClick={() => toggleWatchlist(media)}
+                    className={`flex items-center gap-2 px-5 py-3 rounded-xl font-semibold border transition-colors ${inList ? "bg-nova-accent/20 border-nova-accent text-nova-accent" : "bg-nova-card border-gray-600 text-white hover:border-white"}`}
+                  >
+                    {inList ? "✓ In watchlist" : "+ Watchlist"}
+                  </button>
+                  {isMovie && savedProgress && (
+                    <span className="text-sm text-gray-400">
+                      Gestopt op {Math.floor(savedProgress.current_time / 60)}:{String(Math.floor(savedProgress.current_time % 60)).padStart(2, "0")}
+                    </span>
+                  )}
+                </div>
                 
                 {isMovie && isAvailable !== null && (
                   <div className={`mt-4 flex flex-col gap-3 text-sm`}>
@@ -461,16 +526,6 @@ export default function Watch() {
                   </div>
                 )}
                 {status && <p className="text-sm text-nova-accent animate-pulse mt-3">{status}</p>}
-
-                {/* Watchlist knop voor series */}
-                {!isMovie && (
-                  <button
-                    onClick={() => toggleWatchlist(media)}
-                    className={`flex items-center gap-2 px-5 py-3 rounded-xl font-semibold border transition-colors ${inList ? "bg-nova-accent/20 border-nova-accent text-nova-accent" : "bg-nova-card border-gray-600 text-white hover:border-white"}`}
-                  >
-                    {inList ? "✓ In watchlist" : "+ Watchlist"}
-                  </button>
-                )}
               </div>
             </div>
 
