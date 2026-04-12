@@ -201,6 +201,10 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
     copy_video = v_codec == "h264"
     copy_audio = a_codec == "aac"
 
+    if start and start > 0:
+        copy_video = False
+        copy_audio = False
+
     cmd = [
         "ffmpeg",
         "-hide_banner",
@@ -228,6 +232,14 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         "make_zero",
         "-c:v",
         "copy" if copy_video else "libx264",
+        "-tune",
+        "zerolatency",
+        "-g",
+        "48",
+        "-keyint_min",
+        "48",
+        "-sc_threshold",
+        "0",
         "-preset",
         "ultrafast",
         "-threads",
