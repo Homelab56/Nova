@@ -34,11 +34,12 @@ export default function Watch() {
   const [requestMessage, setRequestMessage] = useState("");
   const [startAt, setStartAt] = useState(0);
   const [durationHint, setDurationHint] = useState(0);
+  const [progressItem, setProgressItem] = useState(null);
   const pollRef = useRef(null);
   const searchAbortRef = useRef(null);
   const requestKeyRef = useRef(null);
 
-  const { toggleWatchlist, isInList, saveProgress, progress } = useUserData();
+  const { toggleWatchlist, isInList, saveProgress, progress, progressMap } = useUserData();
   const inList = isInList(media?.id);
   const savedProgress = progress.find(p => p.id === media?.id);
 
@@ -112,6 +113,9 @@ export default function Watch() {
 
   if (!media) { navigate("/"); return null; }
 
+  const episodeKey = (seasonNumber, episodeNumber) => `tv:${media.id}:S${seasonNumber}E${episodeNumber}`;
+  const getEpisodeProgress = (seasonNumber, episodeNumber) => progressMap?.[episodeKey(seasonNumber, episodeNumber)] || null;
+
   async function handlePlay(episodeInfo = null) {
     if (pollRef.current) clearInterval(pollRef.current);
     if (searchAbortRef.current) searchAbortRef.current.abort();
@@ -159,13 +163,36 @@ export default function Watch() {
             if (rr.stream_url) {
               let finalUrl = rr.stream_url;
               if (finalUrl.startsWith("/")) finalUrl = window.location.origin + finalUrl;
-              const resume = !episodeInfo && isMovie && savedProgress?.current_time && (savedProgress.current_time > 10);
-              const urlWithStart = resume
-                ? `${finalUrl}${finalUrl.includes("?") ? "&" : "?"}start=${encodeURIComponent(savedProgress.current_time)}`
+              let resumeTime = 0;
+              let resumeDuration = 0;
+              let nextProgressItem = media;
+              if (!isMovie && episodeInfo) {
+                const epProg = getEpisodeProgress(selectedSeason, episodeInfo.episode_number);
+                resumeTime = epProg?.current_time || 0;
+                resumeDuration = epProg?.duration || 0;
+                nextProgressItem = {
+                  ...media,
+                  id: episodeKey(selectedSeason, episodeInfo.episode_number),
+                  media_type: "tv_episode",
+                  show_id: media.id,
+                  season_number: selectedSeason,
+                  episode_number: episodeInfo.episode_number,
+                  title: `${title} S${String(selectedSeason).padStart(2,"0")}E${String(episodeInfo.episode_number).padStart(2,"0")}`,
+                };
+              } else if (isMovie) {
+                resumeTime = savedProgress?.current_time || 0;
+                resumeDuration = savedProgress?.duration || 0;
+                nextProgressItem = media;
+              }
+
+              const doResume = resumeTime > 10;
+              const urlWithStart = doResume
+                ? `${finalUrl}${finalUrl.includes("?") ? "&" : "?"}start=${encodeURIComponent(resumeTime)}`
                 : finalUrl;
-              setStartAt(resume ? savedProgress.current_time : 0);
-              setDurationHint(savedProgress?.duration || 0);
+              setStartAt(doResume ? resumeTime : 0);
+              setDurationHint(resumeDuration || 0);
               setStreamUrl(urlWithStart);
+              setProgressItem(nextProgressItem);
               setStatus("");
               setLoading(false);
               if (pollRef.current) clearInterval(pollRef.current);
@@ -199,13 +226,36 @@ export default function Watch() {
       if (finalUrl.startsWith("/")) {
         finalUrl = window.location.origin + finalUrl;
       }
-      const resume = !episodeInfo && isMovie && savedProgress?.current_time && (savedProgress.current_time > 10);
-      const urlWithStart = resume
-        ? `${finalUrl}${finalUrl.includes("?") ? "&" : "?"}start=${encodeURIComponent(savedProgress.current_time)}`
+      let resumeTime = 0;
+      let resumeDuration = 0;
+      let nextProgressItem = media;
+      if (!isMovie && episodeInfo) {
+        const epProg = getEpisodeProgress(selectedSeason, episodeInfo.episode_number);
+        resumeTime = epProg?.current_time || 0;
+        resumeDuration = epProg?.duration || 0;
+        nextProgressItem = {
+          ...media,
+          id: episodeKey(selectedSeason, episodeInfo.episode_number),
+          media_type: "tv_episode",
+          show_id: media.id,
+          season_number: selectedSeason,
+          episode_number: episodeInfo.episode_number,
+          title: `${title} S${String(selectedSeason).padStart(2,"0")}E${String(episodeInfo.episode_number).padStart(2,"0")}`,
+        };
+      } else if (isMovie) {
+        resumeTime = savedProgress?.current_time || 0;
+        resumeDuration = savedProgress?.duration || 0;
+        nextProgressItem = media;
+      }
+
+      const doResume = resumeTime > 10;
+      const urlWithStart = doResume
+        ? `${finalUrl}${finalUrl.includes("?") ? "&" : "?"}start=${encodeURIComponent(resumeTime)}`
         : finalUrl;
-      setStartAt(resume ? savedProgress.current_time : 0);
-      setDurationHint(savedProgress?.duration || 0);
+      setStartAt(doResume ? resumeTime : 0);
+      setDurationHint(resumeDuration || 0);
       setStreamUrl(urlWithStart);
+      setProgressItem(nextProgressItem);
       setStatus("");
     } catch (e) {
       console.error(e);
@@ -266,12 +316,84 @@ export default function Watch() {
 
         {streamUrl && (
           <div className="mb-10">
-            <Player url={streamUrl} media={media} startAt={startAt} durationHint={durationHint} onProgress={(t, d) => saveProgress(media, t, d)} />
+            <Player url={streamUrl} media={progressItem || media} startAt={startAt} durationHint={durationHint} onProgress={(t, d) => saveProgress(progressItem || media, t, d)} />
             <div className="mt-4 flex flex-wrap items-center gap-4">
               <button onClick={() => { setStreamUrl(null); setStatus(""); setStartAt(0); setDurationHint(0); }} className="text-sm text-gray-500 hover:text-white flex items-center gap-1">
                 ← Terug naar info
               </button>
             </div>
+
+            {!isMovie && seasons.length > 0 && (
+              <div className="mt-8">
+                <div className="flex items-center gap-4 mb-5 flex-wrap">
+                  <h2 className="text-lg font-bold">Afleveringen</h2>
+                  <div className="relative">
+                    <select
+                      value={selectedSeason}
+                      onChange={e => setSelectedSeason(Number(e.target.value))}
+                      className="appearance-none bg-nova-card border border-gray-700 text-white px-4 py-2 pr-8 rounded-xl text-sm font-medium focus:outline-none focus:border-nova-accent cursor-pointer"
+                    >
+                      {seasons.map(s => (
+                        <option key={s.season_number} value={s.season_number}>
+                          Seizoen {s.season_number}{s.episode_count ? ` (${s.episode_count} afl.)` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs">▼</span>
+                  </div>
+                </div>
+
+                {loadingSeason ? (
+                  <div className="space-y-3">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <div key={i} className="h-24 rounded-xl bg-nova-card animate-pulse" />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {(seasonData?.episodes || []).map(ep => {
+                      const epProg = getEpisodeProgress(selectedSeason, ep.episode_number);
+                      const watched = !!epProg && epProg.duration > 0 && (epProg.current_time / epProg.duration) >= 0.95;
+                      return (
+                        <div
+                          key={ep.id}
+                          onClick={() => { setSelectedEpisode(ep); handlePlay(ep); }}
+                          className={`flex gap-4 p-3 rounded-xl cursor-pointer transition-all border group ${
+                            selectedEpisode?.id === ep.id ? "border-nova-accent bg-nova-accent/10" : "border-transparent hover:border-gray-700 hover:bg-nova-card"
+                          } ${watched ? "opacity-70" : ""}`}
+                        >
+                          <div className="flex-shrink-0 w-10 flex items-center justify-center text-gray-500 font-bold text-lg group-hover:text-white transition-colors">
+                            {watched ? "✓" : ep.episode_number}
+                          </div>
+
+                          <div className="flex-shrink-0 w-36 aspect-video rounded-lg overflow-hidden bg-nova-bg">
+                            {ep.still_path ? (
+                              <img src={`${TMDB_STILL}${ep.still_path}`} alt={ep.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-gray-700 text-2xl group-hover:text-nova-accent transition-colors">▶</div>
+                            )}
+                          </div>
+
+                          <div className="flex-1 min-w-0 py-1">
+                            <div className="flex items-start justify-between gap-2 mb-1">
+                              <p className="font-semibold text-sm leading-tight">{ep.name}</p>
+                              {ep.runtime && <span className="flex-shrink-0 text-xs text-gray-500">{ep.runtime}m</span>}
+                            </div>
+                            <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">{ep.overview}</p>
+                          </div>
+
+                          <div className="flex-shrink-0 flex items-center pr-1">
+                            <div className="w-9 h-9 rounded-full bg-white/0 group-hover:bg-nova-accent/20 border border-transparent group-hover:border-nova-accent flex items-center justify-center transition-all">
+                              <span className="text-white/0 group-hover:text-nova-accent text-sm transition-colors">▶</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -383,15 +505,18 @@ export default function Watch() {
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {(seasonData?.episodes || []).map(ep => (
+                    {(seasonData?.episodes || []).map(ep => {
+                      const epProg = getEpisodeProgress(selectedSeason, ep.episode_number);
+                      const watched = !!epProg && epProg.duration > 0 && (epProg.current_time / epProg.duration) >= 0.95;
+                      return (
                       <div
                         key={ep.id}
                         onClick={() => { setSelectedEpisode(ep); handlePlay(ep); }}
-                        className={`flex gap-4 p-3 rounded-xl cursor-pointer transition-all border group ${selectedEpisode?.id === ep.id ? "border-nova-accent bg-nova-accent/10" : "border-transparent hover:border-gray-700 hover:bg-nova-card"}`}
+                        className={`flex gap-4 p-3 rounded-xl cursor-pointer transition-all border group ${selectedEpisode?.id === ep.id ? "border-nova-accent bg-nova-accent/10" : "border-transparent hover:border-gray-700 hover:bg-nova-card"} ${watched ? "opacity-70" : ""}`}
                       >
                         {/* Nummer */}
                         <div className="flex-shrink-0 w-10 flex items-center justify-center text-gray-500 font-bold text-lg group-hover:text-white transition-colors">
-                          {ep.episode_number}
+                          {watched ? "✓" : ep.episode_number}
                         </div>
 
                         {/* Thumbnail */}
@@ -419,7 +544,8 @@ export default function Watch() {
                           </div>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
                 {status && <p className="text-sm text-nova-accent animate-pulse mt-4">{status}</p>}

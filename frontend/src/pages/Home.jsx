@@ -84,7 +84,7 @@ export default function Home() {
   const sessionSeed = useRef(Math.floor(Math.random() * 1e9));
 
   const { watchlist, progress, progressMap } = useUserData();
-  const inProgress = progress.filter(p => p.duration > 0 && (p.current_time / p.duration) < 0.95);
+  const inProgress = progress.filter(p => p.duration > 0 && p.media_type !== "tv_episode" && (p.current_time / p.duration) < 0.95);
 
   // Laad vaste rijen
   useEffect(() => {

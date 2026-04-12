@@ -33,7 +33,7 @@ class WatchlistItem(BaseModel):
 
 
 class ProgressItem(BaseModel):
-    id: int
+    id: int | str
     title: str
     poster_path: str = ""
     backdrop_path: str = ""
@@ -43,6 +43,9 @@ class ProgressItem(BaseModel):
     vote_average: float = 0.0
     current_time: float = 0.0
     duration: float = 0.0
+    show_id: int | None = None
+    season_number: int | None = None
+    episode_number: int | None = None
 
 
 # --- Watchlist ---
@@ -85,7 +88,7 @@ def save_progress(item: ProgressItem):
 
 
 @router.delete("/progress/{item_id}")
-def delete_progress(item_id: int):
+def delete_progress(item_id: str):
     data = load()
     data["progress"].pop(str(item_id), None)
     save(data)
