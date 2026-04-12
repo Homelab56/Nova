@@ -579,6 +579,41 @@ export default function Watch() {
                   >
                     {inList ? "✓ In watchlist" : "+ Watchlist"}
                   </button>
+                  {!isMovie && (
+                    <button
+                      onClick={() => {
+                        setRequestStatus("loading");
+                        setRequestMessage("Alle seizoenen aanvragen...");
+                        const payload = {
+                          media_id: media.id,
+                          media_type: type,
+                          seasons: seasons.map(s => s.season_number) // alle bestaande seizoenen, Seerr pakt ook evt toekomstige mee als je op de root aanvraagt afhankelijk van Seerr's default (all seasons)
+                        };
+                        fetch("/api/seerr/request", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify(payload)
+                        })
+                        .then(r => r.json())
+                        .then(data => {
+                          if (data.ok) {
+                            setRequestStatus("done");
+                            setRequestMessage("Alle seizoenen succesvol aangevraagd!");
+                          } else {
+                            setRequestStatus("error");
+                            setRequestMessage(data.message || "Fout bij aanvragen.");
+                          }
+                        })
+                        .catch(() => {
+                          setRequestStatus("error");
+                          setRequestMessage("Netwerkfout bij aanvragen.");
+                        });
+                      }}
+                      className="flex items-center gap-2 px-5 py-3 rounded-xl font-semibold border bg-nova-card border-gray-600 text-white hover:border-white transition-colors"
+                    >
+                      ↓ Download alle seizoenen
+                    </button>
+                  )}
                   {isMovie && savedProgress && (
                     <span className="text-sm text-gray-400">
                       Gestopt op {Math.floor(savedProgress.current_time / 60)}:{String(Math.floor(savedProgress.current_time % 60)).padStart(2, "0")}

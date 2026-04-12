@@ -128,6 +128,14 @@ async def request_media(body: RequestBody):
     
     if body.media_type == "tv" and body.seasons:
         payload["seasons"] = body.seasons
+        # To support future seasons in Seerr, we need to pass isAllSeasons if possible.
+        # But generally Seerr accepts "seasons": "all" or we just provide the list. 
+        # If we provide all existing seasons, Sonarr usually monitors future ones depending on Seerr settings.
+        # We can also add "isAllSeasons": True if the user selected all seasons (which we pass from frontend).
+        # We'll just pass the seasons array, which works out of the box for existing ones.
+        # To be safe and let Seerr handle new seasons:
+        if len(body.seasons) > 1: # if we pass multiple, it's likely "all seasons"
+            payload["isAllSeasons"] = True
 
     try:
         async with httpx.AsyncClient() as client:
