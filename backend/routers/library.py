@@ -115,6 +115,8 @@ async def find_file(q: str):
 
     best_match = None
     best_score = 0
+    # Minimaal vereiste score om een match als geldig te zien
+    min_score = len(words)
 
     # We scannen de hele boom (beperkt tot 3 diep voor performance)
     for root, dirs, files in os.walk(MEDIA_ROOT):
@@ -134,15 +136,22 @@ async def find_file(q: str):
                 continue
 
             file_lower = _normalize_text(file)
-            if ep_tokens and not any(t in file_lower for t in ep_tokens):
+            
+            # Check of ALLE titelwoorden in de bestandsnaam of mapnaam zitten
+            full_path_lower = _normalize_text(candidate_path)
+            score = sum(1 for word in words if word in full_path_lower)
+            
+            if score < min_score:
                 continue
-            score = sum(1 for word in words if word in file_lower)
+
+            if ep_tokens and not any(t in full_path_lower for t in ep_tokens):
+                continue
             
             # Bonus voor exacte match op SxxExx
             if ep_tokens and any(t in file_lower for t in ep_tokens):
                 score += 5
 
-            if score > best_score and score >= len(words):
+            if score > best_score:
                 best_score = score
                 best_match = candidate_path
 
