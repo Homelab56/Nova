@@ -112,6 +112,42 @@ def _is_http_url(value: str) -> bool:
     v = (value or "").lower()
     return v.startswith("http://") or v.startswith("https://")
 
+async def _ffprobe_audio_streams(input_value: str, is_path: bool) -> list[dict]:
+    args = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "a",
+        "-show_entries",
+        "stream=index,codec_name,channels:stream_tags=language,title",
+        "-of",
+        "json",
+        input_value,
+    ]
+    if _is_http_url(input_value):
+        args.insert(4, "5000000")
+        args.insert(4, "-rw_timeout")
+    if is_path:
+        args[-1] = input_value
+
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    out, _err = await proc.communicate()
+    if proc.returncode != 0:
+        return []
+    try:
+        data = json.loads(out.decode("utf-8", errors="ignore") or "{}")
+        streams = data.get("streams") or []
+        if not isinstance(streams, list):
+            return []
+        return [s for s in streams if isinstance(s, dict)]
+    except Exception:
+        return []
+
 async def _ffprobe_subtitle_streams(input_value: str, is_path: bool) -> list[dict]:
     args = [
         "ffprobe",
@@ -318,11 +354,27 @@ def _choose_mode(probe: dict) -> str:
     return "transcode"
 
 
-async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
+async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0, audio_stream_index: int | None = None):
     probe = await _ffprobe_streams(input_value, is_path=is_path)
     streams = (probe or {}).get("streams") or []
     v = next((s for s in streams if s.get("codec_type") == "video"), None) or {}
-    a = next((s for s in streams if s.get("codec_type") == "audio"), None) or {}
+    a_default = next((s for s in streams if s.get("codec_type") == "audio"), None) or {}
+    a = a_default
+    selected_audio_map = "0:a:0?"
+    if audio_stream_index is not None:
+        chosen = None
+        for s in streams:
+            if s.get("codec_type") != "audio":
+                continue
+            try:
+                if int(s.get("index")) == int(audio_stream_index):
+                    chosen = s
+                    break
+            except Exception:
+                continue
+        if chosen:
+            a = chosen
+            selected_audio_map = f"0:{int(audio_stream_index)}"
     v_codec = (v.get("codec_name") or "").lower()
     a_codec = (a.get("codec_name") or "").lower()
 
@@ -351,7 +403,7 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         "-map",
         "0:v:0",
         "-map",
-        "0:a:0?",
+        selected_audio_map,
         "-sn",
         "-fflags",
         "+genpts",
@@ -498,6 +550,7 @@ async def play(
     url: str | None = None,
     path: str | None = None,
     start: float = Query(default=0.0, ge=0.0),
+    a: int | None = Query(default=None),
 ):
     if not url and not path:
         raise HTTPException(status_code=400, detail="url of path is verplicht")
@@ -506,9 +559,46 @@ async def play(
     input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
 
     return StreamingResponse(
-        _ffmpeg_stream(input_value, is_path=is_path, start=start),
+        _ffmpeg_stream(input_value, is_path=is_path, start=start, audio_stream_index=a),
         media_type="video/mp4",
     )
+
+
+@router.get("/audio")
+async def audio(url: str | None = None, path: str | None = None):
+    if not url and not path:
+        raise HTTPException(status_code=400, detail="url of path is verplicht")
+    is_path = path is not None
+    input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
+    streams = await _ffprobe_audio_streams(input_value, is_path=is_path)
+    tracks = []
+    for s in streams:
+        idx = s.get("index")
+        codec = s.get("codec_name") or ""
+        channels = s.get("channels") or 0
+        tags = s.get("tags") or {}
+        if not isinstance(tags, dict):
+            tags = {}
+        lang = tags.get("language") or ""
+        title = tags.get("title") or ""
+        try:
+            idx_i = int(idx)
+        except Exception:
+            continue
+        try:
+            channels_i = int(channels)
+        except Exception:
+            channels_i = 0
+        tracks.append(
+            {
+                "stream_index": idx_i,
+                "language": str(lang),
+                "title": str(title),
+                "codec": str(codec),
+                "channels": channels_i,
+            }
+        )
+    return {"tracks": tracks}
 
 
 @router.get("/subtitles")

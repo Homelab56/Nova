@@ -15,6 +15,8 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const saveTimer = useRef(null);
   const controlsTimer = useRef(null);
   const subsAbortRef = useRef(null);
+  const audioAbortRef = useRef(null);
+  const audioSeekRef = useRef(null);
   const startOffsetRef = useRef(0);
   const baseUrlRef = useRef(null);
   const absTimeRef = useRef(0);
@@ -31,6 +33,9 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const [subtitleTracks, setSubtitleTracks] = useState([]);
   const [subtitleSelected, setSubtitleSelected] = useState(null);
   const [subtitleLabel, setSubtitleLabel] = useState("");
+  const [audioTracks, setAudioTracks] = useState([]);
+  const [audioSelected, setAudioSelected] = useState(null);
+  const [audioLabel, setAudioLabel] = useState("");
 
   const total = useMemo(() => {
     const hint = Number(durationHint) || 0;
@@ -61,6 +66,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       clearTimeout(saveTimer.current);
       clearTimeout(controlsTimer.current);
       if (subsAbortRef.current) subsAbortRef.current.abort();
+      if (audioAbortRef.current) audioAbortRef.current.abort();
       reportProgress();
     };
   }, []);
@@ -84,6 +90,13 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     return u.toString();
   };
 
+  const buildAudioListUrl = () => {
+    const u = new URL(url, window.location.origin);
+    u.searchParams.delete("start");
+    u.pathname = "/api/stream/audio";
+    return u.toString();
+  };
+
   const chooseDefaultSubtitle = (tracks) => {
     if (!tracks || tracks.length === 0) return null;
     const prefer = ["nl", "nld", "dut", "vla", "nl-be", "nl_be"];
@@ -96,7 +109,19 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     return tracks[0];
   };
 
-  const buildSrc = (startSeconds) => {
+  const chooseDefaultAudio = (tracks) => {
+    if (!tracks || tracks.length === 0) return null;
+    const prefer = ["nl", "nld", "dut", "vla", "nl-be", "nl_be"];
+    const norm = (s) => String(s || "").toLowerCase().trim().replace("_", "-");
+    const findByLang = (langs) => tracks.find(t => langs.includes(norm(t.language)));
+    const byLang = findByLang(prefer);
+    if (byLang) return byLang;
+    const byTitle = tracks.find(t => prefer.some(p => norm(t.title).includes(p)));
+    if (byTitle) return byTitle;
+    return null;
+  };
+
+  const buildSrc = (startSeconds, audioStreamIndex = null) => {
     const isHls = url.includes("/stream/hls") || url.includes(".m3u8");
     const progressiveUrl = isHls ? url.replace("/stream/hls", "/stream/play") : url;
     const u = new URL(progressiveUrl, window.location.origin);
@@ -104,6 +129,11 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       u.searchParams.set("start", String(startSeconds.toFixed(3)));
     } else {
       u.searchParams.delete("start");
+    }
+    if (audioStreamIndex !== null && audioStreamIndex !== undefined) {
+      u.searchParams.set("a", String(audioStreamIndex));
+    } else {
+      u.searchParams.delete("a");
     }
     return u.toString();
   };
@@ -121,13 +151,13 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     }
   };
 
-  const seekTo = async (seconds) => {
+  const applySource = async (absSeconds, audioIdx) => {
     const v = videoRef.current;
-    if (!v) return;
-    const t = Math.max(0, Number(seconds) || 0);
+    if (!v || !url) return;
+    const t = Math.max(0, Number(absSeconds) || 0);
     startOffsetRef.current = t;
     absTimeRef.current = t;
-    const src = buildSrc(t);
+    const src = buildSrc(t, audioIdx);
     baseUrlRef.current = src;
     v.src = src;
     v.load();
@@ -135,6 +165,10 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     setAbsTime(t);
     reportProgress(t);
     await tryPlay();
+  };
+
+  const seekTo = async (seconds) => {
+    await applySource(seconds, audioSelected);
   };
 
   const showControlsTemporarily = () => {
@@ -153,16 +187,20 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     if (!v || !url) return;
     setError(null);
     startOffsetRef.current = Math.max(0, Number(startAt) || 0);
-    const src = buildSrc(startOffsetRef.current);
-    baseUrlRef.current = src;
-    v.src = src;
-    v.load();
     setAbsTime(startOffsetRef.current);
     absTimeRef.current = startOffsetRef.current;
     setBuffering(true);
     setShowControls(true);
-    tryPlay();
+    applySource(startOffsetRef.current, audioSelected);
   }, [url, startAt]);
+
+  useEffect(() => {
+    if (!url) return;
+    if (audioSelected === null && audioSeekRef.current === null) return;
+    const abs = audioSeekRef.current !== null ? audioSeekRef.current : absTimeRef.current;
+    audioSeekRef.current = null;
+    applySource(abs, audioSelected);
+  }, [audioSelected, url]);
 
   useEffect(() => {
     if (!url) return;
@@ -182,6 +220,30 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         if (def) {
           setSubtitleSelected(def.stream_index);
           setSubtitleLabel(def.language || def.title || "Subtitles");
+        }
+      })
+      .catch(() => {});
+    return () => ac.abort();
+  }, [url]);
+
+  useEffect(() => {
+    if (!url) return;
+    if (audioAbortRef.current) audioAbortRef.current.abort();
+    const ac = new AbortController();
+    audioAbortRef.current = ac;
+    setAudioTracks([]);
+    setAudioSelected(null);
+    setAudioLabel("");
+    fetch(buildAudioListUrl(), { signal: ac.signal })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        const tracks = Array.isArray(data?.tracks) ? data.tracks : [];
+        if (ac.signal.aborted) return;
+        setAudioTracks(tracks);
+        const def = chooseDefaultAudio(tracks);
+        if (def) {
+          setAudioSelected(def.stream_index);
+          setAudioLabel(def.language || def.title || "Audio");
         }
       })
       .catch(() => {});
@@ -399,32 +461,81 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
             className="flex-1"
           />
 
+          {audioTracks.length > 1 && (
+            <div className="flex items-center gap-2">
+              <div className="text-xs text-white/80 font-semibold">Audio</div>
+              <select
+                value={audioSelected === null ? "auto" : String(audioSelected)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "auto") {
+                    audioSeekRef.current = absTimeRef.current;
+                    setAudioSelected(null);
+                    setAudioLabel("");
+                    return;
+                  }
+                  const idx = Number(v);
+                  if (!Number.isFinite(idx)) return;
+                  const t = audioTracks.find(x => x.stream_index === idx) || null;
+                  audioSeekRef.current = absTimeRef.current;
+                  setAudioSelected(idx);
+                  setAudioLabel(t?.language || t?.title || "Audio");
+                }}
+                className="bg-black/60 hover:bg-black/70 border border-white/20 text-white rounded-lg px-2 py-1.5 text-xs font-semibold min-w-28"
+                title="Audio"
+              >
+                <option value="auto">Auto</option>
+                {audioTracks.map((t) => {
+                  const lang = (t.language || "").trim();
+                  const title = (t.title || "").trim();
+                  const ch = t.channels ? `${t.channels}ch` : "";
+                  const codec = (t.codec || "").trim();
+                  const label = [lang || title || `Track ${t.stream_index}`, codec, ch].filter(Boolean).join(" ");
+                  return (
+                    <option key={t.stream_index} value={String(t.stream_index)}>
+                      {label}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          )}
+
           {subtitleTracks.length > 0 && (
-            <select
-              value={subtitleSelected === null ? "off" : String(subtitleSelected)}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === "off") {
-                  setSubtitleSelected(null);
-                  setSubtitleLabel("");
-                  return;
-                }
-                const idx = Number(v);
-                if (!Number.isFinite(idx)) return;
-                const t = subtitleTracks.find(x => x.stream_index === idx) || null;
-                setSubtitleSelected(idx);
-                setSubtitleLabel(t?.language || t?.title || "Subtitles");
-              }}
-              className="bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg px-2 py-1.5 text-xs font-semibold max-w-28"
-              title="Subtitels"
-            >
-              <option value="off">CC uit</option>
-              {subtitleTracks.map((t) => (
-                <option key={t.stream_index} value={String(t.stream_index)}>
-                  {(t.language || t.title || `Track ${t.stream_index}`)}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-2">
+              <div className="text-xs text-white/80 font-semibold">Sub</div>
+              <select
+                value={subtitleSelected === null ? "off" : String(subtitleSelected)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "off") {
+                    setSubtitleSelected(null);
+                    setSubtitleLabel("");
+                    return;
+                  }
+                  const idx = Number(v);
+                  if (!Number.isFinite(idx)) return;
+                  const t = subtitleTracks.find(x => x.stream_index === idx) || null;
+                  setSubtitleSelected(idx);
+                  setSubtitleLabel(t?.language || t?.title || "Subtitles");
+                }}
+                className="bg-black/60 hover:bg-black/70 border border-white/20 text-white rounded-lg px-2 py-1.5 text-xs font-semibold min-w-24"
+                title="Subtitels"
+              >
+                <option value="off">Uit</option>
+                {subtitleTracks.map((t) => {
+                  const lang = (t.language || "").trim();
+                  const title = (t.title || "").trim();
+                  const codec = (t.codec || "").trim();
+                  const label = [lang || title || `Track ${t.stream_index}`, codec].filter(Boolean).join(" ");
+                  return (
+                    <option key={t.stream_index} value={String(t.stream_index)}>
+                      {label}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
           )}
 
           <button
