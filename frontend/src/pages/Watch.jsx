@@ -271,7 +271,41 @@ export default function Watch() {
       if (!data.stream_url) {
         setStatus("Niet meteen beschikbaar. Ik vraag dit automatisch aan en wacht tot het klaar is...");
         const alreadyRequesting = (requestStatus === "loading" || requestStatus === "waiting") && requestKeyRef.current === reqKey;
-        const requested = alreadyRequesting ? true : await handleRequest(reqKey, lockKey);
+        let requested = alreadyRequesting;
+
+        if (!requested) {
+          try {
+            const av = await fetch(
+              `/api/debrid/check?q=${encodeURIComponent(searchTitle)}&tmdb_id=${encodeURIComponent(media.id)}&media_type=${encodeURIComponent(type)}`,
+              { signal: searchAbortRef.current.signal }
+            ).then(r => r.json());
+            if (av?.available) {
+              setLock(lockKey);
+              setRequestStatus("waiting");
+              setRequestMessage("Beschikbaar in bibliotheek. Wachten tot stream start...");
+              requested = true;
+            }
+          } catch {}
+        }
+
+        if (!requested) {
+          try {
+            const ms = await fetch(
+              `/api/seerr/media-status?tmdb_id=${media.id}&media_type=${type}`,
+              { signal: searchAbortRef.current.signal }
+            ).then(r => r.json());
+            if (ms?.ok && ms?.status !== null && ms?.status !== undefined) {
+              setLock(lockKey);
+              setRequestStatus("waiting");
+              setRequestMessage(ms.status_label || "Bestaat al in Seerr. Wachten...");
+              requested = true;
+            }
+          } catch {}
+        }
+
+        if (!requested) {
+          requested = await handleRequest(reqKey, lockKey);
+        }
         if (!requested) {
           setStatus(data.message || "Geen stream gevonden.");
           setLoading(false);

@@ -345,6 +345,19 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
             eei = int(ee)
             ep_variants = {ep_token, f"{ssi}x{eei:02d}", f"{ssi:02d}x{eei:02d}"}
 
+    from .library import find_file
+    for candidate in candidates:
+        try:
+            local_check = await find_file(candidate)
+            if local_check.get("found"):
+                p = local_check.get("path") or ""
+                years = _extract_years(p)
+                if is_movie and base_year and years and base_year not in years:
+                    continue
+                return {"available": True, "filename": p, "source": "local"}
+        except Exception:
+            pass
+
     async with httpx.AsyncClient() as client:
         r = await client.get(
             f"{RD_BASE}/torrents",

@@ -8,6 +8,27 @@ from typing import List, Optional
 router = APIRouter()
 
 MEDIA_ROOT = "/media"
+STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "de",
+    "der",
+    "des",
+    "die",
+    "el",
+    "en",
+    "het",
+    "in",
+    "la",
+    "le",
+    "les",
+    "of",
+    "the",
+    "to",
+    "van",
+    "und",
+}
 
 class MediaFile(BaseModel):
     name: str
@@ -109,13 +130,15 @@ async def find_file(q: str):
         and not re.fullmatch(r"\d{1,2}x\d{2}", w)
         and not re.fullmatch(r"(19\d{2}|20\d{2})", w)
     ]
+    no_stop = [w for w in words if w not in STOPWORDS]
+    if no_stop:
+        words = no_stop
     
     if not words:
         return {"found": False}
 
     best_match = None
     best_score = 0
-    # Minimaal vereiste score om een match als geldig te zien
     min_score = len(words)
 
     # We scannen de hele boom (beperkt tot 3 diep voor performance)
