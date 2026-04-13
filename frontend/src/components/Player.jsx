@@ -41,6 +41,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const [audioLabel, setAudioLabel] = useState("");
   const [audioMenuOpen, setAudioMenuOpen] = useState(false);
   const [subMenuOpen, setSubMenuOpen] = useState(false);
+  const [fitMode, setFitMode] = useState("contain");
 
   const total = useMemo(() => {
     const hint = Number(durationHint) || 0;
@@ -412,6 +413,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     const onFs = () => {
       const fs = !!document.fullscreenElement;
       setIsFullscreen(fs);
+      if (!fs) setFitMode("contain");
       setShowControls(true);
       clearTimeout(controlsTimer.current);
       if (fs && playing) {
@@ -420,7 +422,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     };
     document.addEventListener("fullscreenchange", onFs);
     return () => document.removeEventListener("fullscreenchange", onFs);
-  }, []);
+  }, [playing]);
 
   useEffect(() => {
     const onDoc = () => {
@@ -436,7 +438,9 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   return (
     <div
       ref={containerRef}
-      className="w-full aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl relative"
+      className={`w-full bg-black relative ${
+        isFullscreen ? "h-full" : "aspect-video rounded-2xl overflow-hidden shadow-2xl"
+      }`}
       onMouseMove={showControlsTemporarily}
       onTouchStart={showControlsTemporarily}
       onClick={() => {
@@ -450,10 +454,14 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         playsInline
         preload="metadata"
         controlsList="noremoteplayback nodownload noplaybackrate"
-        className="w-full h-full"
+        className={`w-full h-full object-${fitMode}`}
         onDoubleClick={() => {
           ignoreClickUntilRef.current = Date.now() + 350;
-          toggleFullscreen();
+          if (isFullscreen) {
+            setFitMode(f => f === "contain" ? "cover" : "contain");
+          } else {
+            toggleFullscreen();
+          }
         }}
       >
         {vttSrc && (
@@ -605,12 +613,25 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
             </div>
           )}
 
+          {isFullscreen && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setFitMode(f => f === "contain" ? "cover" : "contain");
+              }}
+              className="bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg px-3 py-1.5 text-sm font-semibold"
+              title={fitMode === "contain" ? "Vul Scherm" : "Passend Maken"}
+            >
+              {fitMode === "contain" ? "⤡" : "⤢"}
+            </button>
+          )}
+
           <button
             onClick={toggleFullscreen}
             className="bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg px-3 py-1.5 text-sm font-semibold"
             title="Fullscreen"
           >
-            {isFullscreen ? "⤢" : "⤢"}
+            {isFullscreen ? "⤓" : "⤢"}
           </button>
             </div>
           </div>
