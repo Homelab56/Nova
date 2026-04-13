@@ -20,28 +20,38 @@ class _HomeScreenState extends State<HomeScreen> {
   List _trendMovies = [], _trendTv = [], _topMovies = [], _topTv = [];
   List _rdLibrary = [];
   bool _loading = true;
+  String? _error;
 
   @override
   void initState() { super.initState(); _load(); }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
-    final r = await Future.wait([
-      TmdbService.getTrending(),
-      TmdbService.getPopularMovies(),
-      TmdbService.getPopularTv(),
-      TmdbService.getTrendingMovies(),
-      TmdbService.getTrendingTv(),
-      TmdbService.getTopRatedMovies(),
-      TmdbService.getTopRatedTv(),
-      DebridService.getLibrary(),
-    ]);
-    setState(() {
-      _trending = r[0]; _popularMovies = r[1]; _popularTv = r[2];
-      _trendMovies = r[3]; _trendTv = r[4]; _topMovies = r[5]; _topTv = r[6];
-      _rdLibrary = r[7];
-      _loading = false;
-    });
+    setState(() { _loading = true; _error = null; });
+    try {
+      final r = await Future.wait([
+        TmdbService.getTrending(),
+        TmdbService.getPopularMovies(),
+        TmdbService.getPopularTv(),
+        TmdbService.getTrendingMovies(),
+        TmdbService.getTrendingTv(),
+        TmdbService.getTopRatedMovies(),
+        TmdbService.getTopRatedTv(),
+        DebridService.getLibrary(),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _trending = r[0]; _popularMovies = r[1]; _popularTv = r[2];
+        _trendMovies = r[3]; _trendTv = r[4]; _topMovies = r[5]; _topTv = r[6];
+        _rdLibrary = r[7];
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = 'Geen verbinding met server. Open Instellingen en zet je Nova server adres.';
+      });
+    }
   }
 
   List<Map<String, dynamic>> get _rows {
@@ -84,6 +94,24 @@ class _HomeScreenState extends State<HomeScreen> {
       body: SafeArea(
         child: _loading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF00b4d8)))
+          : _error != null
+            ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70)),
+                      const SizedBox(height: 12),
+                      ElevatedButton(
+                        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
+                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00b4d8)),
+                        child: const Text('Open Instellingen', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ),
+                ),
+              )
           : RefreshIndicator(
               onRefresh: _load,
               color: const Color(0xFF00b4d8),

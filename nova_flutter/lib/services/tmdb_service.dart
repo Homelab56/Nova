@@ -1,95 +1,82 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'settings_service.dart';
+import 'api_service.dart';
 
 class TmdbService {
-  static const _base = 'https://api.themoviedb.org/3';
-  static const _lang = 'nl-NL';
-
-  static Future<Map<String, String>> get _params async => {
-    'api_key': await SettingsService.getTmdbKey(),
-    'language': _lang,
-  };
-
-  static Uri _uri(String path, [Map<String, String> extra = const {}]) {
-    return Uri.parse('$_base$path');
-  }
-
-  static Future<dynamic> _get(String path, [Map<String, dynamic> extra = const {}]) async {
-    final key = await SettingsService.getTmdbKey();
-    final params = {'api_key': key, 'language': _lang, ...extra.map((k, v) => MapEntry(k, v.toString()))};
-    final uri = Uri.parse('$_base$path').replace(queryParameters: params);
-    final r = await http.get(uri);
-    if (r.statusCode == 200) return jsonDecode(r.body);
-    throw Exception('TMDB $path failed: ${r.statusCode}');
-  }
-
   static Future<List> getTrending() async {
-    final d = await _get('/trending/all/week');
-    return d['results'] as List;
+    return await ApiService.get('/search/trending') as List;
   }
 
   static Future<List> getPopularMovies({int page = 1}) async {
-    final d = await _get('/movie/popular', {'page': page});
-    return d['results'] as List;
+    return await ApiService.get('/search/popular/movies') as List;
   }
 
   static Future<List> getPopularTv({int page = 1}) async {
-    final d = await _get('/tv/popular', {'page': page});
-    return d['results'] as List;
+    return await ApiService.get('/search/popular/tv') as List;
   }
 
   static Future<List> getTrendingMovies() async {
-    final d = await _get('/trending/movie/week');
-    return d['results'] as List;
+    return await ApiService.get('/search/trending/movies') as List;
   }
 
   static Future<List> getTrendingTv() async {
-    final d = await _get('/trending/tv/week');
-    return d['results'] as List;
+    return await ApiService.get('/search/trending/tv') as List;
   }
 
   static Future<List> getTopRatedMovies() async {
-    final d = await _get('/movie/top_rated');
-    return d['results'] as List;
+    return await ApiService.get('/search/toprated/movies') as List;
   }
 
   static Future<List> getTopRatedTv() async {
-    final d = await _get('/tv/top_rated');
-    return d['results'] as List;
+    return await ApiService.get('/search/toprated/tv') as List;
   }
 
   static Future<Map<String, dynamic>> searchAll(String q, {int page = 1}) async {
-    final d = await _get('/search/multi', {'query': q, 'page': page});
-    return {'items': d['results'] as List, 'total_pages': d['total_pages'], 'total_results': d['total_results']};
+    final movie = await ApiService.get('/search/movie?q=${Uri.encodeComponent(q)}&page=$page') as Map;
+    final tv = await ApiService.get('/search/tv?q=${Uri.encodeComponent(q)}&page=$page') as Map;
+    final items = <dynamic>[
+      ...((movie['items'] as List?) ?? const []),
+      ...((tv['items'] as List?) ?? const []),
+    ];
+    items.sort((a, b) {
+      final ap = (a is Map ? (a['popularity'] as num?) : null) ?? 0;
+      final bp = (b is Map ? (b['popularity'] as num?) : null) ?? 0;
+      return bp.compareTo(ap);
+    });
+    final totalPagesMovie = (movie['total_pages'] as int?) ?? 1;
+    final totalPagesTv = (tv['total_pages'] as int?) ?? 1;
+    final totalResultsMovie = (movie['total_results'] as int?) ?? 0;
+    final totalResultsTv = (tv['total_results'] as int?) ?? 0;
+    return {
+      'items': items,
+      'total_pages': totalPagesMovie > totalPagesTv ? totalPagesMovie : totalPagesTv,
+      'total_results': totalResultsMovie + totalResultsTv,
+    };
   }
 
   static Future<Map<String, dynamic>> discoverGenre(int genreId, String type, {int page = 1}) async {
-    final d = await _get('/discover/$type', {'with_genres': genreId, 'sort_by': 'popularity.desc', 'page': page});
-    return {'items': d['results'] as List, 'total_pages': d['total_pages'], 'total_results': d['total_results']};
+    final d = await ApiService.get('/search/genre/$genreId?type=$type&page=$page') as Map;
+    return {
+      'items': (d['items'] as List?) ?? const [],
+      'total_pages': (d['total_pages'] as int?) ?? 1,
+      'total_results': (d['total_results'] as int?) ?? 0,
+    };
   }
 
-  static Future<Map> getMovieDetail(int id) async => await _get('/movie/$id') as Map;
-  static Future<Map> getTvDetail(int id) async => await _get('/tv/$id') as Map;
+  static Future<Map> getMovieDetail(int id) async => await ApiService.get('/search/movie/$id') as Map;
+  static Future<Map> getTvDetail(int id) async => await ApiService.get('/search/tv/$id') as Map;
 
   static Future<List> getCredits(int id, String type) async {
-    final d = await _get('/$type/$id/credits');
-    final cast = d['cast'] as List;
-    return cast.take(12).toList();
+    return await ApiService.get('/search/$type/$id/credits') as List;
   }
 
   static Future<List> getSimilar(int id, String type) async {
-    final d = await _get('/$type/$id/similar');
-    return (d['results'] as List).take(20).toList();
+    return await ApiService.get('/search/$type/$id/similar') as List;
   }
 
   static Future<Map> getSeason(int id, int season) async {
-    return await _get('/tv/$id/season/$season') as Map;
+    return await ApiService.get('/search/tv/$id/season/$season') as Map;
   }
 
   static Future<bool> testKey(String key) async {
-    final uri = Uri.parse('$_base/configuration').replace(queryParameters: {'api_key': key});
-    final r = await http.get(uri);
-    return r.statusCode == 200;
+    return true;
   }
 }

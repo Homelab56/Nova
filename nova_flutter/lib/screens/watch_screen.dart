@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
 import '../widgets/nova_image.dart';
+import '../services/api_service.dart';
 import '../services/tmdb_service.dart';
 import '../services/debrid_service.dart';
 import '../services/userdata_service.dart';
@@ -112,15 +113,7 @@ class _WatchScreenState extends State<WatchScreen> {
       : '$title $year';
 
     try {
-      // De backend API doet nu het zware werk (library + scraper + cache check)
-      final baseUrl = await SettingsService.getBackendUrl();
-      final response = await http.get(Uri.parse('$baseUrl/api/debrid/search?q=${Uri.encodeComponent(q)}'));
-      
-      if (response.statusCode != 200) {
-        throw 'Server gaf een foutmelding: ${response.statusCode}';
-      }
-
-      final data = jsonDecode(response.body);
+      final data = await ApiService.get('/debrid/search?q=${Uri.encodeComponent(q)}') as Map;
       String? url = data['stream_url'] as String?;
 
       if (url == null) {
@@ -133,7 +126,9 @@ class _WatchScreenState extends State<WatchScreen> {
 
       // Fix relative URLs (bijv. van de lokale mount)
       if (url.startsWith('/')) {
-        url = baseUrl.replaceAll(RegExp(r'/$'), '') + url;
+        final base = await ApiService.baseUrl;
+        final root = base.endsWith('/api') ? base.substring(0, base.length - 4) : base;
+        url = root.replaceAll(RegExp(r'/$'), '') + url;
       }
 
       final source = data['source'] ?? 'unknown';
