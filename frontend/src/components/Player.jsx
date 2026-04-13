@@ -23,6 +23,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const totalRef = useRef(0);
   const lastReportRef = useRef({ t: 0, d: 0, ts: 0 });
   const lastMediaTimeRef = useRef(0);
+  const ignoreClickUntilRef = useRef(0);
   const [error, setError] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [buffering, setBuffering] = useState(false);
@@ -362,8 +363,8 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const sliderValue = dragValue !== null ? dragValue : Math.round(progress * 1000);
   const showNextButton = onNext && total > 0 && (total - absTime) < 90;
   const vEl = videoRef.current;
-  const effectivePlaying = playing || (!!vEl && !vEl.paused && !vEl.ended);
-  const effectiveBuffering = buffering && !effectivePlaying;
+  const effectivePlaying = !!vEl && !vEl.paused && !vEl.ended;
+  const effectiveBuffering = !!vEl && (buffering || (effectivePlaying && !vEl.seeking && vEl.readyState < 3));
 
   const selectedTrackObj = subtitleSelected !== null
     ? subtitleTracks.find(t => t.stream_index === subtitleSelected) || null
@@ -380,7 +381,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const toggle = async () => {
     const v = videoRef.current;
     if (!v) return;
-    if (playing) {
+    if (!v.paused && !v.ended) {
       v.pause();
       setFlashIcon("pause");
       clearTimeout(controlsTimer.current);
@@ -419,6 +420,15 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     return () => document.removeEventListener("fullscreenchange", onFs);
   }, []);
 
+  useEffect(() => {
+    const onDoc = () => {
+      setAudioMenuOpen(false);
+      setSubMenuOpen(false);
+    };
+    document.addEventListener("click", onDoc);
+    return () => document.removeEventListener("click", onDoc);
+  }, []);
+
   if (!url) return null;
 
   return (
@@ -427,6 +437,10 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       className="w-full aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl relative"
       onMouseMove={showControlsTemporarily}
       onTouchStart={showControlsTemporarily}
+      onClick={() => {
+        if (Date.now() < (ignoreClickUntilRef.current || 0)) return;
+        toggle();
+      }}
     >
       <video
         ref={videoRef}
@@ -435,8 +449,10 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         preload="metadata"
         controlsList="noremoteplayback nodownload noplaybackrate"
         className="w-full h-full"
-        onDoubleClick={toggleFullscreen}
-        onClick={toggle}
+        onDoubleClick={() => {
+          ignoreClickUntilRef.current = Date.now() + 350;
+          toggleFullscreen();
+        }}
       >
         {vttSrc && (
           <track
@@ -451,39 +467,29 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         Je browser ondersteunt geen video afspelen.
       </video>
 
-      {(showControls || !isFullscreen || !playing) && (
+      {(showControls || !isFullscreen || !effectivePlaying) && (
       <div
         className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-4 pb-4 pt-10"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+          <div className="flex items-center gap-3">
           <button
             onClick={toggle}
             className="bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg px-3 py-1.5 text-sm font-semibold"
           >
-            {playing ? "⏸" : "▶"}
+            {effectivePlaying ? "⏸" : "▶"}
           </button>
 
           <div className="text-xs text-white/80 w-24 tabular-nums">
             {formatTime(absTime)}{total > 0 ? ` / ${formatTime(total)}` : ""}
           </div>
 
-          <input
-            type="range"
-            min={0}
-            max={1000}
-            value={sliderValue}
-            onChange={(e) => setDragValue(Number(e.target.value))}
-            onMouseUp={commitSeek}
-            onTouchEnd={commitSeek}
-            disabled={total <= 0}
-            className="flex-1"
-          />
-
           {audioTracks.length > 1 && (
             <div className="relative">
               <button
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   setSubMenuOpen(false);
                   setAudioMenuOpen(v => !v);
                 }}
@@ -493,7 +499,10 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
                 A
               </button>
               {audioMenuOpen && (
-                <div className="absolute bottom-11 right-0 bg-black/85 border border-white/15 rounded-xl overflow-hidden min-w-56">
+                <div
+                  className="absolute bottom-11 left-0 sm:left-auto sm:right-0 bg-black/85 border border-white/15 rounded-xl overflow-hidden min-w-56 max-h-64 overflow-y-auto"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <div className="px-3 py-2 text-xs text-white/80 font-semibold border-b border-white/10">
                     Audio
                   </div>
@@ -538,7 +547,8 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
           {subtitleTracks.length > 0 && (
             <div className="relative">
               <button
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   setAudioMenuOpen(false);
                   setSubMenuOpen(v => !v);
                 }}
@@ -548,7 +558,10 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
                 CC
               </button>
               {subMenuOpen && (
-                <div className="absolute bottom-11 right-0 bg-black/85 border border-white/15 rounded-xl overflow-hidden min-w-56">
+                <div
+                  className="absolute bottom-11 left-0 sm:left-auto sm:right-0 bg-black/85 border border-white/15 rounded-xl overflow-hidden min-w-56 max-h-64 overflow-y-auto"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <div className="px-3 py-2 text-xs text-white/80 font-semibold border-b border-white/10">
                     Subtitels
                   </div>
@@ -594,6 +607,19 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
           >
             {isFullscreen ? "⤢" : "⤢"}
           </button>
+          </div>
+
+          <input
+            type="range"
+            min={0}
+            max={1000}
+            value={sliderValue}
+            onChange={(e) => setDragValue(Number(e.target.value))}
+            onMouseUp={commitSeek}
+            onTouchEnd={commitSeek}
+            disabled={total <= 0}
+            className="w-full sm:flex-1"
+          />
         </div>
       </div>
       )}
@@ -608,10 +634,10 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       )}
 
       {!effectiveBuffering && !error && !effectivePlaying && (
-        <div className="absolute inset-0 flex items-center justify-center">
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <button
             onClick={(e) => { e.stopPropagation(); toggle(); }}
-            className="bg-black/50 hover:bg-black/60 border border-white/15 text-white rounded-full w-20 h-20 flex items-center justify-center text-3xl"
+            className="bg-black/50 hover:bg-black/60 border border-white/15 text-white rounded-full w-20 h-20 flex items-center justify-center text-3xl pointer-events-auto"
             title="Afspelen"
           >
             ▶
