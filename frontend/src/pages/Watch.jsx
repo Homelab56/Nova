@@ -294,7 +294,8 @@ export default function Watch() {
               `/api/seerr/media-status?tmdb_id=${media.id}&media_type=${type}`,
               { signal: searchAbortRef.current.signal }
             ).then(r => r.json());
-            if (ms?.ok && ms?.status !== null && ms?.status !== undefined) {
+            // Zorg dat we niet triggeren op status 1 (Unknown) of "Niet aangevraagd"
+            if (ms?.ok && ms?.status && ms.status > 1) {
               setLock(lockKey);
               setRequestStatus("waiting");
               setRequestMessage(ms.status_label || "Bestaat al in Seerr. Wachten...");
