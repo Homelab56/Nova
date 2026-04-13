@@ -1,16 +1,37 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'settings_service.dart';
 
 class ApiService {
-  static const _storage = FlutterSecureStorage();
-
-  // Verander dit naar het IP van je Debian server
-  static const String _defaultBase = 'http://192.168.1.100:8005';
+  static String? _resolvedBase;
+  static String? _lastRoot;
 
   static Future<String> get baseUrl async {
-    final saved = await _storage.read(key: 'server_url');
-    return saved ?? _defaultBase;
+    final saved = (await SettingsService.getBackendUrl()).trim();
+    final root = saved.replaceAll(RegExp(r'/$'), '');
+
+    if (_lastRoot != root) {
+      _lastRoot = root;
+      _resolvedBase = null;
+    }
+
+    if (_resolvedBase != null) return _resolvedBase!;
+
+    final baseRoot = root.isNotEmpty ? root : 'http://localhost:8000';
+    final candidates = <String>['$baseRoot/api', baseRoot];
+
+    for (final c in candidates) {
+      try {
+        final r = await http.get(Uri.parse('$c/settings/status')).timeout(const Duration(seconds: 3));
+        if (r.statusCode == 200) {
+          _resolvedBase = c;
+          return c;
+        }
+      } catch (_) {}
+    }
+
+    _resolvedBase = candidates.first;
+    return _resolvedBase!;
   }
 
   static Future<Map<String, String>> get _headers async => {

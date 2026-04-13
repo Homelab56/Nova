@@ -39,6 +39,7 @@ export default function Settings() {
   const navigate = useNavigate();
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -55,6 +56,29 @@ export default function Settings() {
   useEffect(() => {
     fetchStatus();
   }, []);
+
+  const serverUrl = typeof window !== "undefined" ? window.location.origin : "";
+
+  const copyServerUrl = async () => {
+    if (!serverUrl) return;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(serverUrl);
+      } else {
+        const el = document.createElement("textarea");
+        el.value = serverUrl;
+        el.setAttribute("readonly", "");
+        el.style.position = "absolute";
+        el.style.left = "-9999px";
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand("copy");
+        document.body.removeChild(el);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {}
+  };
 
   return (
     <div className="min-h-screen bg-nova-bg px-6 py-10 max-w-3xl mx-auto">
@@ -115,6 +139,33 @@ export default function Settings() {
           status={status?.seerr}
           loading={loading}
         />
+      </div>
+
+      <div className="mt-10 p-6 bg-nova-card/50 rounded-2xl border border-gray-800/50">
+        <h3 className="text-lg font-bold text-white mb-2">Nova App</h3>
+        <p className="text-gray-400 text-sm leading-relaxed">
+          Download de Android app en verbind met dezelfde Nova server als deze web UI.
+        </p>
+
+        <div className="mt-4 flex flex-col sm:flex-row gap-3">
+          <a
+            href="/nova.apk"
+            download
+            className="bg-nova-accent hover:bg-nova-hover px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all shadow-lg active:scale-95 text-center"
+          >
+            Download Android app (APK)
+          </a>
+          <button
+            onClick={copyServerUrl}
+            className="bg-white/10 hover:bg-white/15 border border-white/10 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all shadow-lg active:scale-95"
+          >
+            {copied ? "Gekopieerd" : "Kopieer server adres"}
+          </button>
+        </div>
+
+        <div className="mt-4 bg-black/50 p-4 rounded-xl font-mono text-xs text-gray-300 border border-white/5 break-all">
+          {serverUrl || "-"}
+        </div>
       </div>
 
       <div className="mt-12 p-6 bg-nova-card/50 rounded-2xl border border-gray-800/50">
