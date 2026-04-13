@@ -14,6 +14,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const videoRef = useRef(null);
   const saveTimer = useRef(null);
   const controlsTimer = useRef(null);
+  const flashTimer = useRef(null);
   const subsAbortRef = useRef(null);
   const audioAbortRef = useRef(null);
   const audioSeekRef = useRef(null);
@@ -69,6 +70,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     return () => {
       clearTimeout(saveTimer.current);
       clearTimeout(controlsTimer.current);
+      clearTimeout(flashTimer.current);
       if (subsAbortRef.current) subsAbortRef.current.abort();
       if (audioAbortRef.current) audioAbortRef.current.abort();
       reportProgress();
@@ -384,13 +386,13 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     if (!v.paused && !v.ended) {
       v.pause();
       setFlashIcon("pause");
-      clearTimeout(controlsTimer.current);
-      controlsTimer.current = setTimeout(() => setFlashIcon(null), 600);
+      clearTimeout(flashTimer.current);
+      flashTimer.current = setTimeout(() => setFlashIcon(null), 600);
       return;
     }
     setFlashIcon("play");
-    clearTimeout(controlsTimer.current);
-    controlsTimer.current = setTimeout(() => setFlashIcon(null), 600);
+    clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlashIcon(null), 600);
     await tryPlay();
   };
 
@@ -472,8 +474,9 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-4 pb-4 pt-10"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-          <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
           <button
             onClick={toggle}
             className="bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg px-3 py-1.5 text-sm font-semibold"
@@ -484,7 +487,9 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
           <div className="text-xs text-white/80 w-24 tabular-nums">
             {formatTime(absTime)}{total > 0 ? ` / ${formatTime(total)}` : ""}
           </div>
+            </div>
 
+            <div className="flex items-center gap-2">
           {audioTracks.length > 1 && (
             <div className="relative">
               <button
@@ -607,6 +612,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
           >
             {isFullscreen ? "⤢" : "⤢"}
           </button>
+            </div>
           </div>
 
           <input
@@ -618,7 +624,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
             onMouseUp={commitSeek}
             onTouchEnd={commitSeek}
             disabled={total <= 0}
-            className="w-full sm:flex-1"
+            className="w-full"
           />
         </div>
       </div>
