@@ -22,6 +22,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const absTimeRef = useRef(0);
   const totalRef = useRef(0);
   const lastReportRef = useRef({ t: 0, d: 0, ts: 0 });
+  const lastMediaTimeRef = useRef(0);
   const [error, setError] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [buffering, setBuffering] = useState(false);
@@ -36,6 +37,8 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const [audioTracks, setAudioTracks] = useState([]);
   const [audioSelected, setAudioSelected] = useState(null);
   const [audioLabel, setAudioLabel] = useState("");
+  const [castAvailable, setCastAvailable] = useState(false);
+  const [castState, setCastState] = useState(null);
 
   const total = useMemo(() => {
     const hint = Number(durationHint) || 0;
@@ -157,6 +160,8 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     const t = Math.max(0, Number(absSeconds) || 0);
     startOffsetRef.current = t;
     absTimeRef.current = t;
+    lastMediaTimeRef.current = 0;
+    setBuffering(true);
     const src = buildSrc(t, audioIdx);
     baseUrlRef.current = src;
     v.src = src;
@@ -284,6 +289,13 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       const t = startOffsetRef.current + (v.currentTime || 0);
       setAbsTime(t);
       absTimeRef.current = t;
+      const mediaT = Number(v.currentTime || 0);
+      const lastT = lastMediaTimeRef.current || 0;
+      if (mediaT > lastT + 0.05) {
+        lastMediaTimeRef.current = mediaT;
+        setBuffering(false);
+        if (!v.paused && !v.ended) setPlaying(true);
+      }
       if (!media || !onProgress) return;
       if (total <= 0) return;
       clearTimeout(saveTimer.current);
@@ -292,7 +304,10 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       }, 5000);
     };
     const onWaiting = () => setBuffering(true);
-    const onPlaying = () => setBuffering(false);
+    const onPlaying = () => {
+      setBuffering(false);
+      setPlaying(true);
+    };
     const onStalled = () => setBuffering(true);
     const onSeeking = () => setBuffering(true);
     const onSeeked = () => {
@@ -334,6 +349,60 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       v.removeEventListener("ended", onEndedEvent);
     };
   }, [media, onProgress, total]);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+
+    const onRemoteAvail = (e) => {
+      const a = e?.availability;
+      setCastAvailable(a === "available");
+    };
+
+    const remote = v.remote;
+    const onRemoteChange = () => {
+      try {
+        setCastState(remote?.state || null);
+      } catch {
+        setCastState(null);
+      }
+    };
+
+    try {
+      if (remote) onRemoteChange();
+    } catch {}
+
+    try {
+      v.addEventListener("remoteplaybackavailabilitychanged", onRemoteAvail);
+    } catch {}
+    try {
+      remote?.addEventListener?.("connect", onRemoteChange);
+      remote?.addEventListener?.("connecting", onRemoteChange);
+      remote?.addEventListener?.("disconnect", onRemoteChange);
+    } catch {}
+
+    const onWebkitAirplayAvail = (e) => {
+      const a = e?.availability;
+      setCastAvailable(a === "available");
+    };
+    try {
+      v.addEventListener("webkitplaybacktargetavailabilitychanged", onWebkitAirplayAvail);
+    } catch {}
+
+    return () => {
+      try {
+        v.removeEventListener("remoteplaybackavailabilitychanged", onRemoteAvail);
+      } catch {}
+      try {
+        remote?.removeEventListener?.("connect", onRemoteChange);
+        remote?.removeEventListener?.("connecting", onRemoteChange);
+        remote?.removeEventListener?.("disconnect", onRemoteChange);
+      } catch {}
+      try {
+        v.removeEventListener("webkitplaybacktargetavailabilitychanged", onWebkitAirplayAvail);
+      } catch {}
+    };
+  }, [url]);
 
   useEffect(() => {
     const onVis = () => {
@@ -415,6 +484,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         autoPlay
         playsInline
         preload="metadata"
+        controlsList="noremoteplayback nodownload noplaybackrate"
         className="w-full h-full"
         onDoubleClick={toggleFullscreen}
         onClick={toggle}
@@ -460,6 +530,30 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
             disabled={total <= 0}
             className="flex-1"
           />
+
+          {(castAvailable || castState) && (
+            <button
+              onClick={() => {
+                const v = videoRef.current;
+                if (!v) return;
+                try {
+                  if (v.remote && typeof v.remote.prompt === "function") {
+                    v.remote.prompt();
+                    return;
+                  }
+                } catch {}
+                try {
+                  if (typeof v.webkitShowPlaybackTargetPicker === "function") {
+                    v.webkitShowPlaybackTargetPicker();
+                  }
+                } catch {}
+              }}
+              className="bg-black/60 hover:bg-black/70 border border-white/20 text-white rounded-lg px-3 py-1.5 text-xs font-semibold"
+              title="Cast"
+            >
+              Cast
+            </button>
+          )}
 
           {audioTracks.length > 1 && (
             <div className="flex items-center gap-2">
