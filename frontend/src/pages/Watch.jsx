@@ -420,14 +420,23 @@ export default function Watch() {
     setRequestMessage("Aanvragen via Seerr...");
     requestKeyRef.current = reqKey || null;
     try {
+      let seasonNums = [];
+      if (!isMovie) {
+        seasonNums = ((seasons || []).map(s => Number(s.season_number)).filter(Boolean));
+        if (seasonNums.length === 0) {
+          try {
+            const d = await fetch(`/api/search/tv/${media.id}`).then(r => r.json());
+            seasonNums = ((d?.seasons || []).map(s => Number(s.season_number)).filter(n => Number.isFinite(n) && n > 0));
+          } catch {}
+        }
+        if (seasonNums.length === 0) seasonNums = [Number(selectedSeason)];
+      }
+
       const payload = {
         media_id: media.id,
         media_type: type,
-        seasons: !isMovie ? ((seasons || []).map(s => s.season_number).filter(Boolean)) : []
+        seasons: isMovie ? [] : seasonNums
       };
-      if (!isMovie && (!payload.seasons || payload.seasons.length === 0)) {
-        payload.seasons = [Number(selectedSeason)];
-      }
       const r = await fetch("/api/seerr/request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

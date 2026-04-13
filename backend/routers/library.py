@@ -102,7 +102,13 @@ async def find_file(q: str):
         ep_tokens = {f"s{ss:02d}e{ee:02d}", f"{ss}x{ee:02d}", f"{ss:02d}x{ee:02d}"}
 
     words = [w for w in q_clean.split() if len(w) >= 2]
-    words = [w for w in words if not re.fullmatch(r"s\d{2}e\d{2}", w) and not re.fullmatch(r"\d{1,2}x\d{2}", w)]
+    words = [
+        w
+        for w in words
+        if not re.fullmatch(r"s\d{2}e\d{2}", w)
+        and not re.fullmatch(r"\d{1,2}x\d{2}", w)
+        and not re.fullmatch(r"(19\d{2}|20\d{2})", w)
+    ]
     
     if not words:
         return {"found": False}

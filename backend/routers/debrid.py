@@ -250,6 +250,8 @@ async def _candidate_queries(q: str, tmdb_id: int | None, media_type: str | None
     base = q.strip()
     if not base:
         return []
+    if media_type == "tv" and _episode_token(base):
+        return [base]
     candidates = [base]
     base_year = _candidate_year(base)
     tmdb_year = None
@@ -333,12 +335,21 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
     if not word_sets:
         return {"available": False}
     word_sets = _filter_candidates_for_year(word_sets, base_year)
+    ep_token = _episode_token(q or "") if media_type == "tv" else None
+    ep_variants = None
+    if ep_token:
+        m = re.fullmatch(r"s(\d{2})e(\d{2})", ep_token)
+        if m:
+            ss, ee = m.groups()
+            ssi = int(ss)
+            eei = int(ee)
+            ep_variants = {ep_token, f"{ssi}x{eei:02d}", f"{ssi:02d}x{eei:02d}"}
 
     async with httpx.AsyncClient() as client:
         r = await client.get(
             f"{RD_BASE}/torrents",
             headers=rd_headers(),
-            params={"limit": 100}
+            params={"limit": 500}
         )
         if r.status_code != 200:
             return {"available": False}
@@ -349,6 +360,8 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
         filename_raw = torrent.get("filename", "") or ""
         filename = _normalize_text(filename_raw)
         filename_years = _extract_years(filename_raw)
+        if ep_variants and not any(t in filename for t in ep_variants):
+            continue
         best_score = 0
         best_min = 999
         for words, candidate_q in word_sets:
@@ -357,7 +370,7 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
                 continue
             if base_year and not cy and filename_years and base_year not in filename_years:
                 continue
-            if is_movie and base_year and (not filename_years or base_year not in filename_years):
+            if is_movie and base_year and filename_years and base_year not in filename_years:
                 continue
             score = sum(1 for word in words if word in filename)
             min_score = _required_score(words, media_type, base_year, is_library=True)
@@ -400,6 +413,15 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
     word_sets = [(w, c) for (w, c) in word_sets if w]
     if not word_sets:
         return {"stream_url": None, "message": "Ongeldige zoekopdracht."}
+    ep_token = _episode_token(q or "") if media_type == "tv" else None
+    ep_variants = None
+    if ep_token:
+        m = re.fullmatch(r"s(\d{2})e(\d{2})", ep_token)
+        if m:
+            ss, ee = m.groups()
+            ssi = int(ss)
+            eei = int(ee)
+            ep_variants = {ep_token, f"{ssi}x{eei:02d}", f"{ssi:02d}x{eei:02d}"}
 
     # --- STAP 0: Zoek op lokale Dumbarr mount ---
     from .library import find_file
@@ -419,7 +441,7 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
         r = await client.get(
             f"{RD_BASE}/torrents",
             headers=rd_headers(),
-            params={"limit": 100}
+            params={"limit": 500}
         )
         if r.status_code == 200:
             torrents = r.json()
@@ -432,6 +454,8 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
             for torrent in torrents:
                 filename_years = _extract_years(torrent.get("filename", "") or "")
                 filename = _normalize_text(torrent.get("filename", "") or "")
+                if ep_variants and not any(t in filename for t in ep_variants):
+                    continue
                 torrent_best = 0
                 torrent_min = 999
                 torrent_q = q
@@ -441,7 +465,7 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                         continue
                     if base_year and not cy and filename_years and base_year not in filename_years:
                         continue
-                    if is_movie and base_year and (not filename_years or base_year not in filename_years):
+                    if is_movie and base_year and filename_years and base_year not in filename_years:
                         continue
                     score = sum(1 for word in words if word in filename)
                     min_score = _required_score(words, media_type, base_year, is_library=True)
@@ -548,13 +572,15 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
         title_raw = t.get("title") or ""
         title_norm = _normalize_text(title_raw)
         title_years = _extract_years(title_raw)
+        if ep_variants and not any(tok in title_norm for tok in ep_variants):
+            continue
         best = 0
         best_min = 999
         for words, candidate_q in primary_word_sets:
             cy = _candidate_year(candidate_q)
             if cy and title_years and cy not in title_years:
                 continue
-            if is_movie and base_year and (not title_years or base_year not in title_years):
+            if is_movie and base_year and title_years and base_year not in title_years:
                 continue
             score = sum(1 for word in words if word in title_norm)
             min_score = _required_score(words, media_type, base_year, is_library=False)
