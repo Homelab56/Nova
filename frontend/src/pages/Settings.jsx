@@ -155,6 +155,13 @@ export default function Settings() {
           >
             Download Android app (APK)
           </a>
+          <a
+            href={serverUrl ? `nova://connect?url=${encodeURIComponent(serverUrl)}` : "#"}
+            onClick={(e) => { if (!serverUrl) e.preventDefault(); }}
+            className="bg-white/10 hover:bg-white/15 border border-white/10 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all shadow-lg active:scale-95 text-center"
+          >
+            Open Nova app
+          </a>
           <button
             onClick={copyServerUrl}
             className="bg-white/10 hover:bg-white/15 border border-white/10 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all shadow-lg active:scale-95"
