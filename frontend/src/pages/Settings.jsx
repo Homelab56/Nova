@@ -150,7 +150,7 @@ export default function Settings() {
         <div className="mt-4 flex flex-col sm:flex-row gap-3">
           <a
             href="/nova.apk"
-            download
+            download="nova.apk"
             className="bg-nova-accent hover:bg-nova-hover px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all shadow-lg active:scale-95 text-center"
           >
             Download Android app (APK)
