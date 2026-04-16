@@ -519,6 +519,29 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
     
     async def _external_search(query: str) -> list[dict]:
         out = []
+        def _clean(v):
+            return str(v or "").strip().replace("`", "")
+
+        def _extract_release(res: dict) -> dict | None:
+            if not isinstance(res, dict):
+                return None
+            info_hash = _clean(res.get("infoHash") or res.get("InfoHash"))
+            magnet = _clean(res.get("magnetUrl") or res.get("magnetUri") or res.get("MagnetUri"))
+            # Prowlarr v1 geeft soms alleen een /download URL; gebruik dan GUID als magnet fallback.
+            if not magnet.lower().startswith("magnet:?"):
+                guid = _clean(res.get("guid") or res.get("Guid"))
+                if guid.lower().startswith("magnet:?"):
+                    magnet = guid
+            if not info_hash or not magnet.lower().startswith("magnet:?"):
+                return None
+            return {
+                "title": _clean(res.get("title") or res.get("Title")),
+                "hash": info_hash.lower(),
+                "magnet": magnet,
+                "seeders": res.get("seeders") or res.get("Seeders") or 0,
+                "size": res.get("size") or res.get("Size"),
+            }
+
         if jackett.get("url") and jackett.get("api_key"):
             prowlarr_url = jackett["url"].rstrip("/")
             prowlarr_key = jackett["api_key"]
@@ -538,18 +561,9 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                     if pr.status_code == 200:
                         releases = pr.json() if isinstance(pr.json(), list) else []
                         for res in releases:
-                            if not isinstance(res, dict):
-                                continue
-                            info_hash = res.get("infoHash") or res.get("InfoHash")
-                            magnet = res.get("magnetUrl") or res.get("magnetUri") or res.get("MagnetUri")
-                            if info_hash and magnet:
-                                out.append({
-                                    "title": res.get("title") or res.get("Title"),
-                                    "hash": info_hash,
-                                    "magnet": magnet,
-                                    "seeders": res.get("seeders") or res.get("Seeders") or 0,
-                                    "size": res.get("size") or res.get("Size"),
-                                })
+                            rel = _extract_release(res)
+                            if rel:
+                                out.append(rel)
                     if not out:
                         pr_tv = await client.get(
                             f"{prowlarr_url}/api/v1/search",
@@ -565,18 +579,9 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                         if pr_tv.status_code == 200:
                             releases = pr_tv.json() if isinstance(pr_tv.json(), list) else []
                             for res in releases:
-                                if not isinstance(res, dict):
-                                    continue
-                                info_hash = res.get("infoHash") or res.get("InfoHash")
-                                magnet = res.get("magnetUrl") or res.get("magnetUri") or res.get("MagnetUri")
-                                if info_hash and magnet:
-                                    out.append({
-                                        "title": res.get("title") or res.get("Title"),
-                                        "hash": info_hash,
-                                        "magnet": magnet,
-                                        "seeders": res.get("seeders") or res.get("Seeders") or 0,
-                                        "size": res.get("size") or res.get("Size"),
-                                    })
+                                rel = _extract_release(res)
+                                if rel:
+                                    out.append(rel)
 
                     if not out:
                         jr = await client.get(
@@ -591,14 +596,9 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                         if jr.status_code == 200:
                             results = jr.json().get("Results", [])
                             for res in results:
-                                if res.get("InfoHash"):
-                                    out.append({
-                                        "title": res.get("Title"),
-                                        "hash": res.get("InfoHash"),
-                                        "magnet": res.get("MagnetUri"),
-                                        "seeders": res.get("Seeders", 0),
-                                        "size": res.get("Size")
-                                    })
+                                rel = _extract_release(res)
+                                if rel:
+                                    out.append(rel)
             except Exception as e:
                 print(f"Jackett fout: {e}")
         if not out:
