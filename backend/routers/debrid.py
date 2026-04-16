@@ -678,7 +678,8 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
     async with httpx.AsyncClient() as client:
         cr = await client.get(f"{RD_BASE}/torrents/instantAvailability/{hash_str}", headers=rd_headers())
         if cr.status_code == 200:
-            cache_data = cr.json()
+            raw_cache = cr.json()
+            cache_data = {str(k).lower(): v for k, v in (raw_cache or {}).items()} if isinstance(raw_cache, dict) else {}
             for t in external_torrents:
                 h = t["hash"].lower()
                 if h in cache_data and cache_data[h].get("rd"):

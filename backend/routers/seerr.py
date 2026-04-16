@@ -19,6 +19,59 @@ class RequestBody(BaseModel):
     media_type: str # "movie" of "tv"
     seasons: list[int] = [] # Alleen voor tv
 
+def _extract_media_from_requests_payload(payload, tmdb_id: int):
+    items = []
+    if isinstance(payload, dict):
+        if isinstance(payload.get("results"), list):
+            items = payload.get("results") or []
+        elif isinstance(payload.get("requests"), list):
+            items = payload.get("requests") or []
+        else:
+            items = [payload]
+    elif isinstance(payload, list):
+        items = payload
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        media = item.get("media") if isinstance(item.get("media"), dict) else item
+        if not isinstance(media, dict):
+            continue
+        mt = media.get("tmdbId")
+        if isinstance(mt, int) and mt == tmdb_id:
+            return media
+    return None
+
+async def _fetch_seerr_media(client: httpx.AsyncClient, url: str, key: str, tmdb_id: int):
+    direct = await client.get(
+        f"{url}/api/v1/media/tmdb/{tmdb_id}",
+        headers={"X-Api-Key": key},
+        timeout=10,
+    )
+    if direct.status_code == 200:
+        return {"ok": True, "media": direct.json(), "status_code": 200}
+    if direct.status_code == 404:
+        return {"ok": True, "media": None, "status_code": 404}
+    if direct.status_code in (401, 403):
+        return {"ok": False, "media": None, "status_code": direct.status_code}
+
+    # Sommige Seerr varianten geven 405 op /media/tmdb; fallback via requests-lijst.
+    if direct.status_code == 405:
+        req = await client.get(
+            f"{url}/api/v1/request",
+            headers={"X-Api-Key": key},
+            params={"take": 200, "skip": 0},
+            timeout=10,
+        )
+        if req.status_code == 200:
+            media = _extract_media_from_requests_payload(req.json(), tmdb_id)
+            return {"ok": True, "media": media, "status_code": 200 if media else 404}
+        if req.status_code in (401, 403):
+            return {"ok": False, "media": None, "status_code": req.status_code}
+        return {"ok": False, "media": None, "status_code": req.status_code}
+
+    return {"ok": False, "media": None, "status_code": direct.status_code}
+
 
 def _find_first_request_id(data):
     if isinstance(data, dict):
@@ -91,14 +144,10 @@ async def request_media(body: RequestBody):
 
     try:
         async with httpx.AsyncClient() as client:
-            existing = await client.get(
-                f"{url}/api/v1/media/tmdb/{body.media_id}",
-                headers={"X-Api-Key": key},
-                timeout=10
-            )
+            existing = await _fetch_seerr_media(client, url, key, body.media_id)
 
-        if existing.status_code == 200:
-            existing_data = existing.json()
+        if existing.get("ok") and existing.get("media") is not None:
+            existing_data = existing.get("media")
             existing_request_id = _find_first_request_id(existing_data)
             if body.media_type == "movie":
                 return {
@@ -115,8 +164,8 @@ async def request_media(body: RequestBody):
                     "media": existing_data,
                 }
 
-        if existing.status_code in (401, 403):
-            return {"ok": False, "message": f"Seerr fout: {existing.status_code}. Toegang geweigerd."}
+        if not existing.get("ok") and existing.get("status_code") in (401, 403):
+            return {"ok": False, "message": f"Seerr fout: {existing.get('status_code')}. Toegang geweigerd."}
     except Exception:
         pass
     
@@ -207,13 +256,9 @@ async def media_status(tmdb_id: int, media_type: str):
 
     try:
         async with httpx.AsyncClient() as client:
-            r = await client.get(
-                f"{url}/api/v1/media/tmdb/{tmdb_id}",
-                headers={"X-Api-Key": key},
-                timeout=10
-            )
-        if r.status_code == 200:
-            data = r.json()
+            r = await _fetch_seerr_media(client, url, key, tmdb_id)
+        if r.get("ok") and r.get("media") is not None:
+            data = r.get("media")
             status_code = data.get("status")
             status_label = STATUS_LABELS.get(status_code, f"Status {status_code}")
             return {
@@ -223,8 +268,8 @@ async def media_status(tmdb_id: int, media_type: str):
                 "download_status": data.get("downloadStatus") or data.get("downloadStatus4k"),
                 "media": data,
             }
-        if r.status_code == 404:
+        if r.get("ok") and r.get("media") is None:
             return {"ok": True, "status": None, "status_label": "Niet aangevraagd", "media": None}
-        return {"ok": False, "message": f"Seerr gaf status {r.status_code} terug."}
+        return {"ok": False, "message": f"Seerr gaf status {r.get('status_code')} terug."}
     except Exception as e:
         return {"ok": False, "message": f"Fout bij verbinden met Seerr: {str(e)}"}
