@@ -146,7 +146,7 @@ async def test_jackett():
             # Probeer eerst de Prowlarr status endpoint
             prowlarr_test = await client.get(
                 f"{url.rstrip('/')}/api/v1/system/status",
-                params={"apikey": key},
+                headers={"X-Api-Key": key},
                 timeout=5,
             )
             if prowlarr_test.status_code == 200:

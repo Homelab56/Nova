@@ -520,28 +520,85 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
     async def _external_search(query: str) -> list[dict]:
         out = []
         if jackett.get("url") and jackett.get("api_key"):
+            prowlarr_url = jackett["url"].rstrip("/")
+            prowlarr_key = jackett["api_key"]
             try:
                 async with httpx.AsyncClient() as client:
-                    jr = await client.get(
-                        f"{jackett['url'].rstrip('/')}/api/v2.0/indexers/all/results",
+                    pr = await client.get(
+                        f"{prowlarr_url}/api/v1/search",
                         params={
-                            "apikey": jackett["api_key"],
-                            "Query": query,
-                            "Category[]": [2000, 5000]
+                            "query": query,
+                            "indexerIds": "-2",
+                            "type": "search",
+                            "categories": 2000,
                         },
-                        timeout=15
+                        headers={"X-Api-Key": prowlarr_key},
+                        timeout=15,
                     )
-                    if jr.status_code == 200:
-                        results = jr.json().get("Results", [])
-                        for res in results:
-                            if res.get("InfoHash"):
+                    if pr.status_code == 200:
+                        releases = pr.json() if isinstance(pr.json(), list) else []
+                        for res in releases:
+                            if not isinstance(res, dict):
+                                continue
+                            info_hash = res.get("infoHash") or res.get("InfoHash")
+                            magnet = res.get("magnetUrl") or res.get("magnetUri") or res.get("MagnetUri")
+                            if info_hash and magnet:
                                 out.append({
-                                    "title": res.get("Title"),
-                                    "hash": res.get("InfoHash"),
-                                    "magnet": res.get("MagnetUri"),
-                                    "seeders": res.get("Seeders", 0),
-                                    "size": res.get("Size")
+                                    "title": res.get("title") or res.get("Title"),
+                                    "hash": info_hash,
+                                    "magnet": magnet,
+                                    "seeders": res.get("seeders") or res.get("Seeders") or 0,
+                                    "size": res.get("size") or res.get("Size"),
                                 })
+                    if not out:
+                        pr_tv = await client.get(
+                            f"{prowlarr_url}/api/v1/search",
+                            params={
+                                "query": query,
+                                "indexerIds": "-2",
+                                "type": "search",
+                                "categories": 5000,
+                            },
+                            headers={"X-Api-Key": prowlarr_key},
+                            timeout=15,
+                        )
+                        if pr_tv.status_code == 200:
+                            releases = pr_tv.json() if isinstance(pr_tv.json(), list) else []
+                            for res in releases:
+                                if not isinstance(res, dict):
+                                    continue
+                                info_hash = res.get("infoHash") or res.get("InfoHash")
+                                magnet = res.get("magnetUrl") or res.get("magnetUri") or res.get("MagnetUri")
+                                if info_hash and magnet:
+                                    out.append({
+                                        "title": res.get("title") or res.get("Title"),
+                                        "hash": info_hash,
+                                        "magnet": magnet,
+                                        "seeders": res.get("seeders") or res.get("Seeders") or 0,
+                                        "size": res.get("size") or res.get("Size"),
+                                    })
+
+                    if not out:
+                        jr = await client.get(
+                            f"{prowlarr_url}/api/v2.0/indexers/all/results",
+                            params={
+                                "apikey": prowlarr_key,
+                                "Query": query,
+                                "Category[]": [2000, 5000]
+                            },
+                            timeout=15
+                        )
+                        if jr.status_code == 200:
+                            results = jr.json().get("Results", [])
+                            for res in results:
+                                if res.get("InfoHash"):
+                                    out.append({
+                                        "title": res.get("Title"),
+                                        "hash": res.get("InfoHash"),
+                                        "magnet": res.get("MagnetUri"),
+                                        "seeders": res.get("Seeders", 0),
+                                        "size": res.get("Size")
+                                    })
             except Exception as e:
                 print(f"Jackett fout: {e}")
         if not out:
