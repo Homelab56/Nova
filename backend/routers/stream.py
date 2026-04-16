@@ -418,6 +418,17 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0, au
     if copy_video:
         cmd += ["-c:v", "copy"]
     else:
+        vf = None
+        maxrate = None
+        bufsize = None
+
+        if v_codec in {"hevc", "h265"}:
+            vf = "scale=-2:min(720\\,ih)"
+            maxrate = "3500k"
+            bufsize = "7000k"
+        elif v_w >= 2560 or v_h >= 1440:
+            vf = "scale=-2:1080"
+
         cmd += [
             "-c:v",
             "libx264",
@@ -438,8 +449,12 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0, au
             "-pix_fmt",
             "yuv420p",
         ]
-        if v_w >= 2560 or v_h >= 1440:
-            cmd += ["-vf", "scale=-2:1080"]
+        if vf:
+            cmd += ["-vf", vf]
+        if maxrate:
+            cmd += ["-maxrate", maxrate]
+        if bufsize:
+            cmd += ["-bufsize", bufsize]
 
     if copy_audio:
         cmd += ["-c:a", "copy"]
@@ -448,7 +463,7 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0, au
             "-c:a",
             "aac",
             "-b:a",
-            "192k",
+            "128k" if v_codec in {"hevc", "h265"} else "192k",
             "-ac",
             "2",
             "-af",
