@@ -138,7 +138,7 @@ async def find_file(q: str):
         return {"found": False}
 
     best_match = None
-    best_score = 0
+    best_score = -10_000_000
     min_score = len(words)
 
     # We scannen de hele boom (beperkt tot 3 diep voor performance)
@@ -162,26 +162,28 @@ async def find_file(q: str):
             
             # Check of ALLE titelwoorden in de bestandsnaam of mapnaam zitten
             full_path_lower = _normalize_text(candidate_path)
-            score = sum(1 for word in words if word in full_path_lower)
+            raw_score = sum(1 for word in words if word in full_path_lower)
             
-            if score < min_score:
+            if raw_score < min_score:
                 continue
+            
+            score = raw_score * 100
 
             if ep_tokens and not any(t in full_path_lower for t in ep_tokens):
                 continue
             
             # Bonus voor exacte match op SxxExx
             if ep_tokens and any(t in file_lower for t in ep_tokens):
-                score += 5
+                score += 500
             
             if re.search(r"\b(x264|h264|avc)\b", full_path_lower):
-                score += 2
+                score += 20
             if re.search(r"\b(x265|h265|hevc)\b", full_path_lower):
-                score -= 2
+                score -= 20
             if re.search(r"\b(10bit|10 bit)\b", full_path_lower):
-                score -= 1
+                score -= 10
             if candidate_path.lower().endswith(".mp4"):
-                score += 1
+                score += 10
 
             if score > best_score:
                 best_score = score
