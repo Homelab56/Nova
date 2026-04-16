@@ -283,7 +283,7 @@ async def _ffprobe_streams(input_value: str, is_path: bool) -> dict:
         "-v",
         "error",
         "-show_entries",
-        "stream=index,codec_type,codec_name",
+        "stream=index,codec_type,codec_name,width,height",
         "-of",
         "json",
         input_value,
@@ -380,10 +380,14 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0, au
 
     copy_video = v_codec == "h264"
     copy_audio = a_codec == "aac"
-
-    if start and start > 0:
-        copy_video = False
-        copy_audio = False
+    try:
+        v_w = int(v.get("width") or 0)
+    except Exception:
+        v_w = 0
+    try:
+        v_h = int(v.get("height") or 0)
+    except Exception:
+        v_h = 0
 
     cmd = [
         "ffmpeg",
@@ -434,6 +438,8 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0, au
             "-pix_fmt",
             "yuv420p",
         ]
+        if v_w >= 2560 or v_h >= 1440:
+            cmd += ["-vf", "scale=-2:1080"]
 
     if copy_audio:
         cmd += ["-c:a", "copy"]
