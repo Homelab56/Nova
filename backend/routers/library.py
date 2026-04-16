@@ -173,6 +173,15 @@ async def find_file(q: str):
             # Bonus voor exacte match op SxxExx
             if ep_tokens and any(t in file_lower for t in ep_tokens):
                 score += 5
+            
+            if re.search(r"\b(x264|h264|avc)\b", full_path_lower):
+                score += 2
+            if re.search(r"\b(x265|h265|hevc)\b", full_path_lower):
+                score -= 2
+            if re.search(r"\b(10bit|10 bit)\b", full_path_lower):
+                score -= 1
+            if candidate_path.lower().endswith(".mp4"):
+                score += 1
 
             if score > best_score:
                 best_score = score
