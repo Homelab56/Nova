@@ -113,8 +113,8 @@ class _WatchScreenState extends State<WatchScreen> {
       : '$title $year';
 
     try {
-      final data = await ApiService.get('/debrid/search?q=${Uri.encodeComponent(q)}') as Map;
-      String? url = data['stream_url'] as String?;
+      final data = await ApiService.get('/debrid/search?q=${Uri.encodeComponent(q)}&client=app') as Map;
+      String? url = data['direct_url'] as String? ?? data['stream_url'] as String?;
 
       if (url == null) {
         setState(() {

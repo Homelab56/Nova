@@ -406,7 +406,12 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
 
 
 @router.get("/search")
-async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str | None = None):
+async def search_and_stream(
+    q: str,
+    tmdb_id: int | None = None,
+    media_type: str | None = None,
+    client: str | None = None,
+):
     """
     Zoekt automatisch naar een beschikbare stream voor een titel.
     1. Zoekt op de lokale Dumbarr mount (/media).
@@ -437,6 +442,7 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
             ep_variants = {ep_token, f"{ssi}x{eei:02d}", f"{ssi:02d}x{eei:02d}"}
 
     # --- STAP 0: Zoek op lokale Dumbarr mount ---
+    want_direct = (client or "").lower() in {"app", "tv"}
     from .library import find_file
     for candidate in candidates:
         local_check = await find_file(candidate)
@@ -449,6 +455,7 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
             encoded_path = urllib.parse.quote(p.replace("\\", "/"))
             return {
                 "stream_url": f"/api/stream/hls?path={encoded_path}",
+                **({"direct_url": f"/api/library/stream?path={encoded_path}"} if want_direct else {}),
                 "source": "local",
                 "title": os.path.basename(p)
             }
@@ -511,6 +518,7 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                                 return {"stream_url": None, "message": "Geen download URL ontvangen van Real-Debrid."}
                             return {
                                 "stream_url": f"/api/stream/hls?url={urllib.parse.quote(download_url)}",
+                                **({"direct_url": download_url} if want_direct else {}),
                                 "source": "library",
                             }
                     return {"stream_url": None, "message": "Match gevonden in bibliotheek, maar geen passende videofile gevonden."}
