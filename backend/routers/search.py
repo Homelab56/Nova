@@ -22,21 +22,27 @@ GENRE_ROWS = [
 ]
 
 
-async def tmdb_get(path: str, params: dict = {}):
-    p = dict(params)
+async def tmdb_get(path: str, params: dict | None = None):
+    p = dict(params or {})
     p["api_key"] = get_tmdb_key()
     p["language"] = "nl-NL"
-    async with httpx.AsyncClient() as client:
-        r = await client.get(f"{TMDB_BASE}{path}", params=p)
-        r.raise_for_status()
-        return r.json()
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"{TMDB_BASE}{path}", params=p, timeout=10)
+            r.raise_for_status()
+            return r.json()
+    except Exception:
+        return {}
 
-async def tmdb_get_pages(path: str, pages: int = 5, params: dict = {}):
+async def tmdb_get_pages(path: str, pages: int = 5, params: dict | None = None):
     import asyncio
-    tasks = [tmdb_get(path, {**params, "page": p}) for p in range(1, pages + 1)]
-    results = await asyncio.gather(*tasks)
+    base = dict(params or {})
+    tasks = [tmdb_get(path, {**base, "page": p}) for p in range(1, pages + 1)]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
     items, seen = [], set()
     for data in results:
+        if isinstance(data, Exception):
+            continue
         for it in data.get("results", []) or []:
             it_id = it.get("id")
             if it_id is None or it_id in seen:

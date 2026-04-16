@@ -441,12 +441,16 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
     for candidate in candidates:
         local_check = await find_file(candidate)
         if local_check.get("found"):
+            p = local_check.get("path") or ""
+            years = _extract_years(p)
+            if is_movie and base_year and years and base_year not in years:
+                continue
             print(f"Match gevonden op lokale mount: {local_check['path']}")
-            encoded_path = urllib.parse.quote((local_check["path"] or "").replace("\\", "/"))
+            encoded_path = urllib.parse.quote(p.replace("\\", "/"))
             return {
                 "stream_url": f"/api/stream/hls?path={encoded_path}",
                 "source": "local",
-                "title": os.path.basename(local_check["path"])
+                "title": os.path.basename(p)
             }
 
     # --- STAP 1: Zoek in eigen RD bibliotheek ---
