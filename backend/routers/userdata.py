@@ -10,8 +10,13 @@ DATA_FILE = "/app/data/userdata.json"
 def load() -> dict:
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE) as f:
-            return json.load(f)
-    return {"watchlist": [], "progress": {}}
+            data = json.load(f)
+            if isinstance(data, dict):
+                data.setdefault("watchlist", [])
+                data.setdefault("progress", {})
+                data.setdefault("prefs", {})
+                return data
+    return {"watchlist": [], "progress": {}, "prefs": {}}
 
 
 def save(data: dict):
@@ -46,6 +51,13 @@ class ProgressItem(BaseModel):
     show_id: int | None = None
     season_number: int | None = None
     episode_number: int | None = None
+
+
+class UserPrefs(BaseModel):
+    default_audio_lang: str = "en"
+    default_sub_lang_1: str = "nl"
+    default_sub_lang_2: str = "nl-be"
+    subtitles_enabled: bool = True
 
 
 # --- Watchlist ---
@@ -91,5 +103,18 @@ def save_progress(item: ProgressItem):
 def delete_progress(item_id: str):
     data = load()
     data["progress"].pop(str(item_id), None)
+    save(data)
+    return {"ok": True}
+
+
+@router.get("/prefs")
+def get_prefs():
+    return load().get("prefs") or {}
+
+
+@router.post("/prefs")
+def save_prefs(prefs: UserPrefs):
+    data = load()
+    data["prefs"] = prefs.dict()
     save(data)
     return {"ok": True}

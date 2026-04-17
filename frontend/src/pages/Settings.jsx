@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 function StatusCard({ title, description, status, loading }) {
@@ -37,8 +37,29 @@ function StatusCard({ title, description, status, loading }) {
 
 export default function Settings() {
   const navigate = useNavigate();
+  const [prefs, setPrefs] = useState({
+    default_audio_lang: "en",
+    default_sub_lang_1: "nl",
+    default_sub_lang_2: "nl-be",
+    subtitles_enabled: true,
+  });
+  const [prefsSaving, setPrefsSaving] = useState(false);
+  const [prefsSaved, setPrefsSaved] = useState(false);
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
+  const languageOptions = useMemo(
+    () => [
+      { value: "", label: "Automatisch" },
+      { value: "nl", label: "Nederlands" },
+      { value: "nl-be", label: "Vlaams" },
+      { value: "en", label: "Engels" },
+      { value: "fr", label: "Frans" },
+      { value: "de", label: "Duits" },
+      { value: "es", label: "Spaans" },
+      { value: "it", label: "Italiaans" },
+    ],
+    []
+  );
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -52,8 +73,36 @@ export default function Settings() {
     setLoading(false);
   };
 
+  const fetchPrefs = async () => {
+    try {
+      const r = await fetch("/api/user/prefs");
+      if (!r.ok) return;
+      const data = await r.json();
+      if (!data || typeof data !== "object") return;
+      setPrefs(p => ({ ...p, ...data }));
+    } catch {}
+  };
+
+  const savePrefs = async () => {
+    setPrefsSaving(true);
+    setPrefsSaved(false);
+    try {
+      const r = await fetch("/api/user/prefs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(prefs),
+      });
+      if (r.ok) {
+        setPrefsSaved(true);
+        setTimeout(() => setPrefsSaved(false), 1500);
+      }
+    } catch {}
+    setPrefsSaving(false);
+  };
+
   useEffect(() => {
     fetchStatus();
+    fetchPrefs();
   }, []);
 
   return (
@@ -115,6 +164,87 @@ export default function Settings() {
           status={status?.seerr}
           loading={loading}
         />
+      </div>
+
+      <div className="mt-8 bg-nova-card/50 p-6 rounded-2xl border border-gray-800/50">
+        <h3 className="text-lg font-bold text-white mb-1">Standaard Talen</h3>
+        <p className="text-gray-400 text-sm">
+          Kies je voorkeurs-audio en ondertitels. Ondertitels gebruikt eerst keuze 1 en valt dan terug op keuze 2.
+        </p>
+
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <div>
+            <label className="text-sm font-semibold text-white block mb-2">Standaard audio</label>
+            <select
+              value={prefs.default_audio_lang}
+              onChange={(e) => setPrefs(p => ({ ...p, default_audio_lang: e.target.value }))}
+              className="w-full bg-black/50 border border-white/10 text-white rounded-xl px-3 py-2 text-sm"
+            >
+              {languageOptions.map(o => (
+                <option key={o.value || "auto"} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-end gap-3">
+            <label className="inline-flex items-center gap-2 text-sm font-semibold text-white">
+              <input
+                type="checkbox"
+                checked={!!prefs.subtitles_enabled}
+                onChange={(e) => setPrefs(p => ({ ...p, subtitles_enabled: e.target.checked }))}
+                className="accent-nova-accent"
+              />
+              Ondertitels standaard aan
+            </label>
+          </div>
+
+          <div>
+            <label className="text-sm font-semibold text-white block mb-2">Ondertitels keuze 1</label>
+            <select
+              value={prefs.default_sub_lang_1}
+              onChange={(e) => setPrefs(p => ({ ...p, default_sub_lang_1: e.target.value }))}
+              className="w-full bg-black/50 border border-white/10 text-white rounded-xl px-3 py-2 text-sm"
+            >
+              {languageOptions
+                .filter(o => o.value !== "")
+                .map(o => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-sm font-semibold text-white block mb-2">Ondertitels keuze 2</label>
+            <select
+              value={prefs.default_sub_lang_2}
+              onChange={(e) => setPrefs(p => ({ ...p, default_sub_lang_2: e.target.value }))}
+              className="w-full bg-black/50 border border-white/10 text-white rounded-xl px-3 py-2 text-sm"
+            >
+              <option value="">Geen</option>
+              {languageOptions
+                .filter(o => o.value && o.value !== prefs.default_sub_lang_1)
+                .map(o => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="mt-5 flex gap-3">
+          <button
+            onClick={savePrefs}
+            disabled={prefsSaving}
+            className="bg-nova-accent hover:bg-nova-hover disabled:opacity-50 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all shadow-lg active:scale-95"
+          >
+            {prefsSaving ? "Opslaan..." : prefsSaved ? "Opgeslagen" : "Opslaan"}
+          </button>
+        </div>
       </div>
 
       <div className="mt-12 p-6 bg-nova-card/50 rounded-2xl border border-gray-800/50">

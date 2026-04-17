@@ -31,15 +31,45 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const [subtitleTracks, setSubtitleTracks] = useState([]);
   const [subtitleSelected, setSubtitleSelected] = useState(null);
   const [subtitleLabel, setSubtitleLabel] = useState("");
+  const [subMenuOpen, setSubMenuOpen] = useState(false);
+  const [prefs, setPrefs] = useState({
+    default_audio_lang: "en",
+    default_sub_lang_1: "nl",
+    default_sub_lang_2: "nl-be",
+    subtitles_enabled: true,
+  });
+  const [derivedTotal, setDerivedTotal] = useState(0);
 
   const total = useMemo(() => {
     const hint = Number(durationHint) || 0;
     return hint > 0 ? hint : 0;
   }, [durationHint]);
 
+  const effectiveTotal = useMemo(() => {
+    if (total > 0) return total;
+    const d = Number(derivedTotal) || 0;
+    return d > 0 ? d : 0;
+  }, [total, derivedTotal]);
+
   useEffect(() => {
-    totalRef.current = total;
-  }, [total]);
+    totalRef.current = effectiveTotal;
+  }, [effectiveTotal]);
+
+  useEffect(() => {
+    const onDoc = () => setSubMenuOpen(false);
+    document.addEventListener("click", onDoc);
+    return () => document.removeEventListener("click", onDoc);
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/user/prefs")
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        if (!data || typeof data !== "object") return;
+        setPrefs(p => ({ ...p, ...data }));
+      })
+      .catch(() => {});
+  }, []);
 
   const reportProgress = (tOverride = null) => {
     if (!media || !onProgress) return;
@@ -86,12 +116,22 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
 
   const chooseDefaultSubtitle = (tracks) => {
     if (!tracks || tracks.length === 0) return null;
-    const prefer = ["nl", "nld", "dut", "vla", "nl-be", "nl_be"];
-    const norm = (s) => String(s || "").toLowerCase().trim().replace("_", "-");
-    const findByLang = (langs) => tracks.find(t => langs.includes(norm(t.language)));
-    const byLang = findByLang(prefer);
+    if (!prefs.subtitles_enabled) return null;
+    const prefer = [
+      prefs.default_sub_lang_1,
+      prefs.default_sub_lang_2,
+      "nl",
+      "nld",
+      "dut",
+      "vla",
+      "nl-be",
+      "nl_be",
+    ].filter(Boolean);
+    const norm = (s) => String(s || "").toLowerCase().trim().replaceAll("_", "-");
+    const prefNorm = prefer.map(norm);
+    const byLang = tracks.find(t => prefNorm.includes(norm(t.language)));
     if (byLang) return byLang;
-    const byTitle = tracks.find(t => prefer.some(p => norm(t.title).includes(p)));
+    const byTitle = tracks.find(t => prefNorm.some(p => norm(t.title).includes(p)));
     if (byTitle) return byTitle;
     return tracks[0];
   };
@@ -182,11 +222,14 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         if (def) {
           setSubtitleSelected(def.stream_index);
           setSubtitleLabel(def.language || def.title || "Subtitles");
+        } else {
+          setSubtitleSelected(null);
+          setSubtitleLabel("");
         }
       })
       .catch(() => {});
     return () => ac.abort();
-  }, [url]);
+  }, [url, prefs.default_sub_lang_1, prefs.default_sub_lang_2, prefs.subtitles_enabled]);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -223,7 +266,14 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       setAbsTime(t);
       absTimeRef.current = t;
       if (!media || !onProgress) return;
-      if (total <= 0) return;
+      if (effectiveTotal <= 0) {
+        const d = Number(v.duration) || 0;
+        if (Number.isFinite(d) && d > 0) {
+          const guess = startOffsetRef.current + d;
+          if (Math.abs((derivedTotal || 0) - guess) > 1) setDerivedTotal(guess);
+        }
+        return;
+      }
       clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         reportProgress(t);
@@ -271,7 +321,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       v.removeEventListener("error", onErr);
       v.removeEventListener("ended", onEndedEvent);
     };
-  }, [media, onProgress, total]);
+  }, [media, onProgress, effectiveTotal, derivedTotal]);
 
   useEffect(() => {
     const onVis = () => {
@@ -281,9 +331,9 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
 
-  const progress = total > 0 ? Math.min(1, Math.max(0, absTime / total)) : 0;
+  const progress = effectiveTotal > 0 ? Math.min(1, Math.max(0, absTime / effectiveTotal)) : 0;
   const sliderValue = dragValue !== null ? dragValue : Math.round(progress * 1000);
-  const showNextButton = onNext && total > 0 && (total - absTime) < 90;
+  const showNextButton = onNext && effectiveTotal > 0 && (effectiveTotal - absTime) < 90;
 
   const selectedTrackObj = subtitleSelected !== null
     ? subtitleTracks.find(t => t.stream_index === subtitleSelected) || null
@@ -291,10 +341,18 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const vttSrc = selectedTrackObj ? buildSubtitleVttUrl(selectedTrackObj.stream_index) : null;
 
   const commitSeek = async () => {
-    if (total <= 0 || dragValue === null) return;
-    const target = (dragValue / 1000) * total;
+    if (effectiveTotal <= 0 || dragValue === null) return;
+    const target = (dragValue / 1000) * effectiveTotal;
     setDragValue(null);
     await seekTo(target);
+  };
+
+  const setDragFromClientX = (el, clientX) => {
+    if (!el || effectiveTotal <= 0) return;
+    const rect = el.getBoundingClientRect();
+    const ratio = rect.width > 0 ? (clientX - rect.left) / rect.width : 0;
+    const v = Math.round(Math.min(1, Math.max(0, ratio)) * 1000);
+    setDragValue(v);
   };
 
   const toggle = async () => {
@@ -384,7 +442,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
           </button>
 
           <div className="text-xs text-white/80 w-24 tabular-nums">
-            {formatTime(absTime)}{total > 0 ? ` / ${formatTime(total)}` : ""}
+            {formatTime(absTime)}{effectiveTotal > 0 ? ` / ${formatTime(effectiveTotal)}` : ""}
           </div>
 
           <input
@@ -393,38 +451,65 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
             max={1000}
             value={sliderValue}
             onChange={(e) => setDragValue(Number(e.target.value))}
+            onMouseDown={(e) => setDragFromClientX(e.currentTarget, e.clientX)}
+            onTouchStart={(e) => {
+              const t = e.touches?.[0];
+              if (!t) return;
+              setDragFromClientX(e.currentTarget, t.clientX);
+            }}
             onMouseUp={commitSeek}
             onTouchEnd={commitSeek}
-            disabled={total <= 0}
+            disabled={effectiveTotal <= 0}
             className="flex-1"
           />
 
           {subtitleTracks.length > 0 && (
-            <select
-              value={subtitleSelected === null ? "off" : String(subtitleSelected)}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === "off") {
-                  setSubtitleSelected(null);
-                  setSubtitleLabel("");
-                  return;
-                }
-                const idx = Number(v);
-                if (!Number.isFinite(idx)) return;
-                const t = subtitleTracks.find(x => x.stream_index === idx) || null;
-                setSubtitleSelected(idx);
-                setSubtitleLabel(t?.language || t?.title || "Subtitles");
-              }}
-              className="bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg px-2 py-1.5 text-xs font-semibold max-w-28"
-              title="Subtitels"
-            >
-              <option value="off">CC uit</option>
-              {subtitleTracks.map((t) => (
-                <option key={t.stream_index} value={String(t.stream_index)}>
-                  {(t.language || t.title || `Track ${t.stream_index}`)}
-                </option>
-              ))}
-            </select>
+            <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={() => setSubMenuOpen(v => !v)}
+                className="bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg px-2.5 py-2 text-sm font-semibold"
+                title="Ondertitels"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M4 5.5h16A2.5 2.5 0 0 1 22.5 8v8A2.5 2.5 0 0 1 20 18.5H8l-4 3v-3H4A2.5 2.5 0 0 1 1.5 16V8A2.5 2.5 0 0 1 4 5.5Z"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                  />
+                  <path
+                    d="M7.5 10.25h3.5M13 10.25h3.5M7.5 13.75h3.5M13 13.75h3.5"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+
+              {subMenuOpen && (
+                <div className="absolute right-0 bottom-12 w-56 bg-black/90 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50">
+                  <button
+                    onClick={() => { setSubtitleSelected(null); setSubtitleLabel(""); setSubMenuOpen(false); }}
+                    className={`w-full text-left px-4 py-2 text-sm ${subtitleSelected === null ? "bg-white/15 text-white" : "text-white/90 hover:bg-white/10"}`}
+                  >
+                    Ondertitels uit
+                  </button>
+                  {subtitleTracks.map((t) => {
+                    const idx = t.stream_index;
+                    const label = t.language || t.title || `Track ${idx}`;
+                    const active = subtitleSelected === idx;
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => { setSubtitleSelected(idx); setSubtitleLabel(label); setSubMenuOpen(false); }}
+                        className={`w-full text-left px-4 py-2 text-sm ${active ? "bg-white/15 text-white" : "text-white/90 hover:bg-white/10"}`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           )}
 
           <button
