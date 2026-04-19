@@ -6,7 +6,8 @@ import urllib.parse
 import hashlib
 import time
 import shutil
-from fastapi import APIRouter, HTTPException, Query
+import mimetypes
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse, FileResponse, RedirectResponse
 from pydantic import BaseModel
 from .config_loader import get_rd_token
@@ -111,6 +112,53 @@ def _resolve_media_file(rel_path: str) -> str:
 def _is_http_url(value: str) -> bool:
     v = (value or "").lower()
     return v.startswith("http://") or v.startswith("https://")
+
+
+def _parse_range_header(value: str, size: int) -> tuple[int, int] | None:
+    if not value or not isinstance(value, str):
+        return None
+    if not value.startswith("bytes="):
+        return None
+    spec = value[len("bytes=") :].strip()
+    if "," in spec:
+        return None
+    if "-" not in spec:
+        return None
+    start_s, end_s = spec.split("-", 1)
+    start_s = start_s.strip()
+    end_s = end_s.strip()
+    if not start_s and not end_s:
+        return None
+
+    if start_s:
+        try:
+            start = int(start_s)
+        except Exception:
+            return None
+        if start < 0:
+            return None
+        end = size - 1
+        if end_s:
+            try:
+                end = int(end_s)
+            except Exception:
+                return None
+    else:
+        try:
+            suffix = int(end_s)
+        except Exception:
+            return None
+        if suffix <= 0:
+            return None
+        start = max(0, size - suffix)
+        end = size - 1
+
+    if start >= size:
+        return None
+    end = min(end, size - 1)
+    if end < start:
+        return None
+    return start, end
 
 async def _ffprobe_subtitle_streams(input_value: str, is_path: bool) -> list[dict]:
     args = [
@@ -542,6 +590,48 @@ async def play(
         _ffmpeg_stream(input_value, is_path=is_path, start=start),
         media_type="video/mp4",
     )
+
+
+@router.get("/file")
+async def direct_file(request: Request, path: str):
+    input_value = _resolve_media_file(path)
+    try:
+        stat = os.stat(input_value)
+        size = int(stat.st_size)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Bestand niet gevonden")
+
+    content_type = mimetypes.guess_type(input_value)[0] or "application/octet-stream"
+    range_header = request.headers.get("range") or request.headers.get("Range") or ""
+    byte_range = _parse_range_header(range_header, size)
+    if not byte_range:
+        return FileResponse(
+            input_value,
+            media_type=content_type,
+            headers={"Accept-Ranges": "bytes"},
+        )
+
+    start, end = byte_range
+    length = end - start + 1
+
+    async def _iter_file():
+        with open(input_value, "rb") as f:
+            f.seek(start)
+            remaining = length
+            while remaining > 0:
+                chunk = f.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    headers = {
+        "Content-Range": f"bytes {start}-{end}/{size}",
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(length),
+        "Cache-Control": "no-cache",
+    }
+    return StreamingResponse(_iter_file(), status_code=206, media_type=content_type, headers=headers)
 
 
 @router.get("/subtitles")

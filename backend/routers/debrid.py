@@ -461,7 +461,7 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
 
 
 @router.get("/search")
-async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str | None = None):
+async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str | None = None, client: str | None = None):
     """
     Zoekt automatisch naar een beschikbare stream voor een titel.
     1. Zoekt op de lokale Dumbarr mount (/media).
@@ -500,6 +500,7 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
             encoded_path = urllib.parse.quote((local_check["path"] or "").replace("\\", "/"))
             return {
                 "stream_url": f"/api/stream/hls?path={encoded_path}",
+                "direct_url": f"/api/stream/file?path={encoded_path}",
                 "source": "local",
                 "title": os.path.basename(local_check["path"])
             }
@@ -562,6 +563,7 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                                 return {"stream_url": None, "message": "Geen download URL ontvangen van Real-Debrid."}
                             return {
                                 "stream_url": f"/api/stream/hls?url={urllib.parse.quote(download_url)}",
+                                "direct_url": download_url,
                                 "source": "library",
                             }
                     return {"stream_url": None, "message": "Match gevonden in bibliotheek, maar geen passende videofile gevonden."}
@@ -699,6 +701,7 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                                         return {"stream_url": None, "message": "Geen download URL ontvangen van Real-Debrid."}
                                     return {
                                         "stream_url": f"/api/stream/hls?url={urllib.parse.quote(download_url)}",
+                                        "direct_url": download_url,
                                         "source": "scraper",
                                         "title": t["title"],
                                     }

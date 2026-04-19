@@ -1,10 +1,16 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
+import 'package:media_kit/media_kit.dart' as mk;
+import 'package:media_kit_video/media_kit_video.dart';
 import '../widgets/nova_image.dart';
 import '../services/tmdb_service.dart';
 import '../services/debrid_service.dart';
 import '../services/userdata_service.dart';
+import '../services/settings_service.dart';
 
 const tmdbPoster = 'https://image.tmdb.org/t/p/w342';
 const tmdbProfile = 'https://image.tmdb.org/t/p/w185';
@@ -31,6 +37,8 @@ class _WatchScreenState extends State<WatchScreen> {
   bool? _isAvailable; // null = nog niet gecheckt
   VideoPlayerController? _vpCtrl;
   ChewieController? _chewieCtrl;
+  mk.Player? _mkPlayer;
+  VideoController? _mkVideoCtrl;
 
   bool get isMovie => widget.media['title'] != null && widget.media['first_air_date'] == null;
   String get title => widget.media['title'] ?? widget.media['name'] ?? '';
@@ -114,14 +122,14 @@ class _WatchScreenState extends State<WatchScreen> {
     try {
       // De backend API doet nu het zware werk (library + scraper + cache check)
       final baseUrl = await SettingsService.getBackendUrl();
-      final response = await http.get(Uri.parse('$baseUrl/api/debrid/search?q=${Uri.encodeComponent(q)}'));
+      final response = await http.get(Uri.parse('$baseUrl/api/debrid/search?q=${Uri.encodeComponent(q)}&tmdb_id=${widget.media['id']}&media_type=${isMovie ? "movie" : "tv"}&client=windows'));
       
       if (response.statusCode != 200) {
         throw 'Server gaf een foutmelding: ${response.statusCode}';
       }
 
       final data = jsonDecode(response.body);
-      String? url = data['stream_url'] as String?;
+      String? url = (Platform.isWindows ? (data['direct_url'] as String?) : null) ?? (data['stream_url'] as String?);
 
       if (url == null) {
         setState(() {
@@ -141,14 +149,21 @@ class _WatchScreenState extends State<WatchScreen> {
         _status = source == 'scraper' ? 'Gevonden op internet. Laden...' : 'Gevonden in bibliotheek. Laden...'; 
       });
 
+      if (Platform.isWindows) {
+        _mkPlayer?.dispose();
+        _mkPlayer = mk.Player();
+        _mkVideoCtrl = VideoController(_mkPlayer!);
+        await _mkPlayer!.open(mk.Media(url), play: true);
+        setState(() { _streamUrl = url; _loadingStream = false; _status = ''; });
+        return;
+      }
+
       _vpCtrl?.dispose();
       _chewieCtrl?.dispose();
-      
       _vpCtrl = VideoPlayerController.networkUrl(Uri.parse(url));
       await _vpCtrl!.initialize().timeout(const Duration(seconds: 15), onTimeout: () {
         throw 'Time-out bij het laden van de video. Probeer het opnieuw.';
       });
-
       _chewieCtrl = ChewieController(
         videoPlayerController: _vpCtrl!,
         autoPlay: true,
@@ -177,6 +192,7 @@ class _WatchScreenState extends State<WatchScreen> {
   void dispose() {
     _vpCtrl?.dispose();
     _chewieCtrl?.dispose();
+    _mkPlayer?.dispose();
     super.dispose();
   }
 
@@ -195,7 +211,9 @@ class _WatchScreenState extends State<WatchScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Player of backdrop
-              if (_streamUrl != null && _chewieCtrl != null)
+              if (_streamUrl != null && Platform.isWindows && _mkVideoCtrl != null)
+                AspectRatio(aspectRatio: 16/9, child: Video(controller: _mkVideoCtrl!))
+              else if (_streamUrl != null && _chewieCtrl != null)
                 AspectRatio(aspectRatio: 16/9, child: Chewie(controller: _chewieCtrl!))
               else if (backdrop != null)
                 Stack(children: [
