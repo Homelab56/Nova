@@ -15,6 +15,9 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const saveTimer = useRef(null);
   const controlsTimer = useRef(null);
   const subsAbortRef = useRef(null);
+  const bufferingTimerRef = useRef(null);
+  const lastTimeRef = useRef(0);
+  const lastTimeTsRef = useRef(0);
   const startOffsetRef = useRef(0);
   const baseUrlRef = useRef(null);
   const absTimeRef = useRef(0);
@@ -90,6 +93,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     return () => {
       clearTimeout(saveTimer.current);
       clearTimeout(controlsTimer.current);
+      clearTimeout(bufferingTimerRef.current);
       if (subsAbortRef.current) subsAbortRef.current.abort();
       reportProgress();
     };
@@ -265,6 +269,9 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       const t = startOffsetRef.current + (v.currentTime || 0);
       setAbsTime(t);
       absTimeRef.current = t;
+      lastTimeRef.current = v.currentTime || 0;
+      lastTimeTsRef.current = Date.now();
+      if (buffering) setBuffering(false);
       if (!media || !onProgress) return;
       if (effectiveTotal <= 0) {
         const d = Number(v.duration) || 0;
@@ -279,15 +286,35 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         reportProgress(t);
       }, 5000);
     };
-    const onWaiting = () => setBuffering(true);
-    const onPlaying = () => setBuffering(false);
-    const onStalled = () => setBuffering(true);
-    const onSeeking = () => setBuffering(true);
+    const maybeBuffering = () => {
+      clearTimeout(bufferingTimerRef.current);
+      bufferingTimerRef.current = setTimeout(() => {
+        const now = Date.now();
+        const dt = now - (lastTimeTsRef.current || 0);
+        const progressed = Math.abs((v.currentTime || 0) - (lastTimeRef.current || 0)) > 0.05;
+        const stalled = dt > 700 && !progressed;
+        // Toon loader enkel bij echte stall; niet bij mini "waiting" events terwijl hij nog speelt.
+        if (stalled || v.readyState < 3) {
+          setBuffering(true);
+        }
+      }, 450);
+    };
+    const onWaiting = () => maybeBuffering();
+    const onPlaying = () => {
+      clearTimeout(bufferingTimerRef.current);
+      setBuffering(false);
+    };
+    const onStalled = () => maybeBuffering();
+    const onSeeking = () => maybeBuffering();
     const onSeeked = () => {
+      clearTimeout(bufferingTimerRef.current);
       setBuffering(false);
       reportProgress();
     };
-    const onCanPlay = () => setBuffering(false);
+    const onCanPlay = () => {
+      clearTimeout(bufferingTimerRef.current);
+      setBuffering(false);
+    };
     const onErr = () => {
       const code = v?.error?.code;
       setError(code ? `Video fout (code ${code}).` : "Video fout.");
@@ -320,8 +347,9 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       v.removeEventListener("canplay", onCanPlay);
       v.removeEventListener("error", onErr);
       v.removeEventListener("ended", onEndedEvent);
+      clearTimeout(bufferingTimerRef.current);
     };
-  }, [media, onProgress, effectiveTotal, derivedTotal]);
+  }, [media, onProgress, effectiveTotal, derivedTotal, buffering]);
 
   useEffect(() => {
     const onVis = () => {
@@ -410,7 +438,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         ref={videoRef}
         autoPlay
         playsInline
-        preload="metadata"
+        preload="auto"
         className="w-full h-full"
         onDoubleClick={toggleFullscreen}
         onClick={toggle}
