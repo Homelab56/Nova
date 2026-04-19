@@ -670,7 +670,7 @@ async def _ensure_hls_session(session_id: str, input_value: str):
 
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin"]
     if start and start > 0:
-        cmd += ["-ss", f"{start:.3f}"]
+        cmd += ["-ss", f"{start:.3f}", "-noaccurate_seek"]
 
     if _is_http_url(input_value):
         cmd += [
@@ -750,12 +750,13 @@ async def _ensure_hls_session(session_id: str, input_value: str):
             "aresample=async=1:first_pts=0",
         ]
 
+    hls_time = "2" if start and start > 0 else "4"
     segment_pattern = os.path.join(sess_dir, "seg_%06d.ts")
     cmd += [
         "-f",
         "hls",
         "-hls_time",
-        "4",
+        hls_time,
         "-hls_list_size",
         "12",
         "-hls_flags",
@@ -822,7 +823,12 @@ async def hls_index(session_id: str):
     await _ensure_hls_session(session_id, s.get("input"))
     playlist_path = _HLS_SESSIONS[session_id]["playlist"]
 
-    for _ in range(300):
+    try:
+        start = float((_HLS_SESSIONS.get(session_id) or {}).get("start") or 0.0)
+    except Exception:
+        start = 0.0
+    max_wait = 1200 if start > 0 else 500
+    for _ in range(max_wait):
         if os.path.exists(playlist_path) and os.path.getsize(playlist_path) > 0:
             break
         await asyncio.sleep(0.1)
