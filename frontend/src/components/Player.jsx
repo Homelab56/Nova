@@ -78,8 +78,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
 
   const reportProgress = (tOverride = null) => {
     if (!media || !onProgress) return;
-    const d = totalRef.current;
-    if (!Number.isFinite(d) || d <= 0) return;
+    const d = Number(totalRef.current) || 0;
     const t = Number.isFinite(tOverride) ? tOverride : absTimeRef.current;
     if (!Number.isFinite(t) || t < 0) return;
 

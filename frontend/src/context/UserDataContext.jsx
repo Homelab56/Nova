@@ -50,7 +50,10 @@ export function UserDataProvider({ children }) {
   }
 
   async function saveProgress(item, currentTime, duration) {
-    if (!item || !duration) return;
+    if (!item) return;
+    const t = Number(currentTime) || 0;
+    const d = Number(duration) || 0;
+    if (t <= 0) return;
     await fetch("/api/user/progress", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -66,8 +69,8 @@ export function UserDataProvider({ children }) {
         show_id: item.show_id ?? null,
         season_number: item.season_number ?? null,
         episode_number: item.episode_number ?? null,
-        current_time: currentTime,
-        duration: duration,
+        current_time: t,
+        duration: d,
       }),
     });
     refreshProgress();

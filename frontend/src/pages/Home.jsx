@@ -131,7 +131,13 @@ export default function Home() {
   const sessionSeed = useRef(Math.floor(Math.random() * 1e9));
 
   const { watchlist, progress, progressMap } = useUserData();
-  const inProgressRaw = progress.filter(p => p.duration > 0 && (p.current_time / p.duration) < 0.95);
+  const inProgressRaw = progress.filter(p => {
+    const t = Number(p?.current_time) || 0;
+    const d = Number(p?.duration) || 0;
+    if (t <= 10) return false;
+    if (d > 0) return (t / d) < 0.95;
+    return true;
+  });
   const inProgressMap = new Map();
   // Reverse to ensure newer overwrites older (if multiple episodes of same show are present)
   [...inProgressRaw].reverse().forEach(p => {
