@@ -604,22 +604,68 @@ async def _ensure_hls_session(session_id: str, input_value: str):
     sess_dir = os.path.join(_HLS_ROOT, session_id)
     os.makedirs(sess_dir, exist_ok=True)
     playlist_path = os.path.join(sess_dir, "index.m3u8")
-    segment_pattern = os.path.join(sess_dir, "seg_%05d.m4s")
-    init_name = "init.mp4"
 
     s = _HLS_SESSIONS.get(session_id)
     if s and s.get("proc") and s["proc"].returncode is None:
         s["last_access"] = time.time()
         return
 
-    probe = await _ffprobe_streams(input_value, is_path=not _is_http_url(input_value))
+    if os.path.exists(playlist_path):
+        try:
+            os.remove(playlist_path)
+        except Exception:
+            pass
 
-    cmd = [
-        "ffmpeg",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-nostdin",
+    for name in os.listdir(sess_dir):
+        if name.endswith(".ts") or name.endswith(".m4s") or name.endswith(".mp4") or name.endswith(".tmp"):
+            try:
+                os.remove(os.path.join(sess_dir, name))
+            except Exception:
+                pass
+
+    start = float(s.get("start") or 0.0)
+    is_path = bool(s.get("is_path"))
+
+    probe = await _ffprobe_streams(input_value, is_path=is_path)
+    streams = (probe or {}).get("streams") or []
+    v = next((st for st in streams if st.get("codec_type") == "video"), None) or {}
+    a = next((st for st in streams if st.get("codec_type") == "audio"), None) or {}
+    v_codec = (v.get("codec_name") or "").lower()
+    a_codec = (a.get("codec_name") or "").lower()
+    try:
+        v_height = int(v.get("height") or 0)
+    except Exception:
+        v_height = 0
+    try:
+        a_channels = int(a.get("channels") or 0)
+    except Exception:
+        a_channels = 0
+    try:
+        max_h = int(os.getenv("TRANSCODE_MAX_HEIGHT", "1080") or "0")
+    except Exception:
+        max_h = 1080
+
+    copy_video = v_codec == "h264"
+    copy_audio = a_codec in {"aac", "mp3"}
+    do_scale = bool(max_h and max_h > 0 and v_height and v_height > max_h)
+
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin"]
+    if start and start > 0:
+        cmd += ["-ss", f"{start:.3f}"]
+
+    if _is_http_url(input_value):
+        cmd += [
+            "-rw_timeout", "15000000",
+            "-reconnect", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "2",
+        ]
+
+    cmd += [
+        "-analyzeduration",
+        "10000000",
+        "-probesize",
+        "10000000",
         "-i",
         input_value,
         "-map",
@@ -627,24 +673,72 @@ async def _ensure_hls_session(session_id: str, input_value: str):
         "-map",
         "0:a:0?",
         "-sn",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "23",
-        "-pix_fmt",
-        "yuv420p",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        "-ac",
-        "2",
+        "-fflags",
+        "+genpts",
+        "-avoid_negative_ts",
+        "make_zero",
+        "-max_muxing_queue_size",
+        "1024",
+    ]
+
+    if copy_video:
+        cmd += ["-c:v", "copy"]
+    else:
+        crf = "21" if do_scale else ("18" if v_height >= 1440 else "20")
+        cmd += [
+            "-c:v",
+            "libx264",
+            "-tune",
+            "zerolatency",
+            "-g",
+            "48",
+            "-keyint_min",
+            "48",
+            "-sc_threshold",
+            "0",
+            "-preset",
+            "ultrafast",
+            "-threads",
+            "0",
+            "-vf",
+            (f"scale=-2:{max_h}" if do_scale else "null"),
+            "-crf",
+            crf,
+            "-pix_fmt",
+            "yuv420p",
+        ]
+
+    if copy_audio:
+        cmd += ["-c:a", "copy"]
+    else:
+        target_channels = 6 if a_channels >= 6 else 2
+        target_bitrate = "384k" if target_channels == 6 else "192k"
+        cmd += [
+            "-c:a",
+            "aac",
+            "-b:a",
+            target_bitrate,
+            "-ac",
+            str(target_channels),
+            "-af",
+            "aresample=async=1:first_pts=0",
+        ]
+
+    segment_pattern = os.path.join(sess_dir, "seg_%06d.ts")
+    cmd += [
         "-f",
-        "mp4",
-        "-movflags",
-        "frag_keyframe+empty_moov+default_base_moof",
+        "hls",
+        "-hls_time",
+        "4",
+        "-hls_list_size",
+        "12",
+        "-hls_flags",
+        "append_list+delete_segments+independent_segments",
+        "-hls_delete_threshold",
+        "1",
+        "-hls_segment_filename",
+        segment_pattern,
+        playlist_path,
     ]
 
     proc = await asyncio.create_subprocess_exec(
@@ -658,21 +752,37 @@ async def _ensure_hls_session(session_id: str, input_value: str):
         "playlist": playlist_path,
         "proc": proc,
         "last_access": time.time(),
+        "input": input_value,
+        "is_path": is_path,
+        "start": start,
     }
 
 
 @router.get("/hls")
-async def hls(url: str | None = None, path: str | None = None):
+async def hls(
+    url: str | None = None,
+    path: str | None = None,
+    start: float = Query(default=0.0, ge=0.0),
+):
     if not url and not path:
         raise HTTPException(status_code=400, detail="url of path is verplicht")
 
-    q = []
-    if path is not None:
-        q.append("path=" + urllib.parse.quote(path))
-    if url is not None:
-        q.append("url=" + urllib.parse.quote(url))
-    query = ("?" + "&".join(q)) if q else ""
-    return RedirectResponse(url=f"/api/stream/play{query}", status_code=302)
+    is_path = path is not None
+    input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
+    sid_seed = f"{input_value}|{float(start):.3f}|{os.getenv('TRANSCODE_MAX_HEIGHT','')}"
+    sid = hashlib.sha1(sid_seed.encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+    s = _HLS_SESSIONS.get(sid) or {}
+    _HLS_SESSIONS[sid] = {
+        **s,
+        "input": input_value,
+        "is_path": is_path,
+        "start": float(start or 0.0),
+        "dir": os.path.join(_HLS_ROOT, sid),
+        "playlist": os.path.join(_HLS_ROOT, sid, "index.m3u8"),
+        "last_access": time.time(),
+    }
+    return RedirectResponse(url=f"/api/stream/hls/{sid}/index.m3u8", status_code=302)
 
 
 @router.get("/hls/{session_id}/index.m3u8")

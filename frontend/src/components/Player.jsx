@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import Hls from "hls.js";
 
 function formatTime(sec) {
   const s = Math.max(0, Math.floor(sec || 0));
@@ -12,6 +13,7 @@ function formatTime(sec) {
 export default function Player({ url, media, onProgress, startAt = 0, durationHint = 0, onEnded, onNext }) {
   const containerRef = useRef(null);
   const videoRef = useRef(null);
+  const hlsRef = useRef(null);
   const saveTimer = useRef(null);
   const controlsTimer = useRef(null);
   const subsAbortRef = useRef(null);
@@ -141,15 +143,42 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   };
 
   const buildSrc = (startSeconds) => {
-    const isHls = url.includes("/stream/hls") || url.includes(".m3u8");
-    const progressiveUrl = isHls ? url.replace("/stream/hls", "/stream/play") : url;
-    const u = new URL(progressiveUrl, window.location.origin);
+    const u = new URL(url, window.location.origin);
     if (startSeconds && startSeconds > 0) {
       u.searchParams.set("start", String(startSeconds.toFixed(3)));
     } else {
       u.searchParams.delete("start");
     }
     return u.toString();
+  };
+
+  const setSource = async (src) => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (hlsRef.current) {
+      try { hlsRef.current.destroy(); } catch {}
+      hlsRef.current = null;
+    }
+
+    const isHlsSrc = src.includes("/api/stream/hls") || src.includes("/stream/hls") || src.endsWith(".m3u8");
+    if (isHlsSrc && Hls.isSupported()) {
+      const hls = new Hls({
+        maxBufferLength: 90,
+        maxMaxBufferLength: 180,
+        backBufferLength: 30,
+        lowLatencyMode: false,
+      });
+      hlsRef.current = hls;
+      hls.loadSource(src);
+      hls.attachMedia(v);
+      hls.on(Hls.Events.MANIFEST_PARSED, async () => {
+        try { await tryPlay(); } catch {}
+      });
+      return;
+    }
+
+    v.src = src;
+    v.load();
   };
 
   const tryPlay = async () => {
@@ -173,8 +202,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     absTimeRef.current = t;
     const src = buildSrc(t);
     baseUrlRef.current = src;
-    v.src = src;
-    v.load();
+    await setSource(src);
     setError(null);
     setAbsTime(t);
     reportProgress(t);
@@ -199,13 +227,18 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     startOffsetRef.current = Math.max(0, Number(startAt) || 0);
     const src = buildSrc(startOffsetRef.current);
     baseUrlRef.current = src;
-    v.src = src;
-    v.load();
+    setSource(src);
     setAbsTime(startOffsetRef.current);
     absTimeRef.current = startOffsetRef.current;
     setBuffering(true);
     setShowControls(true);
     tryPlay();
+    return () => {
+      if (hlsRef.current) {
+        try { hlsRef.current.destroy(); } catch {}
+        hlsRef.current = null;
+      }
+    };
   }, [url, startAt]);
 
   useEffect(() => {
