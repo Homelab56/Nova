@@ -247,7 +247,7 @@ async def _ffprobe_streams(input_value: str, is_path: bool) -> dict:
         "-v",
         "error",
         "-show_entries",
-        "stream=index,codec_type,codec_name",
+        "stream=index,codec_type,codec_name,width,height,channels",
         "-of",
         "json",
         input_value,
@@ -325,13 +325,17 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
     a = next((s for s in streams if s.get("codec_type") == "audio"), None) or {}
     v_codec = (v.get("codec_name") or "").lower()
     a_codec = (a.get("codec_name") or "").lower()
+    try:
+        v_height = int(v.get("height") or 0)
+    except Exception:
+        v_height = 0
+    try:
+        a_channels = int(a.get("channels") or 0)
+    except Exception:
+        a_channels = 0
 
     copy_video = v_codec == "h264"
-    copy_audio = a_codec == "aac"
-
-    if start and start > 0:
-        copy_video = False
-        copy_audio = False
+    copy_audio = a_codec in {"aac", "mp3"}
 
     cmd = [
         "ffmpeg",
@@ -362,6 +366,7 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
     if copy_video:
         cmd += ["-c:v", "copy"]
     else:
+        crf = "18" if v_height >= 1440 else "20"
         cmd += [
             "-c:v",
             "libx264",
@@ -378,7 +383,7 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
             "-threads",
             "0",
             "-crf",
-            "23",
+            crf,
             "-pix_fmt",
             "yuv420p",
         ]
@@ -386,18 +391,22 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
     if copy_audio:
         cmd += ["-c:a", "copy"]
     else:
+        target_channels = 6 if a_channels >= 6 else 2
+        target_bitrate = "384k" if target_channels == 6 else "192k"
         cmd += [
             "-c:a",
             "aac",
             "-b:a",
-            "192k",
+            target_bitrate,
             "-ac",
-            "2",
+            str(target_channels),
             "-af",
             "aresample=async=1:first_pts=0",
         ]
 
     cmd += [
+        "-max_muxing_queue_size",
+        "1024",
         "-f",
         "mp4",
         "-movflags",
