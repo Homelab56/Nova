@@ -129,7 +129,9 @@ class _WatchScreenState extends State<WatchScreen> {
       }
 
       final data = jsonDecode(response.body);
-      String? url = (Platform.isWindows ? (data['direct_url'] as String?) : null) ?? (data['stream_url'] as String?);
+      final direct = data['direct_url'] as String?;
+      final stream = data['stream_url'] as String?;
+      String? url = (Platform.isWindows ? direct : null) ?? stream;
 
       if (url == null) {
         setState(() {
@@ -153,9 +155,28 @@ class _WatchScreenState extends State<WatchScreen> {
         _mkPlayer?.dispose();
         _mkPlayer = mk.Player();
         _mkVideoCtrl = VideoController(_mkPlayer!);
-        await _mkPlayer!.open(mk.Media(url), play: true);
-        setState(() { _streamUrl = url; _loadingStream = false; _status = ''; });
-        return;
+
+        Future<void> openUrl(String u) async {
+          await _mkPlayer!.open(mk.Media(u), play: true).timeout(const Duration(seconds: 20));
+        }
+
+        try {
+          await openUrl(url);
+          setState(() { _streamUrl = url; _loadingStream = false; _status = ''; });
+          return;
+        } catch (_) {
+          if (stream != null) {
+            var fallback = stream;
+            if (fallback.startsWith('/')) {
+              fallback = baseUrl.replaceAll(RegExp(r'/$'), '') + fallback;
+            }
+            setState(() { _status = 'Direct play faalde. Fallback laden...'; });
+            await openUrl(fallback);
+            setState(() { _streamUrl = fallback; _loadingStream = false; _status = ''; });
+            return;
+          }
+          rethrow;
+        }
       }
 
       _vpCtrl?.dispose();
