@@ -1,6 +1,7 @@
 import httpx
 from fastapi import APIRouter, Query
 from .config_loader import get_tmdb_key
+import re
 
 router = APIRouter()
 TMDB_BASE = "https://api.themoviedb.org/3"
@@ -24,6 +25,26 @@ GENRE_ROWS = [
 EXCLUDE_TV_GENRES = {10763, 10764, 10766, 10767}
 KIDS_MOVIE_GENRES = {10751}
 KIDS_TV_GENRES = {10762, 10751}
+EXCLUDE_LANGS = {"zh", "cn", "zh-cn", "zh-tw", "ja", "ko"}
+
+_SEX_WORDS = {
+    "sex",
+    "sexo",
+    "porn",
+    "porno",
+    "xxx",
+    "erotic",
+    "erotica",
+    "hentai",
+    "onlyfans",
+}
+
+def _norm_text(s: str) -> str:
+    if not isinstance(s, str) or not s:
+        return ""
+    s = s.lower()
+    s = re.sub(r"[^a-z0-9]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
 
 
 async def tmdb_get(path: str, params: dict = {}):
@@ -58,6 +79,28 @@ def _is_anime(item: dict, media_type: str | None) -> bool:
     if media_type == "tv":
         origin = item.get("origin_country")
         if isinstance(origin, list) and "JP" in origin:
+            return True
+    return False
+
+def _is_sexual(item: dict) -> bool:
+    parts = []
+    for k in ("title", "name", "original_title", "original_name", "overview"):
+        v = item.get(k)
+        if isinstance(v, str) and v.strip():
+            parts.append(v)
+    hay = _norm_text(" ".join(parts))
+    if not hay:
+        return False
+    return any(w in hay for w in _SEX_WORDS)
+
+def _is_unwanted_language(item: dict, media_type: str | None) -> bool:
+    lang = item.get("original_language")
+    if isinstance(lang, str) and lang.strip().lower() in EXCLUDE_LANGS:
+        return True
+    origin = item.get("origin_country")
+    if media_type == "tv" and isinstance(origin, list):
+        oc = {str(x).upper() for x in origin if isinstance(x, str)}
+        if oc & {"CN", "JP", "KR"}:
             return True
     return False
 
@@ -102,6 +145,10 @@ def _filter_items(
             continue
         inferred = it.get("media_type") or media_type
         if _is_anime(it, inferred):
+            continue
+        if suggestion_mode and _is_sexual(it):
+            continue
+        if suggestion_mode and _is_unwanted_language(it, inferred):
             continue
         if suggestion_mode and inferred == "tv" and _is_weird_tv(it):
             continue
