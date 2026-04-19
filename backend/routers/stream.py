@@ -340,6 +340,12 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         max_h = int(os.getenv("TRANSCODE_MAX_HEIGHT", "1080") or "0")
     except Exception:
         max_h = 1080
+    try:
+        target_fps = float(os.getenv("TRANSCODE_FPS", "0") or "0")
+    except Exception:
+        target_fps = 0.0
+    if not (target_fps and target_fps > 0):
+        target_fps = 0.0
 
     cmd = [
         "ffmpeg",
@@ -375,7 +381,14 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         cmd += ["-c:v", "copy"]
     else:
         do_scale = bool(max_h and max_h > 0 and v_height and v_height > max_h)
+        do_fps = bool(target_fps and target_fps > 0)
         crf = "21" if do_scale else ("18" if v_height >= 1440 else "20")
+        vf_parts = []
+        if do_fps:
+            vf_parts.append(f"fps={target_fps:g}")
+        if do_scale:
+            vf_parts.append(f"scale=-2:{max_h}:flags=fast_bilinear")
+        vf = ",".join(vf_parts) if vf_parts else "null"
         cmd += [
             "-c:v",
             "libx264",
@@ -392,7 +405,7 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
             "-threads",
             "0",
             "-vf",
-            (f"scale=-2:{max_h}" if do_scale else "null"),
+            vf,
             "-crf",
             crf,
             "-pix_fmt",
@@ -644,6 +657,12 @@ async def _ensure_hls_session(session_id: str, input_value: str):
         max_h = int(os.getenv("TRANSCODE_MAX_HEIGHT", "1080") or "0")
     except Exception:
         max_h = 1080
+    try:
+        target_fps = float(os.getenv("TRANSCODE_FPS", "0") or "0")
+    except Exception:
+        target_fps = 0.0
+    if not (target_fps and target_fps > 0):
+        target_fps = 0.0
 
     copy_video = v_codec == "h264"
     copy_audio = a_codec in {"aac", "mp3"}
@@ -684,7 +703,14 @@ async def _ensure_hls_session(session_id: str, input_value: str):
     if copy_video:
         cmd += ["-c:v", "copy"]
     else:
+        do_fps = bool(target_fps and target_fps > 0)
         crf = "21" if do_scale else ("18" if v_height >= 1440 else "20")
+        vf_parts = []
+        if do_fps:
+            vf_parts.append(f"fps={target_fps:g}")
+        if do_scale:
+            vf_parts.append(f"scale=-2:{max_h}:flags=fast_bilinear")
+        vf = ",".join(vf_parts) if vf_parts else "null"
         cmd += [
             "-c:v",
             "libx264",
@@ -701,7 +727,7 @@ async def _ensure_hls_session(session_id: str, input_value: str):
             "-threads",
             "0",
             "-vf",
-            (f"scale=-2:{max_h}" if do_scale else "null"),
+            vf,
             "-crf",
             crf,
             "-pix_fmt",
