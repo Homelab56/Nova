@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -35,6 +36,24 @@ class _WatchScreenState extends State<WatchScreen> {
   bool? _isAvailable; // null = nog niet gecheckt
   VideoPlayerController? _vpCtrl;
   ChewieController? _chewieCtrl;
+
+  Future<bool> _tryStartProcess(String exe, List<String> args) async {
+    try {
+      final p = await Process.start(exe, args, runInShell: true);
+      unawaited(p.exitCode);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _openExternalPlayer(String url) async {
+    final okMpv = await _tryStartProcess('mpv', [url]);
+    if (okMpv) return;
+    final okVlc = await _tryStartProcess('vlc', [url]);
+    if (okVlc) return;
+    await _tryStartProcess('cmd', ['/c', 'start', '', url]);
+  }
 
   bool get isMovie => widget.media['title'] != null && widget.media['first_air_date'] == null;
   String get title => widget.media['title'] ?? widget.media['name'] ?? '';
@@ -147,10 +166,16 @@ class _WatchScreenState extends State<WatchScreen> {
         _status = source == 'scraper' ? 'Gevonden op internet. Laden...' : 'Gevonden in bibliotheek. Laden...'; 
       });
 
+      if (Platform.isWindows) {
+        setState(() { _status = 'Openen in Windows player...'; });
+        await _openExternalPlayer(url);
+        setState(() { _loadingStream = false; _status = 'Gestart in externe player.'; });
+        return;
+      }
+
       _vpCtrl?.dispose();
       _chewieCtrl?.dispose();
       _vpCtrl = VideoPlayerController.networkUrl(Uri.parse(url));
-      await _vpCtrl!.initialize().timeout(const Duration(seconds: 15), onTimeout: () {
       await _vpCtrl!.initialize().timeout(const Duration(seconds: 15), onTimeout: () {
         throw 'Time-out bij het laden van de video. Probeer het opnieuw.';
       });
