@@ -31,6 +31,12 @@ def _hls_cleanup():
                 proc.terminate()
             except Exception:
                 pass
+        task = s.get("stderr_task")
+        if task:
+            try:
+                task.cancel()
+            except Exception:
+                pass
         dir_path = s.get("dir")
         if dir_path:
             try:
@@ -864,6 +870,24 @@ async def _ensure_hls_session(session_id: str, input_value: str):
         stderr=asyncio.subprocess.PIPE,
     )
 
+    stderr_buf = bytearray()
+
+    async def _drain_stderr():
+        if not proc.stderr:
+            return
+        try:
+            while True:
+                chunk = await proc.stderr.read(4096)
+                if not chunk:
+                    break
+                stderr_buf.extend(chunk)
+                if len(stderr_buf) > 256_000:
+                    del stderr_buf[:-256_000]
+        except Exception:
+            return
+
+    stderr_task = asyncio.create_task(_drain_stderr())
+
     _HLS_SESSIONS[session_id] = {
         "dir": sess_dir,
         "playlist": playlist_path,
@@ -872,6 +896,8 @@ async def _ensure_hls_session(session_id: str, input_value: str):
         "input": input_value,
         "is_path": is_path,
         "start": start,
+        "stderr_buf": stderr_buf,
+        "stderr_task": stderr_task,
     }
 
 
@@ -924,7 +950,8 @@ async def hls_index(session_id: str):
         await asyncio.sleep(0.1)
 
     if not os.path.exists(playlist_path) or os.path.getsize(playlist_path) == 0:
-        proc = _HLS_SESSIONS[session_id].get("proc")
+        sess = _HLS_SESSIONS.get(session_id) or {}
+        proc = sess.get("proc")
         err = b""
         rc = None
         if proc:
@@ -934,9 +961,12 @@ async def hls_index(session_id: str):
                     rc = await asyncio.wait_for(proc.wait(), timeout=0.1)
                 except Exception:
                     rc = proc.returncode
-        if proc and proc.stderr:
+        buf = sess.get("stderr_buf")
+        if isinstance(buf, (bytes, bytearray)) and len(buf) > 0:
+            err = bytes(buf)
+        elif proc and proc.stderr:
             try:
-                err = await proc.stderr.read(65536)
+                err = await asyncio.wait_for(proc.stderr.read(65536), timeout=0.2)
             except Exception:
                 err = b""
         input_value = s.get("input") or ""

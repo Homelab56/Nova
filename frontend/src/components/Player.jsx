@@ -14,6 +14,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const containerRef = useRef(null);
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
+  const hlsFallbackRef = useRef(false);
   const saveTimer = useRef(null);
   const controlsTimer = useRef(null);
   const subsAbortRef = useRef(null);
@@ -173,6 +174,29 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       hls.on(Hls.Events.MANIFEST_PARSED, async () => {
         try { await tryPlay(); } catch {}
       });
+      hls.on(Hls.Events.ERROR, async (_evt, data) => {
+        if (!data) return;
+        const fatal = data.fatal === true;
+        const code = data?.response?.code;
+        const toProgressive = (s) => s.replace("/api/stream/hls", "/api/stream/play").replace("/stream/hls", "/stream/play");
+        if ((fatal || code === 502) && !hlsFallbackRef.current) {
+          const fallback = toProgressive(src);
+          if (fallback !== src) {
+            hlsFallbackRef.current = true;
+            try {
+              hls.destroy();
+            } catch {}
+            if (hlsRef.current === hls) hlsRef.current = null;
+            v.src = fallback;
+            v.load();
+            try { await tryPlay(); } catch {}
+            return;
+          }
+        }
+        if (fatal) {
+          setError("Stream fout. Probeer opnieuw.");
+        }
+      });
       return;
     }
 
@@ -223,6 +247,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     const v = videoRef.current;
     if (!v || !url) return;
     setError(null);
+    hlsFallbackRef.current = false;
     startOffsetRef.current = Math.max(0, Number(startAt) || 0);
     const src = buildSrc(startOffsetRef.current);
     baseUrlRef.current = src;
