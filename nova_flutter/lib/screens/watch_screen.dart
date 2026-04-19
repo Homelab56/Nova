@@ -4,8 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
-import 'package:media_kit/media_kit.dart' as mk;
-import 'package:media_kit_video/media_kit_video.dart';
 import '../widgets/nova_image.dart';
 import '../services/tmdb_service.dart';
 import '../services/debrid_service.dart';
@@ -37,8 +35,6 @@ class _WatchScreenState extends State<WatchScreen> {
   bool? _isAvailable; // null = nog niet gecheckt
   VideoPlayerController? _vpCtrl;
   ChewieController? _chewieCtrl;
-  mk.Player? _mkPlayer;
-  VideoController? _mkVideoCtrl;
 
   bool get isMovie => widget.media['title'] != null && widget.media['first_air_date'] == null;
   String get title => widget.media['title'] ?? widget.media['name'] ?? '';
@@ -131,7 +127,7 @@ class _WatchScreenState extends State<WatchScreen> {
       final data = jsonDecode(response.body);
       final direct = data['direct_url'] as String?;
       final stream = data['stream_url'] as String?;
-      String? url = (Platform.isWindows ? direct : null) ?? stream;
+      String? url = (direct != null && direct.isNotEmpty) ? direct : stream;
 
       if (url == null) {
         setState(() {
@@ -151,37 +147,10 @@ class _WatchScreenState extends State<WatchScreen> {
         _status = source == 'scraper' ? 'Gevonden op internet. Laden...' : 'Gevonden in bibliotheek. Laden...'; 
       });
 
-      if (Platform.isWindows) {
-        _mkPlayer?.dispose();
-        _mkPlayer = mk.Player();
-        _mkVideoCtrl = VideoController(_mkPlayer!);
-
-        Future<void> openUrl(String u) async {
-          await _mkPlayer!.open(mk.Media(u), play: true).timeout(const Duration(seconds: 20));
-        }
-
-        try {
-          await openUrl(url);
-          setState(() { _streamUrl = url; _loadingStream = false; _status = ''; });
-          return;
-        } catch (_) {
-          if (stream != null) {
-            var fallback = stream;
-            if (fallback.startsWith('/')) {
-              fallback = baseUrl.replaceAll(RegExp(r'/$'), '') + fallback;
-            }
-            setState(() { _status = 'Direct play faalde. Fallback laden...'; });
-            await openUrl(fallback);
-            setState(() { _streamUrl = fallback; _loadingStream = false; _status = ''; });
-            return;
-          }
-          rethrow;
-        }
-      }
-
       _vpCtrl?.dispose();
       _chewieCtrl?.dispose();
       _vpCtrl = VideoPlayerController.networkUrl(Uri.parse(url));
+      await _vpCtrl!.initialize().timeout(const Duration(seconds: 15), onTimeout: () {
       await _vpCtrl!.initialize().timeout(const Duration(seconds: 15), onTimeout: () {
         throw 'Time-out bij het laden van de video. Probeer het opnieuw.';
       });
@@ -213,7 +182,6 @@ class _WatchScreenState extends State<WatchScreen> {
   void dispose() {
     _vpCtrl?.dispose();
     _chewieCtrl?.dispose();
-    _mkPlayer?.dispose();
     super.dispose();
   }
 
@@ -232,9 +200,7 @@ class _WatchScreenState extends State<WatchScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Player of backdrop
-              if (_streamUrl != null && Platform.isWindows && _mkVideoCtrl != null)
-                AspectRatio(aspectRatio: 16/9, child: Video(controller: _mkVideoCtrl!))
-              else if (_streamUrl != null && _chewieCtrl != null)
+              if (_streamUrl != null && _chewieCtrl != null)
                 AspectRatio(aspectRatio: 16/9, child: Chewie(controller: _chewieCtrl!))
               else if (backdrop != null)
                 Stack(children: [
