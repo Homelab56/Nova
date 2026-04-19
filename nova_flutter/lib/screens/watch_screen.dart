@@ -47,12 +47,35 @@ class _WatchScreenState extends State<WatchScreen> {
     }
   }
 
+  Future<bool> _tryStartExePath(String exePath, List<String> args) async {
+    try {
+      final f = File(exePath);
+      if (!await f.exists()) return false;
+      final p = await Process.start(exePath, args, runInShell: true);
+      unawaited(p.exitCode);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> _openExternalPlayer(String url) async {
     final okMpv = await _tryStartProcess('mpv', [url]);
     if (okMpv) return;
+    final okMpvPath = await _tryStartExePath(r'C:\Program Files\mpv\mpv.exe', [url]) ||
+        await _tryStartExePath(r'C:\Program Files (x86)\mpv\mpv.exe', [url]);
+    if (okMpvPath) return;
+
     final okVlc = await _tryStartProcess('vlc', [url]);
     if (okVlc) return;
-    await _tryStartProcess('cmd', ['/c', 'start', '', url]);
+    final okVlcPath = await _tryStartExePath(r'C:\Program Files\VideoLAN\VLC\vlc.exe', [url]) ||
+        await _tryStartExePath(r'C:\Program Files (x86)\VideoLAN\VLC\vlc.exe', [url]);
+    if (okVlcPath) return;
+
+    final okExplorer = await _tryStartProcess('explorer.exe', [url]);
+    if (okExplorer) return;
+
+    await _tryStartProcess('cmd', ['/c', 'start', '', '"$url"']);
   }
 
   bool get isMovie => widget.media['title'] != null && widget.media['first_air_date'] == null;
