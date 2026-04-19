@@ -24,21 +24,35 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() { super.initState(); _load(); }
 
+  Future<List> _safeList(Future<List> f) async {
+    try {
+      return await f.timeout(const Duration(seconds: 12));
+    } catch (_) {
+      return const [];
+    }
+  }
+
   Future<void> _load() async {
     setState(() => _loading = true);
     final r = await Future.wait([
-      TmdbService.getTrending(),
-      TmdbService.getPopularMovies(),
-      TmdbService.getPopularTv(),
-      TmdbService.getTrendingMovies(),
-      TmdbService.getTrendingTv(),
-      TmdbService.getTopRatedMovies(),
-      TmdbService.getTopRatedTv(),
-      DebridService.getLibrary(),
+      _safeList(TmdbService.getTrending()),
+      _safeList(TmdbService.getPopularMovies()),
+      _safeList(TmdbService.getPopularTv()),
+      _safeList(TmdbService.getTrendingMovies()),
+      _safeList(TmdbService.getTrendingTv()),
+      _safeList(TmdbService.getTopRatedMovies()),
+      _safeList(TmdbService.getTopRatedTv()),
+      _safeList(DebridService.getLibrary()),
     ]);
+    if (!mounted) return;
     setState(() {
-      _trending = r[0]; _popularMovies = r[1]; _popularTv = r[2];
-      _trendMovies = r[3]; _trendTv = r[4]; _topMovies = r[5]; _topTv = r[6];
+      _trending = r[0];
+      _popularMovies = r[1];
+      _popularTv = r[2];
+      _trendMovies = r[3];
+      _trendTv = r[4];
+      _topMovies = r[5];
+      _topTv = r[6];
       _rdLibrary = r[7];
       _loading = false;
     });

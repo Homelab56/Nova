@@ -1,16 +1,16 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
-  static const _storage = FlutterSecureStorage();
+  static const _kServer = 'server_url';
 
   // Verander dit naar het IP van je Debian server
   static const String _defaultBase = 'http://192.168.1.100:8005';
 
   static Future<String> get baseUrl async {
-    final saved = await _storage.read(key: 'server_url');
-    return saved ?? _defaultBase;
+    final p = await SharedPreferences.getInstance();
+    return p.getString(_kServer) ?? _defaultBase;
   }
 
   static Future<Map<String, String>> get _headers async => {
