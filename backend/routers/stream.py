@@ -750,19 +750,19 @@ async def _ensure_hls_session(session_id: str, input_value: str):
             "aresample=async=1:first_pts=0",
         ]
 
-    hls_time = "2" if start and start > 0 else "4"
+    hls_time = "4"
     segment_pattern = os.path.join(sess_dir, "seg_%06d.ts")
     cmd += [
         "-f",
         "hls",
         "-hls_time",
         hls_time,
+        "-hls_playlist_type",
+        "event",
         "-hls_list_size",
-        "12",
+        "0",
         "-hls_flags",
-        "append_list+delete_segments+independent_segments",
-        "-hls_delete_threshold",
-        "1",
+        "append_list+independent_segments",
         "-hls_segment_filename",
         segment_pattern,
         playlist_path,
