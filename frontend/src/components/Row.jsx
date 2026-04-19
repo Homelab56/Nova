@@ -77,13 +77,15 @@ function Card({ item, progressPct, dismissable }) {
   );
 }
 
-export default function Row({ title, items = [], loading = false, progressMap = {}, dismissable = false }) {
+export default function Row({ title, items = [], loading = false, progressMap = {}, dismissable = false, hasMore = false, loadingMore = false, onLoadMore = null }) {
   const rowRef = useRef(null);
   const [visibleCount, setVisibleCount] = useState(20);
+  const lastRequestedLengthRef = useRef(0);
 
   useEffect(() => {
     setVisibleCount(20);
-  }, [title, items?.length]);
+    lastRequestedLengthRef.current = 0;
+  }, [title]);
 
   function scroll(dir) {
     rowRef.current?.scrollBy({ left: dir * 500, behavior: "smooth" });
@@ -95,6 +97,11 @@ export default function Row({ title, items = [], loading = false, progressMap = 
     const nearEnd = el.scrollLeft + el.clientWidth >= (el.scrollWidth - 320);
     if (!nearEnd) return;
     setVisibleCount((c) => Math.min(items.length, c + 20));
+    if (!onLoadMore || !hasMore || loadingMore) return;
+    if (visibleCount < Math.max(1, items.length - 8)) return;
+    if (lastRequestedLengthRef.current >= items.length) return;
+    lastRequestedLengthRef.current = items.length;
+    onLoadMore();
   };
 
   const visibleItems = items.slice(0, visibleCount);
@@ -119,14 +126,22 @@ export default function Row({ title, items = [], loading = false, progressMap = 
             ? Array.from({ length: 8 }).map((_, i) => (
                 <div key={i} className="flex-shrink-0 w-36 sm:w-40 md:w-44 aspect-[2/3] rounded-xl bg-nova-card animate-pulse" />
               ))
-            : visibleItems.map((item) => (
-                <Card
-                  key={item.id}
-                  item={item}
-                  progressPct={progressMap[item.id] ? Math.round((progressMap[item.id].current_time / progressMap[item.id].duration) * 100) : (item.current_time ? Math.round((item.current_time / item.duration) * 100) : 0)}
-                  dismissable={dismissable}
-                />
-              ))}
+            : <>
+                {visibleItems.map((item) => (
+                  <Card
+                    key={item.id}
+                    item={item}
+                    progressPct={progressMap[item.id] ? Math.round((progressMap[item.id].current_time / progressMap[item.id].duration) * 100) : (item.current_time ? Math.round((item.current_time / item.duration) * 100) : 0)}
+                    dismissable={dismissable}
+                  />
+                ))}
+                {loadingMore && (
+                  <>
+                    <div className="flex-shrink-0 w-36 sm:w-40 md:w-44 aspect-[2/3] rounded-xl bg-nova-card animate-pulse" />
+                    <div className="flex-shrink-0 w-36 sm:w-40 md:w-44 aspect-[2/3] rounded-xl bg-nova-card animate-pulse" />
+                  </>
+                )}
+              </>}
         </div>
         <button
           onClick={() => scroll(1)}

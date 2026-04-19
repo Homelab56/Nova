@@ -246,12 +246,67 @@ async def _tmdb_year(tmdb_id: int, media_type: str) -> int | None:
     except Exception:
         return None
 
+async def _tmdb_main_titles(tmdb_id: int, media_type: str) -> list[str]:
+    if not tmdb_id or media_type not in {"movie", "tv"}:
+        return []
+    path = f"/{media_type}/{tmdb_id}"
+    params = {"api_key": get_tmdb_key()}
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"{TMDB_BASE}{path}", params=params, timeout=10)
+            if r.status_code != 200:
+                return []
+            data = r.json()
+    except Exception:
+        return []
+
+    out = []
+    keys = ["title", "original_title"] if media_type == "movie" else ["name", "original_name"]
+    for k in keys:
+        v = data.get(k)
+        if isinstance(v, str) and v.strip():
+            out.append(v.strip())
+    seen = set()
+    uniq = []
+    for t in out:
+        n = _normalize_text(t)
+        if not n or n in seen:
+            continue
+        seen.add(n)
+        uniq.append(t)
+    return uniq
+
 async def _candidate_queries(q: str, tmdb_id: int | None, media_type: str | None) -> list[str]:
     base = q.strip()
     if not base:
         return []
-    if media_type == "tv" and _episode_token(base):
-        return [base]
+    if media_type == "tv":
+        ep = _episode_token(base)
+        if ep:
+            raw = base
+            raw = re.sub(r"\bs\d{1,2}e\d{1,2}\b", " ", raw, flags=re.IGNORECASE)
+            raw = re.sub(r"\b\d{1,2}x\d{1,2}\b", " ", raw, flags=re.IGNORECASE)
+            show_part = re.sub(r"\s+", " ", raw).strip()
+
+            candidates = [base]
+            if show_part and show_part.lower() != base.lower():
+                candidates.append(f"{show_part} {ep.upper()}")
+            if tmdb_id:
+                for t in await _tmdb_main_titles(tmdb_id, "tv"):
+                    candidates.append(f"{t} {ep.upper()}")
+                alts = await _tmdb_alt_titles(tmdb_id, "tv")
+                for t in alts[:12]:
+                    candidates.append(f"{t} {ep.upper()}")
+
+            seen = set()
+            out = []
+            for c in candidates:
+                k = _normalize_text(c)
+                if not k or k in seen:
+                    continue
+                seen.add(k)
+                out.append(c)
+            return out
     candidates = [base]
     base_year = _candidate_year(base)
     tmdb_year = None

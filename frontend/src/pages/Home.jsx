@@ -6,8 +6,15 @@ import { useUserData } from "../context/UserDataContext";
 
 async function fetchRow(path) {
   const r = await fetch(path);
-  if (!r.ok) return [];
-  return r.json();
+  if (!r.ok) return { items: [], page: 1, total_pages: 1, total_results: 0 };
+  const data = await r.json();
+  if (Array.isArray(data)) return { items: data, page: 1, total_pages: 1, total_results: data.length };
+  return {
+    items: data.items || [],
+    page: data.page || 1,
+    total_pages: data.total_pages || 1,
+    total_results: data.total_results || 0,
+  };
 }
 
 function _hashString(str) {
@@ -64,6 +71,46 @@ const FIXED_ROWS = {
   ],
 };
 
+const KIDS_ROWS = {
+  all: [
+    { key: "kidsMovies", title: "Kids films", path: "/api/search/kids/movies" },
+    { key: "kidsTv", title: "Kids series", path: "/api/search/kids/tv" },
+  ],
+  movie: [{ key: "kidsMovies", title: "Kids films", path: "/api/search/kids/movies" }],
+  tv: [{ key: "kidsTv", title: "Kids series", path: "/api/search/kids/tv" }],
+};
+
+function _mediaKey(item) {
+  const id = item?.id;
+  if (id == null) return null;
+  const t = item?.media_type || (item?.title ? "movie" : "tv");
+  return `${t}:${id}`;
+}
+
+function _mergeUnique(prev = [], next = []) {
+  const seen = new Set();
+  const out = [];
+  prev.forEach((it) => {
+    const k = _mediaKey(it);
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    out.push(it);
+  });
+  next.forEach((it) => {
+    const k = _mediaKey(it);
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    out.push(it);
+  });
+  return out;
+}
+
+function _withPage(path, page) {
+  const u = new URL(path, window.location.origin);
+  u.searchParams.set("page", String(page));
+  return u.pathname + u.search;
+}
+
 export default function Home() {
   const [mode, setMode] = useState("all");
   const [rowData, setRowData] = useState({});
@@ -106,11 +153,94 @@ export default function Home() {
   });
   const inProgress = Array.from(inProgressMap.values()).reverse();
 
+  function findRowConfig(key) {
+    const rows = [...(FIXED_ROWS[mode] || []), ...(KIDS_ROWS[mode] || [])];
+    return rows.find(r => r.key === key) || null;
+  }
+
+  async function loadMoreRow(key) {
+    const cfg = findRowConfig(key);
+    if (!cfg) return;
+
+    let nextPage;
+    setRowData(prev => {
+      const current = prev[key];
+      if (!current || current.loadingMore) return prev;
+      if ((current.page || 1) >= (current.total_pages || 1)) return prev;
+      nextPage = (current.page || 1) + 1;
+      return { ...prev, [key]: { ...current, loadingMore: true } };
+    });
+    if (!nextPage) return;
+
+    try {
+      const data = await fetchRow(_withPage(cfg.path, nextPage));
+      setRowData(prev => {
+        const current = prev[key];
+        if (!current) return prev;
+        const merged = _mergeUnique(current.items || [], data.items || []);
+        return {
+          ...prev,
+          [key]: {
+            ...current,
+            items: merged,
+            page: data.page || nextPage,
+            total_pages: data.total_pages || current.total_pages || 1,
+            total_results: data.total_results || current.total_results || 0,
+            loadingMore: false,
+          },
+        };
+      });
+    } catch {
+      setRowData(prev => {
+        const current = prev[key];
+        if (!current) return prev;
+        return { ...prev, [key]: { ...current, loadingMore: false } };
+      });
+    }
+  }
+
+  async function loadMoreGenreRow(rowKey) {
+    let target;
+    setGenreRows(prev => {
+      target = prev.find(r => r.key === rowKey);
+      if (!target) return prev;
+      if (target.loadingMore) return prev;
+      if ((target.page || 1) >= (target.total_pages || 1)) return prev;
+      return prev.map(r => r.key === rowKey ? { ...r, loadingMore: true } : r);
+    });
+    if (!target) return;
+    const nextPage = (target.page || 1) + 1;
+    try {
+      const data = await fetch(`/api/search/genre/${target.genre_id}?type=${encodeURIComponent(target.media_type)}&page=${nextPage}`).then(r => r.json());
+      setGenreRows(prev => {
+        const next = prev.map(r => {
+          if (r.key !== rowKey) return r;
+          const merged = _mergeUnique(r.items || [], data.items || []);
+          return {
+            ...r,
+            items: merged,
+            page: data.page || nextPage,
+            total_pages: data.total_pages || r.total_pages || 1,
+            loadingMore: false,
+          };
+        });
+        genreCache.current[mode] = next;
+        return next;
+      });
+    } catch {
+      setGenreRows(prev => {
+        const next = prev.map(r => r.key === rowKey ? { ...r, loadingMore: false } : r);
+        genreCache.current[mode] = next;
+        return next;
+      });
+    }
+  }
+
   // Laad vaste rijen
   useEffect(() => {
     if (mode === "watchlist") return;
     setLoadingFixed(true);
-    const configs = FIXED_ROWS[mode];
+    const configs = [...(FIXED_ROWS[mode] || []), ...(KIDS_ROWS[mode] || [])];
     const toLoad = configs.filter(c => !rowData[c.key]);
     if (toLoad.length === 0) { setLoadingFixed(false); return; }
 
@@ -276,10 +406,10 @@ export default function Home() {
   const overlayTitle = searchResults ? `Resultaten voor "${searchQuery}"` : activeGenre?.name || "";
 
   const heroItems = mode === "movie"
-    ? (rowData.popularMovies || [])
+    ? (rowData.popularMovies?.items || [])
     : mode === "tv"
-    ? (rowData.popularTv || [])
-    : (rowData.trending || []);
+    ? (rowData.popularTv?.items || [])
+    : (rowData.trending?.items || []);
 
   // Watchlist pagina
   if (mode === "watchlist") {
@@ -354,15 +484,15 @@ export default function Home() {
             {(() => {
               const used = new Set();
               return FIXED_ROWS[mode].map((row) => {
-                const raw = rowData[row.key] || [];
+                const raw = rowData[row.key]?.items || [];
                 const shuffled = _shuffle(raw, sessionSeed.current ^ _hashString(`${mode}:${row.key}`));
                 const items = shuffled
                   .filter(_isReleased)
                   .filter(item => {
-                    const id = item?.id;
-                    if (id == null) return false;
-                    if (used.has(id)) return false;
-                    used.add(id);
+                    const k = _mediaKey(item);
+                    if (!k) return false;
+                    if (used.has(k)) return false;
+                    used.add(k);
                     return true;
                   });
               if (!loadingFixed && items.length === 0) return null;
@@ -373,6 +503,9 @@ export default function Home() {
                     items={items}
                     loading={loadingFixed && !rowData[row.key]}
                     progressMap={progressMap}
+                    hasMore={(rowData[row.key]?.page || 1) < (rowData[row.key]?.total_pages || 1)}
+                    loadingMore={!!rowData[row.key]?.loadingMore}
+                    onLoadMore={() => loadMoreRow(row.key)}
                   />
                 </div>
               );
@@ -386,16 +519,19 @@ export default function Home() {
                 ))
               : (() => {
                   const used = new Set();
-                  FIXED_ROWS[mode].forEach(r => (rowData[r.key] || []).forEach(it => used.add(it?.id)));
+                  FIXED_ROWS[mode].forEach(r => (rowData[r.key]?.items || []).forEach(it => {
+                    const k = _mediaKey(it);
+                    if (k) used.add(k);
+                  }));
                   return genreRows.map(row => {
                     const shuffled = _shuffle(row.items || [], sessionSeed.current ^ _hashString(`${mode}:genre:${row.key}`));
                     const items = shuffled
                       .filter(_isReleased)
                       .filter(item => {
-                        const id = item?.id;
-                        if (id == null) return false;
-                        if (used.has(id)) return false;
-                        used.add(id);
+                        const k = _mediaKey(item);
+                        if (!k) return false;
+                        if (used.has(k)) return false;
+                        used.add(k);
                         return true;
                       });
                     if (items.length === 0) return null;
@@ -405,11 +541,39 @@ export default function Home() {
                         title={row.title}
                         items={items}
                         progressMap={progressMap}
+                        hasMore={(row.page || 1) < (row.total_pages || 1)}
+                        loadingMore={!!row.loadingMore}
+                        onLoadMore={() => loadMoreGenreRow(row.key)}
                       />
                     );
                   });
                 })()
             }
+
+            {(KIDS_ROWS[mode] || []).length > 0 && (
+              <div className="mt-10">
+                <div className="px-4 md:px-10 mb-4">
+                  <h2 className="text-2xl md:text-3xl font-black text-gray-100">Kids</h2>
+                </div>
+                {(KIDS_ROWS[mode] || []).map((row) => {
+                  const raw = rowData[row.key]?.items || [];
+                  const items = raw.filter(_isReleased);
+                  if (!loadingFixed && items.length === 0) return null;
+                  return (
+                    <Row
+                      key={row.key}
+                      title={row.title}
+                      items={items}
+                      loading={loadingFixed && !rowData[row.key]}
+                      progressMap={progressMap}
+                      hasMore={(rowData[row.key]?.page || 1) < (rowData[row.key]?.total_pages || 1)}
+                      loadingMore={!!rowData[row.key]?.loadingMore}
+                      onLoadMore={() => loadMoreRow(row.key)}
+                    />
+                  );
+                })}
+              </div>
+            )}
           </div>
         </>
       )}

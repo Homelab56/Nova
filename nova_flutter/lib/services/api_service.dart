@@ -42,10 +42,17 @@ class ApiService {
     throw Exception('DELETE $path failed: ${r.statusCode}');
   }
 
+  static Future<List> _getItems(String path) async {
+    final data = await get(path);
+    if (data is List) return data;
+    if (data is Map && data['items'] is List) return data['items'] as List;
+    return const [];
+  }
+
   // --- TMDB ---
-  static Future<List> getTrending() async => await get('/search/trending') as List;
-  static Future<List> getPopularMovies() async => await get('/search/popular/movies') as List;
-  static Future<List> getPopularTv() async => await get('/search/popular/tv') as List;
+  static Future<List> getTrending() async => await _getItems('/search/trending');
+  static Future<List> getPopularMovies() async => await _getItems('/search/popular/movies');
+  static Future<List> getPopularTv() async => await _getItems('/search/popular/tv');
   static Future<List> searchMovies(String q, {int page = 1}) async {
     final data = await get('/search/movie?q=${Uri.encodeComponent(q)}&page=$page');
     return data['items'] as List;
