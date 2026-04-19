@@ -336,6 +336,10 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
 
     copy_video = v_codec == "h264"
     copy_audio = a_codec in {"aac", "mp3"}
+    try:
+        max_h = int(os.getenv("TRANSCODE_MAX_HEIGHT", "1080") or "0")
+    except Exception:
+        max_h = 1080
 
     cmd = [
         "ffmpeg",
@@ -350,6 +354,10 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         cmd += ["-ss", f"{start:.3f}"]
 
     cmd += [
+        "-analyzeduration",
+        "10000000",
+        "-probesize",
+        "10000000",
         "-i",
         input_value,
         "-map",
@@ -366,7 +374,8 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
     if copy_video:
         cmd += ["-c:v", "copy"]
     else:
-        crf = "18" if v_height >= 1440 else "20"
+        do_scale = bool(max_h and max_h > 0 and v_height and v_height > max_h)
+        crf = "21" if do_scale else ("18" if v_height >= 1440 else "20")
         cmd += [
             "-c:v",
             "libx264",
@@ -382,6 +391,8 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
             "ultrafast",
             "-threads",
             "0",
+            "-vf",
+            (f"scale=-2:{max_h}" if do_scale else "null"),
             "-crf",
             crf,
             "-pix_fmt",
@@ -527,10 +538,19 @@ async def subtitles(url: str | None = None, path: str | None = None):
     is_path = path is not None
     input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
     streams = await _ffprobe_subtitle_streams(input_value, is_path=is_path)
+    bitmap_codecs = {
+        "hdmv_pgs_subtitle",
+        "dvd_subtitle",
+        "dvb_subtitle",
+        "xsub",
+    }
     tracks = []
     for s in streams:
         idx = s.get("index")
         codec = s.get("codec_name") or ""
+        codec_l = str(codec).lower().strip()
+        if codec_l in bitmap_codecs:
+            continue
         tags = s.get("tags") or {}
         if not isinstance(tags, dict):
             tags = {}
@@ -561,6 +581,17 @@ async def subtitle_vtt(
         raise HTTPException(status_code=400, detail="url of path is verplicht")
     is_path = path is not None
     input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
+    streams = await _ffprobe_subtitle_streams(input_value, is_path=is_path)
+    for s in streams:
+        try:
+            if int(s.get("index")) != int(stream_index):
+                continue
+        except Exception:
+            continue
+        codec = str(s.get("codec_name") or "").lower().strip()
+        if codec in {"hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "xsub"}:
+            raise HTTPException(status_code=415, detail="Bitmap ondertitels (PGS/DVD) worden niet ondersteund.")
+        break
     return StreamingResponse(
         _ffmpeg_subtitle_vtt(input_value, is_path=is_path, stream_index=stream_index),
         media_type="text/vtt",
