@@ -21,7 +21,7 @@ class RequestBody(BaseModel):
     seasons: list[int] = [] # Alleen voor tv
 
 _RECENT_REQUESTS: dict[str, float] = {}
-_RECENT_TTL_SECONDS = 30
+_RECENT_TTL_SECONDS = 10 * 60
 
 
 def _find_first_request_id(data):

@@ -41,6 +41,7 @@ export default function Watch() {
   const pollRef = useRef(null);
   const searchAbortRef = useRef(null);
   const requestKeyRef = useRef(null);
+  const seerrInFlightRef = useRef(new Set());
 
   const { toggleWatchlist, isInList, saveProgress, progress, progressMap } = useUserData();
   const inList = isInList(media?.id);
@@ -451,6 +452,13 @@ export default function Watch() {
       requestKeyRef.current = reqKey || null;
       return true;
     }
+    if (seerrInFlightRef.current.has(lockKey)) {
+      setRequestStatus("waiting");
+      setRequestMessage("Aanvraag is net verstuurd. Even wachten...");
+      requestKeyRef.current = reqKey || null;
+      return true;
+    }
+    seerrInFlightRef.current.add(lockKey);
     setRequestStatus("loading");
     setRequestMessage("Aanvragen via Seerr...");
     requestKeyRef.current = reqKey || null;
@@ -494,6 +502,10 @@ export default function Watch() {
       setRequestStatus("error");
       setRequestMessage("Kon geen verbinding maken met Seerr.");
       return false;
+    } finally {
+      setTimeout(() => {
+        seerrInFlightRef.current.delete(lockKey);
+      }, 5000);
     }
   }
 

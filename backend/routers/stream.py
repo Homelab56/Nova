@@ -910,6 +910,15 @@ async def hls(
     if not url and not path:
         raise HTTPException(status_code=400, detail="url of path is verplicht")
 
+    if float(start or 0.0) > 0.0:
+        qs = []
+        if path is not None:
+            qs.append(f"path={urllib.parse.quote(path)}")
+        if url is not None:
+            qs.append(f"url={urllib.parse.quote(url)}")
+        qs.append(f"start={urllib.parse.quote(str(float(start)))}")
+        return RedirectResponse(url=f"/api/stream/play?{'&'.join(qs)}", status_code=302)
+
     is_path = path is not None
     input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
     sid_seed = f"{input_value}|{float(start):.3f}|{os.getenv('TRANSCODE_MAX_HEIGHT','')}"
