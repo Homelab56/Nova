@@ -1,4 +1,5 @@
 import httpx
+import time
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from .config_loader import get_seerr_config
@@ -18,6 +19,9 @@ class RequestBody(BaseModel):
     media_id: int
     media_type: str # "movie" of "tv"
     seasons: list[int] = [] # Alleen voor tv
+
+_RECENT_REQUESTS: dict[str, float] = {}
+_RECENT_TTL_SECONDS = 30
 
 
 def _find_first_request_id(data):
@@ -50,9 +54,64 @@ def _has_request_for_seasons(data, seasons: list[int]) -> bool:
         if not isinstance(r, dict):
             continue
         rs = r.get("seasons")
-        if isinstance(rs, list) and any(isinstance(x, int) and x in seasons for x in rs):
-            return True
+        if isinstance(rs, list):
+            vals = []
+            for x in rs:
+                if isinstance(x, int):
+                    vals.append(x)
+                elif isinstance(x, dict):
+                    n = x.get("seasonNumber") or x.get("season_number") or x.get("season")
+                    if isinstance(n, int):
+                        vals.append(n)
+            if any(x in seasons for x in vals):
+                return True
     return False
+
+
+async def _find_existing_request_from_list(url: str, key: str, media_id: int, media_type: str, seasons: list[int]) -> int | None:
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                f"{url}/api/v1/request",
+                headers={"X-Api-Key": key},
+                params={"take": 200, "skip": 0},
+                timeout=10,
+            )
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        results = data.get("results") if isinstance(data, dict) else None
+        if not isinstance(results, list):
+            return None
+        for it in results:
+            if not isinstance(it, dict):
+                continue
+            media = it.get("media")
+            if not isinstance(media, dict):
+                continue
+            if str(media.get("mediaType") or "").lower() != str(media_type).lower():
+                continue
+            if int(media.get("tmdbId") or 0) != int(media_id):
+                continue
+            if media_type == "tv" and seasons:
+                rs = it.get("seasons")
+                if isinstance(rs, list):
+                    vals = []
+                    for x in rs:
+                        if isinstance(x, int):
+                            vals.append(x)
+                        elif isinstance(x, dict):
+                            n = x.get("seasonNumber") or x.get("season_number") or x.get("season")
+                            if isinstance(n, int):
+                                vals.append(n)
+                    if not any(x in seasons for x in vals):
+                        continue
+            rid = it.get("id")
+            if isinstance(rid, int):
+                return rid
+        return None
+    except Exception:
+        return None
 
 
 @router.get("/status")
@@ -89,6 +148,15 @@ async def request_media(body: RequestBody):
     if not url or not key:
         raise HTTPException(status_code=400, detail="Seerr niet geconfigureerd.")
 
+    lock_key = f"{body.media_type}:{body.media_id}:{','.join(str(x) for x in (body.seasons or []))}"
+    now = time.time()
+    for k, ts in list(_RECENT_REQUESTS.items()):
+        if now - ts > _RECENT_TTL_SECONDS:
+            _RECENT_REQUESTS.pop(k, None)
+    if lock_key in _RECENT_REQUESTS:
+        return {"ok": True, "message": "Aanvraag is net verstuurd. Even wachten...", "request_id": None}
+    _RECENT_REQUESTS[lock_key] = now
+
     try:
         async with httpx.AsyncClient() as client:
             existing = await client.get(
@@ -100,6 +168,13 @@ async def request_media(body: RequestBody):
         if existing.status_code == 200:
             existing_data = existing.json()
             existing_request_id = _find_first_request_id(existing_data)
+            if body.media_type == "tv" and isinstance(existing_data, dict) and isinstance(existing_data.get("requests"), list) and len(existing_data.get("requests")) > 0 and not body.seasons:
+                return {
+                    "ok": True,
+                    "message": "Bestaat al in Seerr.",
+                    "request_id": existing_request_id,
+                    "media": existing_data,
+                }
             if body.media_type == "movie":
                 return {
                     "ok": True,
@@ -119,6 +194,10 @@ async def request_media(body: RequestBody):
             return {"ok": False, "message": f"Seerr fout: {existing.status_code}. Toegang geweigerd."}
     except Exception:
         pass
+
+    existing_request_id = await _find_existing_request_from_list(url, key, body.media_id, body.media_type, body.seasons)
+    if existing_request_id is not None:
+        return {"ok": True, "message": "Bestaat al in Seerr.", "request_id": existing_request_id, "media": None}
     
     endpoint = f"{url}/api/v1/request"
     payload = {

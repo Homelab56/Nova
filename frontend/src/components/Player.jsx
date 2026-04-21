@@ -145,6 +145,12 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const buildSrc = (startSeconds) => {
     const u = new URL(url, window.location.origin);
     if (startSeconds && startSeconds > 0) {
+      const p = u.pathname || "";
+      if (p.includes("/stream/hls") && !p.endsWith(".m3u8")) {
+        u.pathname = p.replace("/stream/hls", "/stream/play");
+      }
+    }
+    if (startSeconds && startSeconds > 0) {
       u.searchParams.set("start", String(startSeconds.toFixed(3)));
     } else {
       u.searchParams.delete("start");
