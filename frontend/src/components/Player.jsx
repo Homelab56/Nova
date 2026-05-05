@@ -17,6 +17,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const hlsFallbackRef = useRef(false);
   const saveTimer = useRef(null);
   const controlsTimer = useRef(null);
+  const flashTimer = useRef(null);
   const subsAbortRef = useRef(null);
   const bufferingTimerRef = useRef(null);
   const lastTimeRef = useRef(0);
@@ -95,6 +96,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     return () => {
       clearTimeout(saveTimer.current);
       clearTimeout(controlsTimer.current);
+      clearTimeout(flashTimer.current);
       clearTimeout(bufferingTimerRef.current);
       if (subsAbortRef.current) subsAbortRef.current.abort();
       reportProgress();
@@ -455,13 +457,13 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     if (playing) {
       v.pause();
       setFlashIcon("pause");
-      clearTimeout(controlsTimer.current);
-      controlsTimer.current = setTimeout(() => setFlashIcon(null), 600);
+      clearTimeout(flashTimer.current);
+      flashTimer.current = setTimeout(() => setFlashIcon(null), 600);
       return;
     }
     setFlashIcon("play");
-    clearTimeout(controlsTimer.current);
-    controlsTimer.current = setTimeout(() => setFlashIcon(null), 600);
+    clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlashIcon(null), 600);
     await tryPlay();
   };
 
