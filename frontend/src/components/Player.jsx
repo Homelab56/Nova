@@ -116,7 +116,9 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
 
   const buildSubtitleVttUrl = (streamIndex) => {
     const u = new URL(url, window.location.origin);
-    u.searchParams.delete("start");
+    const start = Number(startOffsetRef.current) || 0;
+    if (start > 0) u.searchParams.set("start", String(start.toFixed(3)));
+    else u.searchParams.delete("start");
     u.pathname = "/api/stream/subtitle.vtt";
     u.searchParams.set("stream_index", String(streamIndex));
     return u.toString();

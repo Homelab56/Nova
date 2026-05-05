@@ -7,6 +7,7 @@ import hashlib
 import time
 import shutil
 import mimetypes
+import re
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse, FileResponse, RedirectResponse
 from pydantic import BaseModel
@@ -202,7 +203,194 @@ async def _ffprobe_subtitle_streams(input_value: str, is_path: bool) -> list[dic
     except Exception:
         return []
 
-async def _ffmpeg_subtitle_vtt(input_value: str, is_path: bool, stream_index: int):
+def _parse_vtt_timestamp(value: str) -> float | None:
+    v = (value or "").strip()
+    if not v:
+        return None
+    parts = v.split(":")
+    if len(parts) == 3:
+        h_s, m_s, s_ms = parts
+    elif len(parts) == 2:
+        h_s, m_s, s_ms = "0", parts[0], parts[1]
+    else:
+        return None
+    if "." not in s_ms:
+        return None
+    s_s, ms_s = s_ms.split(".", 1)
+    try:
+        h = int(h_s)
+        m = int(m_s)
+        s = int(s_s)
+        ms = int((ms_s + "000")[:3])
+    except Exception:
+        return None
+    if h < 0 or m < 0 or s < 0 or ms < 0:
+        return None
+    return (h * 3600) + (m * 60) + s + (ms / 1000.0)
+
+
+def _format_vtt_timestamp(seconds: float) -> str:
+    total_ms = int(round(max(0.0, float(seconds or 0.0)) * 1000.0))
+    ms = total_ms % 1000
+    total_s = total_ms // 1000
+    s = total_s % 60
+    total_m = total_s // 60
+    m = total_m % 60
+    h = total_m // 60
+    return f"{h:02}:{m:02}:{s:02}.{ms:03}"
+
+
+def _shift_webvtt(text: str, shift_seconds: float) -> str:
+    shift = max(0.0, float(shift_seconds or 0.0))
+    if not (shift and shift > 0):
+        return text
+    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = normalized.split("\n")
+    blocks: list[list[str]] = []
+    cur: list[str] = []
+    for line in lines:
+        if line.strip() == "":
+            blocks.append(cur)
+            cur = []
+        else:
+            cur.append(line)
+    if cur:
+        blocks.append(cur)
+
+    out_blocks: list[list[str]] = []
+    timing_re = re.compile(r"^\s*(\S+)\s*-->\s*(\S+)(.*)$")
+    for b in blocks:
+        if not b:
+            continue
+        timing_idx = next((i for i, ln in enumerate(b) if "-->" in ln), None)
+        if timing_idx is None:
+            out_blocks.append(b)
+            continue
+        m = timing_re.match(b[timing_idx])
+        if not m:
+            out_blocks.append(b)
+            continue
+        start_ts, end_ts, rest = m.group(1), m.group(2), m.group(3) or ""
+        start_s = _parse_vtt_timestamp(start_ts)
+        end_s = _parse_vtt_timestamp(end_ts)
+        if start_s is None or end_s is None:
+            out_blocks.append(b)
+            continue
+        if end_s <= shift + 0.001:
+            continue
+        new_start = max(0.0, start_s - shift)
+        new_end = max(0.0, end_s - shift)
+        if new_end <= new_start + 0.001:
+            continue
+        b2 = list(b)
+        b2[timing_idx] = f"{_format_vtt_timestamp(new_start)} --> {_format_vtt_timestamp(new_end)}{rest}"
+        out_blocks.append(b2)
+
+    if not out_blocks:
+        return "WEBVTT\n"
+    return "\n\n".join("\n".join(b) for b in out_blocks).strip("\n") + "\n"
+
+
+async def _ffmpeg_subtitle_vtt(input_value: str, is_path: bool, stream_index: int, start: float = 0.0):
+    try:
+        start_f = float(start or 0.0)
+    except Exception:
+        start_f = 0.0
+    start_f = max(0.0, start_f)
+
+    if not (start_f and start_f > 0):
+        cmd = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-i",
+            input_value,
+            "-map",
+            f"0:{int(stream_index)}",
+            "-c:s",
+            "webvtt",
+            "-f",
+            "webvtt",
+            "pipe:1",
+        ]
+        if _is_http_url(input_value):
+            insert_at = cmd.index("-i")
+            cmd[insert_at:insert_at] = [
+                "-rw_timeout",
+                "15000000",
+                "-reconnect",
+                "1",
+                "-reconnect_streamed",
+                "1",
+                "-reconnect_delay_max",
+                "2",
+            ]
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        stderr_buf = bytearray()
+
+        async def _drain_stderr():
+            if not proc.stderr:
+                return
+            try:
+                while True:
+                    chunk = await proc.stderr.read(4096)
+                    if not chunk:
+                        break
+                    stderr_buf.extend(chunk)
+                    if len(stderr_buf) > 128_000:
+                        del stderr_buf[:-128_000]
+            except Exception:
+                return
+
+        stderr_task = asyncio.create_task(_drain_stderr())
+        produced = 0
+        try:
+            while True:
+                chunk = await proc.stdout.read(64 * 1024)
+                if not chunk:
+                    break
+                produced += len(chunk)
+                yield chunk
+        finally:
+            try:
+                if proc.returncode is None:
+                    proc.kill()
+            except Exception:
+                pass
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=0.5)
+            except Exception:
+                pass
+            try:
+                await asyncio.wait_for(stderr_task, timeout=0.5)
+            except Exception:
+                try:
+                    stderr_task.cancel()
+                except Exception:
+                    pass
+
+            if produced == 0:
+                msg = (bytes(stderr_buf).decode("utf-8", errors="ignore") or "").strip()
+                if not msg:
+                    msg = "Geen stderr output van ffmpeg."
+                print(
+                    "FFMPEG subtitles gaf geen data terug\n"
+                    f"input={input_value}\n"
+                    f"stream_index={stream_index}\n"
+                    f"returncode={proc.returncode}\n"
+                    f"cmd={' '.join(cmd)}\n"
+                    f"{msg[:1800]}"
+                )
+        return
+
     cmd = [
         "ffmpeg",
         "-hide_banner",
@@ -237,62 +425,34 @@ async def _ffmpeg_subtitle_vtt(input_value: str, is_path: bool, stream_index: in
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-
-    stderr_buf = bytearray()
-
-    async def _drain_stderr():
-        if not proc.stderr:
-            return
-        try:
-            while True:
-                chunk = await proc.stderr.read(4096)
-                if not chunk:
-                    break
-                stderr_buf.extend(chunk)
-                if len(stderr_buf) > 128_000:
-                    del stderr_buf[:-128_000]
-        except Exception:
-            return
-
-    stderr_task = asyncio.create_task(_drain_stderr())
-    produced = 0
     try:
-        while True:
-            chunk = await proc.stdout.read(64 * 1024)
-            if not chunk:
-                break
-            produced += len(chunk)
-            yield chunk
-    finally:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=25)
+    except Exception:
         try:
-            if proc.returncode is None:
-                proc.kill()
+            proc.kill()
         except Exception:
             pass
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=0.5)
-        except Exception:
-            pass
-        try:
-            await asyncio.wait_for(stderr_task, timeout=0.5)
-        except Exception:
-            try:
-                stderr_task.cancel()
-            except Exception:
-                pass
-
-        if produced == 0:
-            msg = (bytes(stderr_buf).decode("utf-8", errors="ignore") or "").strip()
-            if not msg:
-                msg = "Geen stderr output van ffmpeg."
-            print(
-                "FFMPEG subtitles gaf geen data terug\n"
-                f"input={input_value}\n"
-                f"stream_index={stream_index}\n"
-                f"returncode={proc.returncode}\n"
-                f"cmd={' '.join(cmd)}\n"
-                f"{msg[:1800]}"
-            )
+        return
+    if proc.returncode != 0 or not out:
+        msg = (err.decode("utf-8", errors="ignore") or "").strip()
+        if not msg:
+            msg = "Geen stderr output van ffmpeg."
+        print(
+            "FFMPEG subtitles gaf geen data terug\n"
+            f"input={input_value}\n"
+            f"stream_index={stream_index}\n"
+            f"returncode={proc.returncode}\n"
+            f"cmd={' '.join(cmd)}\n"
+            f"{msg[:1800]}"
+        )
+        return
+    try:
+        text = out.decode("utf-8", errors="ignore")
+    except Exception:
+        yield out
+        return
+    shifted = _shift_webvtt(text, start_f)
+    yield shifted.encode("utf-8")
 
 
 async def _ffprobe_streams(input_value: str, is_path: bool) -> dict:
@@ -685,6 +845,7 @@ async def subtitle_vtt(
     stream_index: int,
     url: str | None = None,
     path: str | None = None,
+    start: float = 0.0,
 ):
     if not url and not path:
         raise HTTPException(status_code=400, detail="url of path is verplicht")
@@ -702,7 +863,7 @@ async def subtitle_vtt(
             raise HTTPException(status_code=415, detail="Bitmap ondertitels (PGS/DVD) worden niet ondersteund.")
         break
     return StreamingResponse(
-        _ffmpeg_subtitle_vtt(input_value, is_path=is_path, stream_index=stream_index),
+        _ffmpeg_subtitle_vtt(input_value, is_path=is_path, stream_index=stream_index, start=start),
         media_type="text/vtt",
         headers={"Cache-Control": "no-cache"},
     )
