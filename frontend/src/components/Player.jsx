@@ -39,6 +39,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const [subtitleSelected, setSubtitleSelected] = useState(null);
   const [subtitleLabel, setSubtitleLabel] = useState("");
   const [subMenuOpen, setSubMenuOpen] = useState(false);
+  const [subtitleDelay, setSubtitleDelay] = useState(0);
   const [prefs, setPrefs] = useState({
     default_audio_lang: "en",
     default_sub_lang_1: "nl",
@@ -77,6 +78,20 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("nova_subtitle_delay_seconds_v1");
+      const v = Number(raw);
+      if (Number.isFinite(v)) setSubtitleDelay(Math.max(-10, Math.min(10, v)));
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("nova_subtitle_delay_seconds_v1", String(subtitleDelay));
+    } catch {}
+  }, [subtitleDelay]);
 
   const reportProgress = (tOverride = null) => {
     if (!media || !onProgress) return;
@@ -119,6 +134,11 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     const apiPrefix = u.pathname.startsWith("/api/") ? "/api" : "";
     u.pathname = `${apiPrefix}/stream/subtitle.vtt`;
     u.searchParams.set("stream_index", String(streamIndex));
+    if (subtitleDelay && Math.abs(subtitleDelay) > 0.0005) {
+      u.searchParams.set("delay", String(Number(subtitleDelay).toFixed(3)));
+    } else {
+      u.searchParams.delete("delay");
+    }
     return u.toString();
   };
 
@@ -589,6 +609,33 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
                   >
                     Ondertitels uit
                   </button>
+                  <div className="px-4 py-2 border-t border-white/10">
+                    <div className="text-xs text-white/70 mb-2">
+                      Sync: {subtitleDelay >= 0 ? "+" : ""}{Number(subtitleDelay).toFixed(1)}s
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setSubtitleDelay(v => Math.max(-10, Number((Number(v) - 0.5).toFixed(3))))}
+                        className="flex-1 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg px-2 py-1 text-xs font-semibold"
+                        title="Ondertitels vroeger"
+                      >
+                        -0.5s
+                      </button>
+                      <button
+                        onClick={() => setSubtitleDelay(0)}
+                        className="flex-1 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg px-2 py-1 text-xs font-semibold"
+                      >
+                        Reset
+                      </button>
+                      <button
+                        onClick={() => setSubtitleDelay(v => Math.min(10, Number((Number(v) + 0.5).toFixed(3))))}
+                        className="flex-1 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg px-2 py-1 text-xs font-semibold"
+                        title="Ondertitels later"
+                      >
+                        +0.5s
+                      </button>
+                    </div>
+                  </div>
                   {subtitleTracks.map((t) => {
                     const idx = t.stream_index;
                     const label = t.language || t.title || `Track ${idx}`;
