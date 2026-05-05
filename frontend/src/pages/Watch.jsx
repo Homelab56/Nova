@@ -292,7 +292,7 @@ export default function Watch() {
                 `/api/seerr/media-status?tmdb_id=${mediaId}&media_type=${type}`,
                 { signal: searchAbortRef.current.signal }
               ).then(r => r.json());
-              if (!(ms?.ok && ms?.status && ms.status > 1)) {
+              if (!(ms?.ok && ms?.requested)) {
                 clearLock(lockKey);
                 setRequestStatus(null);
                 setRequestMessage("");
@@ -329,7 +329,7 @@ export default function Watch() {
               { signal: searchAbortRef.current.signal }
             ).then(r => r.json());
             // Zorg dat we niet triggeren op status 1 (Unknown) of "Niet aangevraagd"
-            if (ms?.ok && ms?.status && ms.status > 1) {
+            if (ms?.ok && ms?.requested) {
               setLock(lockKey);
               setRequestStatus("waiting");
               setRequestMessage(ms.status_label || "Bestaat al in Seerr. Wachten...");
@@ -482,7 +482,7 @@ export default function Watch() {
     if (isLocked(lockKey)) {
       try {
         const ms = await fetch(`/api/seerr/media-status?tmdb_id=${mediaId}&media_type=${type}`).then(r => r.json());
-        if (ms?.ok && ms?.status && ms.status > 1) {
+        if (ms?.ok && ms?.requested) {
           setRequestStatus("waiting");
           setRequestMessage(ms.status_label || "Download loopt al. Wachten tot hij beschikbaar is...");
           requestKeyRef.current = reqKey || null;

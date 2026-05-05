@@ -309,11 +309,19 @@ async def media_status(tmdb_id: int, media_type: str):
             data = r.json()
             status_code = data.get("status")
             status_label = STATUS_LABELS.get(status_code, f"Status {status_code}")
+            request_id = _find_first_request_id(data)
+            requested = False
+            if request_id is not None:
+                requested = True
+            elif isinstance(data, dict) and isinstance(data.get("requests"), list) and len(data.get("requests")) > 0:
+                requested = True
             return {
                 "ok": True,
                 "status": status_code,
                 "status_label": status_label,
                 "download_status": data.get("downloadStatus") or data.get("downloadStatus4k"),
+                "requested": requested,
+                "request_id": request_id,
                 "media": data,
             }
         if r.status_code == 404:
