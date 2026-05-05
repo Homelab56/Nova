@@ -17,6 +17,10 @@ export default function Watch() {
   const navigate = useNavigate();
   const media = state?.media;
 
+  const rawId = media?.id ?? media?.tmdb_id ?? media?.tmdbId ?? media?.tmdbID ?? null;
+  const parsedId = (typeof rawId === "string" && /^\d+$/.test(rawId)) ? Number(rawId) : rawId;
+  const mediaId = (typeof parsedId === "number" && Number.isFinite(parsedId) && parsedId > 0) ? parsedId : null;
+
   const type = media?.media_type || (media?.name ? "tv" : "movie");
   const isMovie = type === "movie";
 
@@ -44,8 +48,8 @@ export default function Watch() {
   const seerrInFlightRef = useRef(new Set());
 
   const { toggleWatchlist, isInList, saveProgress, progress, progressMap } = useUserData();
-  const inList = isInList(media?.id);
-  const savedProgress = progress.find(p => p.id === media?.id);
+  const inList = isInList(mediaId);
+  const savedProgress = progress.find(p => p.id === mediaId);
 
   const title = media?.title || media?.name;
   const year = (media?.release_date || media?.first_air_date || "").slice(0, 4);
@@ -104,7 +108,7 @@ export default function Watch() {
     if (!media) return;
     
     // Als we alleen een filename hebben (RD item), eerst zoeken naar TMDB match
-    if (!media.id || typeof media.id === 'string') {
+    if (!mediaId) {
       const name = media.filename || media.title || media.name;
       fetch(`/api/search/movie?q=${encodeURIComponent(name)}`)
         .then(r => r.json())
@@ -119,17 +123,22 @@ export default function Watch() {
       return;
     }
 
-    fetch(`/api/search/${type}/${media.id}/credits`).then(r => r.json()).then(setCast).catch(() => {});
-    fetch(`/api/search/${type}/${media.id}/similar`).then(r => r.json()).then(setSimilar).catch(() => {});
-    fetch(`/api/search/${type}/${media.id}`).then(r => r.json()).then(setDetail).catch(() => {});
+    if (media.id !== mediaId) {
+      navigate("/watch", { state: { media: { ...media, id: mediaId } }, replace: true });
+      return;
+    }
+
+    fetch(`/api/search/${type}/${mediaId}/credits`).then(r => r.json()).then(setCast).catch(() => {});
+    fetch(`/api/search/${type}/${mediaId}/similar`).then(r => r.json()).then(setSimilar).catch(() => {});
+    fetch(`/api/search/${type}/${mediaId}`).then(r => r.json()).then(setDetail).catch(() => {});
     
     // Check RD availability
     const searchTitle = `${title} ${year}`;
-    fetch(`/api/debrid/check?q=${encodeURIComponent(searchTitle)}&tmdb_id=${encodeURIComponent(media.id)}&media_type=${encodeURIComponent(type)}`)
+    fetch(`/api/debrid/check?q=${encodeURIComponent(searchTitle)}&tmdb_id=${encodeURIComponent(mediaId)}&media_type=${encodeURIComponent(type)}`)
       .then(r => r.json())
       .then(data => setIsAvailable(data.available))
       .catch(() => setIsAvailable(false));
-  }, [media?.id]);
+  }, [mediaId]);
 
   useEffect(() => {
     return () => {
@@ -139,7 +148,7 @@ export default function Watch() {
   }, []);
 
   useEffect(() => {
-    if (!media?.id) return;
+    if (!mediaId) return;
     if (pollRef.current) clearInterval(pollRef.current);
     if (searchAbortRef.current) searchAbortRef.current.abort();
     requestKeyRef.current = null;
@@ -156,28 +165,28 @@ export default function Watch() {
       setSelectedEpisode(null);
       setSeasonData(null);
     }
-  }, [media?.id]);
+  }, [mediaId]);
 
   useEffect(() => {
-    if (!media?.id) return;
+    if (!mediaId) return;
     if (streamUrl) return;
-    const lockKey = `${type}:${media.id}`;
+    const lockKey = `${type}:${mediaId}`;
     if (!isLocked(lockKey)) return;
     setRequestStatus("waiting");
     setRequestMessage("Download loopt al. Wachten tot hij beschikbaar is...");
     handlePlay();
-  }, [media?.id]);
+  }, [mediaId]);
 
   // Laad seizoendata als serie
   useEffect(() => {
     if (isMovie || !media) return;
     setLoadingSeason(true);
     setSelectedEpisode(null);
-    fetch(`/api/search/tv/${media.id}/season/${selectedSeason}`)
+    fetch(`/api/search/tv/${mediaId}/season/${selectedSeason}`)
       .then(r => r.json())
       .then(d => { setSeasonData(d); setLoadingSeason(false); })
       .catch(() => setLoadingSeason(false));
-  }, [media?.id, selectedSeason, isMovie]);
+  }, [mediaId, selectedSeason, isMovie]);
 
   useEffect(() => {
     if (!streamUrl) return;
@@ -195,12 +204,12 @@ export default function Watch() {
 
   if (!media) { navigate("/"); return null; }
 
-  const episodeKey = (seasonNumber, episodeNumber) => `tv:${media.id}:S${seasonNumber}E${episodeNumber}`;
+  const episodeKey = (seasonNumber, episodeNumber) => `tv:${mediaId}:S${seasonNumber}E${episodeNumber}`;
   const getEpisodeProgress = (seasonNumber, episodeNumber) => progressMap?.[episodeKey(seasonNumber, episodeNumber)] || null;
 
   const getLatestEpisode = () => {
     if (isMovie) return null;
-    const eps = progress.filter(p => p.show_id === media.id && p.media_type === "tv_episode");
+    const eps = progress.filter(p => p.show_id === mediaId && p.media_type === "tv_episode");
     if (eps.length === 0) return null;
     const latest = eps[eps.length - 1]; // Assume last is the most recent
     if ((latest.current_time / latest.duration) >= 0.95) {
@@ -231,7 +240,7 @@ export default function Watch() {
         setStatus("Afleveringen laden...");
         setLoadingSeason(true);
         try {
-          const d = await fetch(`/api/search/tv/${media.id}/season/${targetSeason}`, { signal: searchAbortRef.current.signal }).then(r => r.json());
+          const d = await fetch(`/api/search/tv/${mediaId}/season/${targetSeason}`, { signal: searchAbortRef.current.signal }).then(r => r.json());
           setSeasonData(d);
           setLoadingSeason(false);
           const ep = (d?.episodes || [])[0] || null;
@@ -247,8 +256,8 @@ export default function Watch() {
       }
     }
 
-    const reqKey = episodeInfo ? `${type}:${media.id}:S${targetSeason}E${episodeInfo.episode_number}` : `${type}:${media.id}`;
-    const lockKey = `${type}:${media.id}`;
+    const reqKey = episodeInfo ? `${type}:${mediaId}:S${targetSeason}E${episodeInfo.episode_number}` : `${type}:${mediaId}`;
+    const lockKey = `${type}:${mediaId}`;
     const hasLock = isLocked(lockKey);
     if (requestKeyRef.current !== reqKey) {
       if (!hasLock) {
@@ -266,7 +275,7 @@ export default function Watch() {
 
     try {
       // Stap 1: Zoek stream (Backend doet nu library + scraper check)
-      const r = await fetch(`/api/debrid/search?q=${encodeURIComponent(searchTitle)}&tmdb_id=${encodeURIComponent(media.id)}&media_type=${encodeURIComponent(type)}`, { signal: searchAbortRef.current.signal });
+      const r = await fetch(`/api/debrid/search?q=${encodeURIComponent(searchTitle)}&tmdb_id=${encodeURIComponent(mediaId)}&media_type=${encodeURIComponent(type)}`, { signal: searchAbortRef.current.signal });
       const data = await r.json();
       
       if (!data.stream_url) {
@@ -280,7 +289,7 @@ export default function Watch() {
           } else {
             try {
               const ms = await fetch(
-                `/api/seerr/media-status?tmdb_id=${media.id}&media_type=${type}`,
+                `/api/seerr/media-status?tmdb_id=${mediaId}&media_type=${type}`,
                 { signal: searchAbortRef.current.signal }
               ).then(r => r.json());
               if (!(ms?.ok && ms?.status && ms.status > 1)) {
@@ -301,7 +310,7 @@ export default function Watch() {
         if (!requested) {
           try {
             const av = await fetch(
-              `/api/debrid/check?q=${encodeURIComponent(searchTitle)}&tmdb_id=${encodeURIComponent(media.id)}&media_type=${encodeURIComponent(type)}`,
+              `/api/debrid/check?q=${encodeURIComponent(searchTitle)}&tmdb_id=${encodeURIComponent(mediaId)}&media_type=${encodeURIComponent(type)}`,
               { signal: searchAbortRef.current.signal }
             ).then(r => r.json());
             if (av?.available) {
@@ -316,7 +325,7 @@ export default function Watch() {
         if (!requested) {
           try {
             const ms = await fetch(
-              `/api/seerr/media-status?tmdb_id=${media.id}&media_type=${type}`,
+              `/api/seerr/media-status?tmdb_id=${mediaId}&media_type=${type}`,
               { signal: searchAbortRef.current.signal }
             ).then(r => r.json());
             // Zorg dat we niet triggeren op status 1 (Unknown) of "Niet aangevraagd"
@@ -341,7 +350,7 @@ export default function Watch() {
         const startedAt = Date.now();
         const poll = async () => {
           try {
-            const ms = await fetch(`/api/seerr/media-status?tmdb_id=${media.id}&media_type=${type}`, { signal: searchAbortRef.current.signal }).then(r => r.json());
+            const ms = await fetch(`/api/seerr/media-status?tmdb_id=${mediaId}&media_type=${type}`, { signal: searchAbortRef.current.signal }).then(r => r.json());
             if (ms.ok && requestKeyRef.current === reqKey) {
               const dl = ms.download_status ? ` · ${ms.download_status}` : "";
               setRequestMessage(`${ms.status_label || "Seerr status"}${dl}`);
@@ -349,7 +358,7 @@ export default function Watch() {
           } catch {}
 
           try {
-            const rr = await fetch(`/api/debrid/search?q=${encodeURIComponent(searchTitle)}&tmdb_id=${encodeURIComponent(media.id)}&media_type=${encodeURIComponent(type)}`, { signal: searchAbortRef.current.signal }).then(r => r.json());
+            const rr = await fetch(`/api/debrid/search?q=${encodeURIComponent(searchTitle)}&tmdb_id=${encodeURIComponent(mediaId)}&media_type=${encodeURIComponent(type)}`, { signal: searchAbortRef.current.signal }).then(r => r.json());
             if (rr.stream_url) {
               let finalUrl = rr.stream_url;
               if (finalUrl.startsWith("/")) finalUrl = window.location.origin + finalUrl;
@@ -364,7 +373,7 @@ export default function Watch() {
                   ...media,
                   id: episodeKey(targetSeason, episodeInfo.episode_number),
                   media_type: "tv_episode",
-                  show_id: media.id,
+                  show_id: mediaId,
                   season_number: targetSeason,
                   episode_number: episodeInfo.episode_number,
                   title: `${title} S${String(targetSeason).padStart(2,"0")}E${String(episodeInfo.episode_number).padStart(2,"0")}`,
@@ -439,7 +448,7 @@ export default function Watch() {
           ...media,
           id: episodeKey(targetSeason, episodeInfo.episode_number),
           media_type: "tv_episode",
-          show_id: media.id,
+          show_id: mediaId,
           season_number: targetSeason,
           episode_number: episodeInfo.episode_number,
           title: `${title} S${String(targetSeason).padStart(2,"0")}E${String(episodeInfo.episode_number).padStart(2,"0")}`,
@@ -472,7 +481,7 @@ export default function Watch() {
   async function handleRequest(reqKey, lockKey) {
     if (isLocked(lockKey)) {
       try {
-        const ms = await fetch(`/api/seerr/media-status?tmdb_id=${media.id}&media_type=${type}`).then(r => r.json());
+        const ms = await fetch(`/api/seerr/media-status?tmdb_id=${mediaId}&media_type=${type}`).then(r => r.json());
         if (ms?.ok && ms?.status && ms.status > 1) {
           setRequestStatus("waiting");
           setRequestMessage(ms.status_label || "Download loopt al. Wachten tot hij beschikbaar is...");
@@ -498,7 +507,7 @@ export default function Watch() {
         seasonNums = ((seasons || []).map(s => Number(s.season_number)).filter(Boolean));
         if (seasonNums.length === 0) {
           try {
-            const d = await fetch(`/api/search/tv/${media.id}`).then(r => r.json());
+            const d = await fetch(`/api/search/tv/${mediaId}`).then(r => r.json());
             seasonNums = ((d?.seasons || []).map(s => Number(s.season_number)).filter(n => Number.isFinite(n) && n > 0));
           } catch {}
         }
@@ -506,7 +515,7 @@ export default function Watch() {
       }
 
       const payload = {
-        media_id: media.id,
+        media_id: mediaId,
         media_type: type,
         seasons: isMovie ? [] : seasonNums
       };
@@ -552,7 +561,7 @@ export default function Watch() {
     let activeSeasonData = seasonData;
     if (!activeSeasonData?.episodes?.length || selectedSeason !== currentSeasonNum) {
       try {
-        const r = await fetch(`/api/search/tv/${media.id}/season/${currentSeasonNum}`);
+        const r = await fetch(`/api/search/tv/${mediaId}/season/${currentSeasonNum}`);
         const d = await r.json();
         activeSeasonData = d;
         setSeasonData(d);
@@ -583,7 +592,7 @@ export default function Watch() {
     setStatus("Volgende seizoen laden...");
     setSelectedSeason(nextSeasonNum);
     try {
-      const r = await fetch(`/api/search/tv/${media.id}/season/${nextSeasonNum}`);
+      const r = await fetch(`/api/search/tv/${mediaId}/season/${nextSeasonNum}`);
       const d = await r.json();
       if (d.episodes && d.episodes.length > 0) {
         const nextEp = d.episodes[0];

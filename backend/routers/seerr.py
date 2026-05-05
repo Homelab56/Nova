@@ -205,49 +205,63 @@ async def request_media(body: RequestBody):
         return {"ok": True, "message": "Bestaat al in Seerr.", "request_id": existing_request_id, "media": None}
     
     endpoint = f"{url}/api/v1/request"
-    payload = {
+    base_payload = {
         "mediaId": body.media_id,
         "mediaType": body.media_type,
     }
-    
-    if body.media_type == "tv" and body.seasons:
-        if len(body.seasons) > 1:
-            payload["isAllSeasons"] = True
+
+    payloads: list[dict] = [base_payload]
+    if body.media_type == "tv":
+        seasons = [int(x) for x in (body.seasons or []) if isinstance(x, int) and x > 0]
+        if seasons:
+            payloads = [
+                {**base_payload, "seasons": seasons},
+                {**base_payload, "seasons": "all"},
+                {**base_payload, "isAllSeasons": True},
+            ]
         else:
-            payload["seasons"] = body.seasons
+            payloads = [
+                {**base_payload},
+                {**base_payload, "isAllSeasons": True},
+                {**base_payload, "seasons": "all"},
+            ]
 
     try:
         async with httpx.AsyncClient() as client:
-            r = await client.post(
-                endpoint,
-                headers={"X-Api-Key": key},
-                json=payload,
-                timeout=10
-            )
-            if r.status_code in [200, 201]:
-                data = r.json()
-                return {
-                    "ok": True,
-                    "message": "Verzoek succesvol ingediend bij Seerr.",
-                    "request_id": data.get("id"),
-                    "media": data.get("media"),
-                }
-            else:
+            last_status = None
+            last_msg = None
+            for payload in payloads:
+                r = await client.post(
+                    endpoint,
+                    headers={"X-Api-Key": key},
+                    json=payload,
+                    timeout=15
+                )
+                if r.status_code in (200, 201):
+                    data = r.json()
+                    return {
+                        "ok": True,
+                        "message": "Verzoek succesvol ingediend bij Seerr.",
+                        "request_id": data.get("id"),
+                        "media": data.get("media"),
+                    }
+
+                last_status = r.status_code
                 try:
                     data = r.json()
-                    err_msg = data.get("message")
-                except:
-                    err_msg = None
-                
-                if not err_msg:
-                    if r.status_code == 403:
-                        err_msg = "Seerr fout: 403. Controleer of de gebruiker van de API Key voldoende rechten heeft in Seerr."
-                    elif r.status_code == 401:
-                        err_msg = "Seerr fout: 401. API Key is ongeldig. Controleer .env."
-                    else:
-                        err_msg = f"Seerr fout: {r.status_code}"
-                
-                return {"ok": False, "message": err_msg}
+                    last_msg = data.get("message")
+                except Exception:
+                    last_msg = None
+
+            if not last_msg:
+                if last_status == 403:
+                    last_msg = "Seerr fout: 403. Controleer of de gebruiker van de API Key voldoende rechten heeft in Seerr."
+                elif last_status == 401:
+                    last_msg = "Seerr fout: 401. API Key is ongeldig. Controleer .env."
+                else:
+                    last_msg = f"Seerr fout: {last_status}"
+
+            return {"ok": False, "message": last_msg}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fout bij verbinden met Seerr: {str(e)}")
 
