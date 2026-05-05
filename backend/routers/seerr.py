@@ -21,7 +21,7 @@ class RequestBody(BaseModel):
     seasons: list[int] = [] # Alleen voor tv
 
 _RECENT_REQUESTS: dict[str, float] = {}
-_RECENT_TTL_SECONDS = 10 * 60
+_RECENT_TTL_SECONDS = 20
 
 
 def _find_first_request_id(data):
@@ -153,8 +153,13 @@ async def request_media(body: RequestBody):
     for k, ts in list(_RECENT_REQUESTS.items()):
         if now - ts > _RECENT_TTL_SECONDS:
             _RECENT_REQUESTS.pop(k, None)
-    if lock_key in _RECENT_REQUESTS:
-        return {"ok": True, "message": "Aanvraag is net verstuurd. Even wachten...", "request_id": None}
+    ts = _RECENT_REQUESTS.get(lock_key)
+    if ts is not None:
+        existing_request_id = await _find_existing_request_from_list(url, key, body.media_id, body.media_type, body.seasons)
+        if existing_request_id is not None:
+            return {"ok": True, "message": "Bestaat al in Seerr.", "request_id": existing_request_id, "media": None}
+        if now - ts < 8:
+            return {"ok": True, "message": "Aanvraag is bezig. Even wachten...", "request_id": None}
     _RECENT_REQUESTS[lock_key] = now
 
     try:
