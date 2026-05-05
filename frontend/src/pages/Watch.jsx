@@ -9,8 +9,8 @@ const TMDB_PROFILE = "https://image.tmdb.org/t/p/w185";
 const TMDB_BACKDROP = "https://image.tmdb.org/t/p/original";
 const TMDB_STILL = "https://image.tmdb.org/t/p/w300";
 
-const SEERR_LOCKS_KEY = "nova_seerr_request_locks";
-const SEERR_LOCK_TTL_MS = 24 * 60 * 60 * 1000;
+const SEERR_LOCKS_KEY = "nova_seerr_request_locks_v6";
+const SEERR_LOCK_TTL_MS = 2 * 60 * 60 * 1000;
 
 export default function Watch() {
   const { state } = useLocation();
