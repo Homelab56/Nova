@@ -274,6 +274,30 @@ export default function Watch() {
         const alreadyRequesting = (requestStatus === "loading" || requestStatus === "waiting") && requestKeyRef.current === reqKey;
         let requested = alreadyRequesting;
 
+        if (requested) {
+          if (!hasLock) {
+            requested = false;
+          } else {
+            try {
+              const ms = await fetch(
+                `/api/seerr/media-status?tmdb_id=${media.id}&media_type=${type}`,
+                { signal: searchAbortRef.current.signal }
+              ).then(r => r.json());
+              if (!(ms?.ok && ms?.status && ms.status > 1)) {
+                clearLock(lockKey);
+                setRequestStatus(null);
+                setRequestMessage("");
+                requested = false;
+              }
+            } catch {
+              clearLock(lockKey);
+              setRequestStatus(null);
+              setRequestMessage("");
+              requested = false;
+            }
+          }
+        }
+
         if (!requested) {
           try {
             const av = await fetch(
