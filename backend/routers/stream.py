@@ -19,6 +19,7 @@ RD_BASE = "https://api.real-debrid.com/rest/1.0"
 
 _HLS_ROOT = "/tmp/nova_hls"
 _HLS_SESSIONS: dict[str, dict] = {}
+_LAST_START: dict[str, tuple[float, float]] = {}
 
 
 def _hls_cleanup():
@@ -742,6 +743,7 @@ async def meta(url: str | None = None, path: str | None = None):
 
 @router.get("/play")
 async def play(
+    request: Request,
     url: str | None = None,
     path: str | None = None,
     start: float = Query(default=0.0, ge=0.0),
@@ -751,6 +753,14 @@ async def play(
 
     is_path = path is not None
     input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
+
+    try:
+        client_host = (request.client.host if request.client else "") or ""
+    except Exception:
+        client_host = ""
+    if client_host and (start and start > 0):
+        key = f"{client_host}|{'path' if is_path else 'url'}|{path or url or ''}"
+        _LAST_START[key] = (time.time(), float(start))
 
     return StreamingResponse(
         _ffmpeg_stream(input_value, is_path=is_path, start=start),
@@ -842,6 +852,7 @@ async def subtitles(url: str | None = None, path: str | None = None):
 
 @router.get("/subtitle.vtt")
 async def subtitle_vtt(
+    request: Request,
     stream_index: int,
     url: str | None = None,
     path: str | None = None,
@@ -862,8 +873,34 @@ async def subtitle_vtt(
         if codec in {"hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "xsub"}:
             raise HTTPException(status_code=415, detail="Bitmap ondertitels (PGS/DVD) worden niet ondersteund.")
         break
+    try:
+        start_f = float(start or 0.0)
+    except Exception:
+        start_f = 0.0
+    if not (start_f and start_f > 0):
+        ref = request.headers.get("referer") or request.headers.get("referrer") or ""
+        try:
+            parsed = urllib.parse.urlparse(ref)
+            q = urllib.parse.parse_qs(parsed.query or "")
+            v = (q.get("start") or [None])[0]
+            start_f = float(v or 0.0)
+        except Exception:
+            start_f = 0.0
+    if not (start_f and start_f > 0):
+        try:
+            client_host = (request.client.host if request.client else "") or ""
+        except Exception:
+            client_host = ""
+        if client_host:
+            key = f"{client_host}|{'path' if path is not None else 'url'}|{path or url or ''}"
+            entry = _LAST_START.get(key)
+            if entry:
+                ts, val = entry
+                if (time.time() - float(ts)) <= 45:
+                    start_f = float(val)
+
     return StreamingResponse(
-        _ffmpeg_subtitle_vtt(input_value, is_path=is_path, stream_index=stream_index, start=start),
+        _ffmpeg_subtitle_vtt(input_value, is_path=is_path, stream_index=stream_index, start=start_f),
         media_type="text/vtt",
         headers={"Cache-Control": "no-cache"},
     )
