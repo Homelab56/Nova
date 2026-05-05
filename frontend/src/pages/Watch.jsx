@@ -447,10 +447,16 @@ export default function Watch() {
 
   async function handleRequest(reqKey, lockKey) {
     if (isLocked(lockKey)) {
-      setRequestStatus("waiting");
-      setRequestMessage("Download loopt al. Wachten tot hij beschikbaar is...");
-      requestKeyRef.current = reqKey || null;
-      return true;
+      try {
+        const ms = await fetch(`/api/seerr/media-status?tmdb_id=${media.id}&media_type=${type}`).then(r => r.json());
+        if (ms?.ok && ms?.status && ms.status > 1) {
+          setRequestStatus("waiting");
+          setRequestMessage(ms.status_label || "Download loopt al. Wachten tot hij beschikbaar is...");
+          requestKeyRef.current = reqKey || null;
+          return true;
+        }
+      } catch {}
+      clearLock(lockKey);
     }
     if (seerrInFlightRef.current.has(lockKey)) {
       setRequestStatus("waiting");
