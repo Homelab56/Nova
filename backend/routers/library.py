@@ -106,6 +106,8 @@ async def find_file(q: str):
     """Zoekt een specifiek bestand op de mount gebaseerd op een query (bijv. 'The Boys S01E01')."""
     q_clean = _normalize_text(q)
     raw = (q or "").lower()
+    year_match = re.findall(r"\b(19\d{2}|20\d{2})\b", raw)
+    query_year = int(year_match[-1]) if year_match else None
     ep = None
     m = re.search(r"\bs(\d{1,2})e(\d{1,2})\b", raw)
     if m:
@@ -162,6 +164,15 @@ async def find_file(q: str):
             
             # Check of ALLE titelwoorden in de bestandsnaam of mapnaam zitten
             full_path_lower = _normalize_text(candidate_path)
+
+            if query_year and not ep_tokens:
+                try:
+                    path_years = {int(y) for y in re.findall(r"\b(19\d{2}|20\d{2})\b", candidate_path)}
+                except Exception:
+                    path_years = set()
+                if query_year not in path_years:
+                    continue
+
             score = sum(1 for word in words if word in full_path_lower)
             
             if score < min_score:
