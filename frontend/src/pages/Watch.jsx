@@ -283,6 +283,13 @@ export default function Watch() {
         const alreadyRequesting = (requestStatus === "loading" || requestStatus === "waiting") && requestKeyRef.current === reqKey;
         let requested = alreadyRequesting;
 
+        if (!requested && data?.seerr_requested) {
+          setLock(lockKey);
+          setRequestStatus("waiting");
+          setRequestMessage(data.seerr_message || data.message || "Aangevraagd via Seerr. Wachten...");
+          requested = true;
+        }
+
         if (requested) {
           if (!hasLock) {
             requested = false;

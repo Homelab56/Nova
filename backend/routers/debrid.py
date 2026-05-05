@@ -491,6 +491,25 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
             eei = int(ee)
             ep_variants = {ep_token, f"{ssi}x{eei:02d}", f"{ssi:02d}x{eei:02d}"}
 
+    async def _maybe_request_seerr() -> tuple[bool, str | None]:
+        try:
+            tid = int(tmdb_id or 0)
+        except Exception:
+            tid = 0
+        if tid <= 0 or media_type not in {"movie", "tv"}:
+            return False, None
+        try:
+            from .seerr import request_media, RequestBody
+            resp = await request_media(RequestBody(media_id=tid, media_type=media_type, seasons=[]))
+            if isinstance(resp, dict) and resp.get("ok"):
+                msg = resp.get("message")
+                print(f"Seerr auto-request: {media_type} tmdb_id={tid} ok=True msg={msg}")
+                return True, str(msg) if msg else None
+            return False, None
+        except Exception as e:
+            print(f"Seerr auto-request fout: {e}")
+            return False, None
+
     # --- STAP 0: Zoek op lokale Dumbarr mount ---
     from .library import find_file
     for candidate in candidates:
@@ -633,7 +652,13 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
         q_no_year = re.sub(r"\s\d{4}$", "", q).strip()
         if (media_type != "movie") and q_no_year != q:
             return await search_and_stream(q_no_year, tmdb_id=tmdb_id, media_type=media_type)
-        return {"stream_url": None, "message": f"Geen streams gevonden voor '{q}' op het internet."}
+        seerr_ok, seerr_msg = await _maybe_request_seerr()
+        return {
+            "stream_url": None,
+            "seerr_requested": seerr_ok,
+            "seerr_message": seerr_msg,
+            "message": seerr_msg or f"Geen streams gevonden voor '{q}' op het internet.",
+        }
 
     base_year = _infer_base_year(q, candidates, media_type)
     primary_word_sets = _filter_candidates_for_year(word_sets, base_year)
@@ -664,7 +689,13 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
         q_no_year = re.sub(r"\s\d{4}$", "", q).strip()
         if (media_type != "movie") and q_no_year != q:
             return await search_and_stream(q_no_year, tmdb_id=tmdb_id, media_type=media_type)
-        return {"stream_url": None, "message": f"Geen streams gevonden voor '{q}' op het internet."}
+        seerr_ok, seerr_msg = await _maybe_request_seerr()
+        return {
+            "stream_url": None,
+            "seerr_requested": seerr_ok,
+            "seerr_message": seerr_msg,
+            "message": seerr_msg or f"Geen streams gevonden voor '{q}' op het internet.",
+        }
 
     # --- STAP 3: Controleer RD cache (Instant Availability) ---
     # Sorteer op de meeste seeders eerst
@@ -710,9 +741,12 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                                 "message": "Er is wel een torrent gevonden, maar de bestanden erin lijken niet te matchen met de gekozen titel.",
                             }
 
+    seerr_ok, seerr_msg = await _maybe_request_seerr()
     return {
         "stream_url": None,
-        "message": f"Geen direct afspeelbare streams gevonden voor '{q}'. Probeer een andere versie of voeg handmatig een torrent toe."
+        "seerr_requested": seerr_ok,
+        "seerr_message": seerr_msg,
+        "message": seerr_msg or f"Geen direct afspeelbare streams gevonden voor '{q}'. Probeer een andere versie of voeg handmatig een torrent toe.",
     }
 
 
