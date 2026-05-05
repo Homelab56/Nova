@@ -400,12 +400,16 @@ async def _ffmpeg_subtitle_vtt(input_value: str, is_path: bool, stream_index: in
         "-loglevel",
         "error",
         "-nostdin",
+        "-ss",
+        f"{start_f:.3f}",
         "-i",
         input_value,
         "-map",
         f"0:{int(stream_index)}",
         "-c:s",
         "webvtt",
+        "-avoid_negative_ts",
+        "make_zero",
         "-f",
         "webvtt",
         "pipe:1",
@@ -428,34 +432,61 @@ async def _ffmpeg_subtitle_vtt(input_value: str, is_path: bool, stream_index: in
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=25)
-    except Exception:
+    stderr_buf = bytearray()
+
+    async def _drain_stderr():
+        if not proc.stderr:
+            return
         try:
-            proc.kill()
+            while True:
+                chunk = await proc.stderr.read(4096)
+                if not chunk:
+                    break
+                stderr_buf.extend(chunk)
+                if len(stderr_buf) > 128_000:
+                    del stderr_buf[:-128_000]
+        except Exception:
+            return
+
+    stderr_task = asyncio.create_task(_drain_stderr())
+    produced = 0
+    try:
+        while True:
+            chunk = await proc.stdout.read(64 * 1024)
+            if not chunk:
+                break
+            produced += len(chunk)
+            yield chunk
+    finally:
+        try:
+            if proc.returncode is None:
+                proc.kill()
         except Exception:
             pass
-        return
-    if proc.returncode != 0 or not out:
-        msg = (err.decode("utf-8", errors="ignore") or "").strip()
-        if not msg:
-            msg = "Geen stderr output van ffmpeg."
-        print(
-            "FFMPEG subtitles gaf geen data terug\n"
-            f"input={input_value}\n"
-            f"stream_index={stream_index}\n"
-            f"returncode={proc.returncode}\n"
-            f"cmd={' '.join(cmd)}\n"
-            f"{msg[:1800]}"
-        )
-        return
-    try:
-        text = out.decode("utf-8", errors="ignore")
-    except Exception:
-        yield out
-        return
-    shifted = _shift_webvtt(text, start_f)
-    yield shifted.encode("utf-8")
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=0.5)
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(stderr_task, timeout=0.5)
+        except Exception:
+            try:
+                stderr_task.cancel()
+            except Exception:
+                pass
+
+        if produced == 0:
+            msg = (bytes(stderr_buf).decode("utf-8", errors="ignore") or "").strip()
+            if not msg:
+                msg = "Geen stderr output van ffmpeg."
+            print(
+                "FFMPEG subtitles gaf geen data terug\n"
+                f"input={input_value}\n"
+                f"stream_index={stream_index}\n"
+                f"returncode={proc.returncode}\n"
+                f"cmd={' '.join(cmd)}\n"
+                f"{msg[:1800]}"
+            )
 
 
 async def _ffprobe_streams(input_value: str, is_path: bool) -> dict:
