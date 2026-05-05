@@ -208,6 +208,7 @@ def _parse_vtt_timestamp(value: str) -> float | None:
     v = (value or "").strip()
     if not v:
         return None
+    v = v.replace(",", ".")
     parts = v.split(":")
     if len(parts) == 3:
         h_s, m_s, s_ms = parts
@@ -222,7 +223,8 @@ def _parse_vtt_timestamp(value: str) -> float | None:
         h = int(h_s)
         m = int(m_s)
         s = int(s_s)
-        ms = int((ms_s + "000")[:3])
+        ms_digits = "".join(ch for ch in ms_s if ch.isdigit())
+        ms = int((ms_digits + "000")[:3]) if ms_digits else 0
     except Exception:
         return None
     if h < 0 or m < 0 or s < 0 or ms < 0:
