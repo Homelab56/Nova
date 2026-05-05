@@ -629,7 +629,10 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       )}
 
       {!buffering && !error && !playing && (
-        <div className="absolute inset-0 flex items-center justify-center">
+        <div
+          className="absolute inset-0 flex items-center justify-center"
+          onClick={(e) => { e.stopPropagation(); toggle(); }}
+        >
           <button
             onClick={(e) => { e.stopPropagation(); toggle(); }}
             className="bg-black/50 hover:bg-black/60 border border-white/15 text-white rounded-full w-20 h-20 flex items-center justify-center text-3xl"
