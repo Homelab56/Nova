@@ -592,6 +592,9 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         "-nostdin",
     ]
 
+    if start and start > 0:
+        cmd += ["-ss", f"{float(start):.3f}"]
+
     cmd += [
         "-analyzeduration",
         "10000000",
@@ -609,12 +612,6 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         "-avoid_negative_ts",
         "make_zero",
     ]
-    if start and start > 0:
-        try:
-            insert_at = cmd.index(input_value) + 1
-            cmd[insert_at:insert_at] = ["-ss", f"{float(start):.3f}"]
-        except Exception:
-            pass
 
     if copy_video:
         cmd += ["-c:v", "copy"]
