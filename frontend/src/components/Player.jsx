@@ -323,6 +323,11 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     return () => ac.abort();
   }, [url, prefs.default_sub_lang_1, prefs.default_sub_lang_2, prefs.subtitles_enabled]);
 
+  const selectedTrackObj = subtitleSelected !== null
+    ? subtitleTracks.find(t => t.stream_index === subtitleSelected) || null
+    : null;
+  const vttSrc = selectedTrackObj ? buildSubtitleVttUrl(selectedTrackObj.stream_index) : null;
+
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -474,11 +479,6 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const progress = effectiveTotal > 0 ? Math.min(1, Math.max(0, absTime / effectiveTotal)) : 0;
   const sliderValue = dragValue !== null ? dragValue : Math.round(progress * 1000);
   const showNextButton = onNext && effectiveTotal > 0 && (effectiveTotal - absTime) < 90;
-
-  const selectedTrackObj = subtitleSelected !== null
-    ? subtitleTracks.find(t => t.stream_index === subtitleSelected) || null
-    : null;
-  const vttSrc = selectedTrackObj ? buildSubtitleVttUrl(selectedTrackObj.stream_index) : null;
 
   const commitSeek = async () => {
     if (effectiveTotal <= 0 || dragValue === null) return;
