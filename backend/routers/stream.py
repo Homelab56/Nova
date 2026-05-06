@@ -612,6 +612,9 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
 
     copy_video = v_codec == "h264"
     copy_audio = a_codec in {"aac", "mp3"}
+    if start and start > 0:
+        copy_video = False
+        copy_audio = False
     try:
         max_h = int(os.getenv("TRANSCODE_MAX_HEIGHT", "1080") or "0")
     except Exception:
@@ -631,9 +634,6 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         "-nostdin",
     ]
 
-    if start and start > 0:
-        cmd += ["-ss", f"{float(start):.3f}"]
-
     cmd += [
         "-analyzeduration",
         "10000000",
@@ -641,6 +641,8 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         "10000000",
         "-i",
         input_value,
+        "-max_interleave_delta",
+        "0",
         "-map",
         "0:v:0",
         "-map",
@@ -651,6 +653,12 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         "-avoid_negative_ts",
         "make_zero",
     ]
+    if start and start > 0:
+        try:
+            insert_at = cmd.index(input_value) + 1
+            cmd[insert_at:insert_at] = ["-ss", f"{float(start):.3f}"]
+        except Exception:
+            pass
 
     if copy_video:
         cmd += ["-c:v", "copy"]
@@ -681,6 +689,8 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
             "0",
             "-vf",
             vf,
+            "-vsync",
+            "1",
             "-crf",
             crf,
             "-pix_fmt",

@@ -351,7 +351,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       const tracks = v.textTracks || [];
       for (let i = 0; i < tracks.length; i++) tracks[i].mode = "disabled";
       if (subtitleSelected !== null && tracks.length > 0) {
-        tracks[0].mode = "showing";
+        tracks[tracks.length - 1].mode = "showing";
       }
     } catch {}
   };
@@ -362,11 +362,32 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     const onLoaded = () => applySubtitleModeNow();
     v.addEventListener("loadedmetadata", onLoaded);
     v.addEventListener("loadeddata", onLoaded);
+    let list = null;
+    try {
+      list = v.textTracks || null;
+    } catch {}
+    const onAdd = () => applySubtitleModeNow();
+    try {
+      if (list && typeof list.addEventListener === "function") {
+        list.addEventListener("addtrack", onAdd);
+      }
+    } catch {}
     return () => {
       v.removeEventListener("loadedmetadata", onLoaded);
       v.removeEventListener("loadeddata", onLoaded);
+      try {
+        if (list && typeof list.removeEventListener === "function") {
+          list.removeEventListener("addtrack", onAdd);
+        }
+      } catch {}
     };
   }, [subtitleSelected, vttSrc]);
+
+  useEffect(() => {
+    if (!vttSrc) return;
+    const t = setTimeout(() => applySubtitleModeNow(), 800);
+    return () => clearTimeout(t);
+  }, [vttSrc, subtitleSelected]);
 
   useEffect(() => {
     const v = videoRef.current;
