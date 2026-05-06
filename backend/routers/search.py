@@ -421,6 +421,46 @@ async def search_tv(q: str = Query(..., min_length=1), page: int = 1):
         "total_results": data.get("total_results", 0),
     }
 
+@router.get("/multi")
+async def search_multi(q: str = Query(..., min_length=1), page: int = 1):
+    import asyncio
+
+    def _keep(it: dict) -> bool:
+        mt = (it.get("media_type") or "").lower().strip()
+        return mt in {"movie", "tv"}
+
+    if page == 1:
+        tasks = [tmdb_get("/search/multi", {"query": q, "page": p, "include_adult": "false"}) for p in range(1, 6)]
+        pages = await asyncio.gather(*tasks)
+        items, seen = [], set()
+        for pg in pages:
+            for item in pg.get("results", []) or []:
+                if not isinstance(item, dict) or not _keep(item):
+                    continue
+                k = f"{item.get('media_type')}:{item.get('id')}"
+                if not item.get("id") or k in seen:
+                    continue
+                seen.add(k)
+                items.append(item)
+        first = pages[0] if pages else {}
+        filtered = _filter_items(items, media_type=None, suggestion_mode=False, allow_kids=True)
+        return {
+            "items": filtered,
+            "page": 5,
+            "total_pages": int(first.get("total_pages") or 1),
+            "total_results": len(filtered),
+        }
+
+    data = await tmdb_get("/search/multi", {"query": q, "page": page, "include_adult": "false"})
+    items = [it for it in (data.get("results", []) or []) if isinstance(it, dict) and _keep(it)]
+    filtered = _filter_items(items, media_type=None, suggestion_mode=False, allow_kids=True)
+    return {
+        "items": filtered,
+        "page": page,
+        "total_pages": int(data.get("total_pages") or 1),
+        "total_results": int(data.get("total_results") or 0),
+    }
+
 
 # --- Detail ---
 
