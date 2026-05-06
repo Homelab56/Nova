@@ -612,7 +612,12 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
 
     copy_video = v_codec == "h264"
     copy_audio = a_codec in {"aac", "mp3"}
-    if start and start > 0:
+    try:
+        start_f = float(start or 0.0)
+    except Exception:
+        start_f = 0.0
+    start_f = max(0.0, start_f)
+    if start_f > 0:
         copy_video = False
         copy_audio = False
     try:
@@ -634,6 +639,15 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         "-nostdin",
     ]
 
+    seek_pre = 0.0
+    seek_post = 0.0
+    if start_f > 0:
+        seek_back = min(10.0, start_f)
+        seek_pre = max(0.0, start_f - seek_back)
+        seek_post = seek_back
+        if seek_pre > 0:
+            cmd += ["-ss", f"{seek_pre:.3f}"]
+
     cmd += [
         "-analyzeduration",
         "10000000",
@@ -643,6 +657,8 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         input_value,
         "-max_interleave_delta",
         "0",
+        "-ss",
+        f"{seek_post:.3f}",
         "-map",
         "0:v:0",
         "-map",
@@ -653,12 +669,6 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         "-avoid_negative_ts",
         "make_zero",
     ]
-    if start and start > 0:
-        try:
-            insert_at = cmd.index(input_value) + 1
-            cmd[insert_at:insert_at] = ["-ss", f"{float(start):.3f}"]
-        except Exception:
-            pass
 
     if copy_video:
         cmd += ["-c:v", "copy"]
