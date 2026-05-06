@@ -316,6 +316,30 @@ async def _ffmpeg_subtitle_vtt(
     except Exception:
         delay_f = 0.0
 
+    async def _run_vtt(cmd: list[str], timeout_s: float) -> tuple[str | None, str]:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            return None, "ffmpeg timeout/kill"
+        if proc.returncode != 0 or not out:
+            msg = (err.decode("utf-8", errors="ignore") or "").strip()
+            if not msg:
+                msg = "Geen stderr output van ffmpeg."
+            return None, msg
+        try:
+            return out.decode("utf-8", errors="ignore"), ""
+        except Exception:
+            return None, "decode failed"
+
     if not (start_f and start_f > 0):
         cmd = [
             "ffmpeg",
@@ -409,16 +433,16 @@ async def _ffmpeg_subtitle_vtt(
                 )
         return
 
-    cmd = [
+    cmd_seek = [
         "ffmpeg",
         "-hide_banner",
         "-loglevel",
         "error",
         "-nostdin",
-        "-i",
-        input_value,
         "-ss",
         f"{start_f:.3f}",
+        "-i",
+        input_value,
         "-map",
         f"0:{int(stream_index)}",
         "-c:s",
@@ -430,8 +454,8 @@ async def _ffmpeg_subtitle_vtt(
         "pipe:1",
     ]
     if _is_http_url(input_value):
-        insert_at = cmd.index("-i")
-        cmd[insert_at:insert_at] = [
+        insert_at = cmd_seek.index("-i")
+        cmd_seek[insert_at:insert_at] = [
             "-rw_timeout",
             "15000000",
             "-reconnect",
@@ -442,40 +466,55 @@ async def _ffmpeg_subtitle_vtt(
             "2",
         ]
 
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=25)
-    except Exception:
-        try:
-            proc.kill()
-        except Exception:
-            pass
+    text, err_msg = await _run_vtt(cmd_seek, timeout_s=60)
+    if not text or "-->" not in text:
+        cmd_full = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-i",
+            input_value,
+            "-map",
+            f"0:{int(stream_index)}",
+            "-c:s",
+            "webvtt",
+            "-f",
+            "webvtt",
+            "pipe:1",
+        ]
+        if _is_http_url(input_value):
+            insert_at = cmd_full.index("-i")
+            cmd_full[insert_at:insert_at] = [
+                "-rw_timeout",
+                "15000000",
+                "-reconnect",
+                "1",
+                "-reconnect_streamed",
+                "1",
+                "-reconnect_delay_max",
+                "2",
+            ]
+        full_text, full_err = await _run_vtt(cmd_full, timeout_s=60)
+        if not full_text:
+            msg = full_err or err_msg
+            if msg:
+                print(
+                    "FFMPEG subtitles gaf geen data terug\n"
+                    f"input={input_value}\n"
+                    f"stream_index={stream_index}\n"
+                    f"cmd={' '.join(cmd_seek)}\n"
+                    f"{msg[:1800]}"
+                )
+            return
+        shift = (-start_f) + delay_f
+        out_text = _shift_webvtt(full_text, shift)
+        yield out_text.encode("utf-8")
         return
-    if proc.returncode != 0 or not out:
-        msg = (err.decode("utf-8", errors="ignore") or "").strip()
-        if not msg:
-            msg = "Geen stderr output van ffmpeg."
-        print(
-            "FFMPEG subtitles gaf geen data terug\n"
-            f"input={input_value}\n"
-            f"stream_index={stream_index}\n"
-            f"returncode={proc.returncode}\n"
-            f"cmd={' '.join(cmd)}\n"
-            f"{msg[:1800]}"
-        )
-        return
-    try:
-        text = out.decode("utf-8", errors="ignore")
-    except Exception:
-        yield out
-        return
-    if delay_f and abs(delay_f) > 0.0005:
-        text = _shift_webvtt(text, delay_f)
-    yield text.encode("utf-8")
+
+    out_text = _shift_webvtt(text, delay_f) if (delay_f and abs(delay_f) > 0.0005) else text
+    yield out_text.encode("utf-8")
 
 
 async def _ffprobe_streams(input_value: str, is_path: bool) -> dict:
