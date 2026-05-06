@@ -337,7 +337,31 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     };
     const t = setTimeout(apply, 500);
     return () => clearTimeout(t);
-  }, [subtitleSelected, url]);
+  }, [subtitleSelected, url, vttSrc]);
+
+  const applySubtitleModeNow = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    try {
+      const tracks = v.textTracks || [];
+      for (let i = 0; i < tracks.length; i++) tracks[i].mode = "disabled";
+      if (subtitleSelected !== null && tracks.length > 0) {
+        tracks[0].mode = "showing";
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const onLoaded = () => applySubtitleModeNow();
+    v.addEventListener("loadedmetadata", onLoaded);
+    v.addEventListener("loadeddata", onLoaded);
+    return () => {
+      v.removeEventListener("loadedmetadata", onLoaded);
+      v.removeEventListener("loadeddata", onLoaded);
+    };
+  }, [subtitleSelected, vttSrc]);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -539,6 +563,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
             srcLang={(selectedTrackObj?.language || "und")}
             label={(selectedTrackObj?.language || selectedTrackObj?.title || subtitleLabel || "Subtitles")}
             default
+            onLoad={applySubtitleModeNow}
           />
         )}
         Je browser ondersteunt geen video afspelen.
@@ -636,20 +661,22 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
                       </button>
                     </div>
                   </div>
-                  {subtitleTracks.map((t) => {
-                    const idx = t.stream_index;
-                    const label = t.language || t.title || `Track ${idx}`;
-                    const active = subtitleSelected === idx;
-                    return (
-                      <button
-                        key={idx}
-                        onClick={() => { setSubtitleSelected(idx); setSubtitleLabel(label); setSubMenuOpen(false); }}
-                        className={`w-full text-left px-4 py-2 text-sm ${active ? "bg-white/15 text-white" : "text-white/90 hover:bg-white/10"}`}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
+                  <div className="max-h-72 overflow-y-auto">
+                    {subtitleTracks.map((t) => {
+                      const idx = t.stream_index;
+                      const label = t.language || t.title || `Track ${idx}`;
+                      const active = subtitleSelected === idx;
+                      return (
+                        <button
+                          key={idx}
+                          onClick={() => { setSubtitleSelected(idx); setSubtitleLabel(label); setSubMenuOpen(false); }}
+                          className={`w-full text-left px-4 py-2 text-sm ${active ? "bg-white/15 text-white" : "text-white/90 hover:bg-white/10"}`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>
