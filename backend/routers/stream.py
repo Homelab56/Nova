@@ -316,30 +316,6 @@ async def _ffmpeg_subtitle_vtt(
     except Exception:
         delay_f = 0.0
 
-    async def _run_vtt(cmd: list[str], timeout_s: float) -> tuple[str | None, str]:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
-        except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
-            return None, "ffmpeg timeout/kill"
-        if proc.returncode != 0 or not out:
-            msg = (err.decode("utf-8", errors="ignore") or "").strip()
-            if not msg:
-                msg = "Geen stderr output van ffmpeg."
-            return None, msg
-        try:
-            return out.decode("utf-8", errors="ignore"), ""
-        except Exception:
-            return None, "decode failed"
-
     if not (start_f and start_f > 0):
         cmd = [
             "ffmpeg",
@@ -447,6 +423,8 @@ async def _ffmpeg_subtitle_vtt(
         f"0:{int(stream_index)}",
         "-c:s",
         "webvtt",
+        "-copyts",
+        "-start_at_zero",
         "-avoid_negative_ts",
         "make_zero",
         "-f",
@@ -466,55 +444,93 @@ async def _ffmpeg_subtitle_vtt(
             "2",
         ]
 
-    text, err_msg = await _run_vtt(cmd_seek, timeout_s=60)
-    if not text or "-->" not in text:
-        cmd_full = [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-nostdin",
-            "-i",
-            input_value,
-            "-map",
-            f"0:{int(stream_index)}",
-            "-c:s",
-            "webvtt",
-            "-f",
-            "webvtt",
-            "pipe:1",
-        ]
-        if _is_http_url(input_value):
-            insert_at = cmd_full.index("-i")
-            cmd_full[insert_at:insert_at] = [
-                "-rw_timeout",
-                "15000000",
-                "-reconnect",
-                "1",
-                "-reconnect_streamed",
-                "1",
-                "-reconnect_delay_max",
-                "2",
-            ]
-        full_text, full_err = await _run_vtt(cmd_full, timeout_s=60)
-        if not full_text:
-            msg = full_err or err_msg
-            if msg:
-                print(
-                    "FFMPEG subtitles gaf geen data terug\n"
-                    f"input={input_value}\n"
-                    f"stream_index={stream_index}\n"
-                    f"cmd={' '.join(cmd_seek)}\n"
-                    f"{msg[:1800]}"
-                )
-            return
-        shift = (-start_f) + delay_f
-        out_text = _shift_webvtt(full_text, shift)
-        yield out_text.encode("utf-8")
-        return
+    proc = await asyncio.create_subprocess_exec(
+        *cmd_seek,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
 
-    out_text = _shift_webvtt(text, delay_f) if (delay_f and abs(delay_f) > 0.0005) else text
-    yield out_text.encode("utf-8")
+    stderr_buf = bytearray()
+
+    async def _drain_stderr():
+        if not proc.stderr:
+            return
+        try:
+            while True:
+                chunk = await proc.stderr.read(4096)
+                if not chunk:
+                    break
+                stderr_buf.extend(chunk)
+                if len(stderr_buf) > 128_000:
+                    del stderr_buf[:-128_000]
+        except Exception:
+            return
+
+    stderr_task = asyncio.create_task(_drain_stderr())
+    produced = 0
+    buf = ""
+    try:
+        while True:
+            chunk = await proc.stdout.read(64 * 1024)
+            if not chunk:
+                break
+            produced += len(chunk)
+            if delay_f and abs(delay_f) > 0.0005:
+                try:
+                    buf += chunk.decode("utf-8", errors="ignore")
+                except Exception:
+                    yield chunk
+                    continue
+                while "\n" in buf:
+                    line, buf = buf.split("\n", 1)
+                    if "-->" in line:
+                        try:
+                            m = re.match(r"^\s*(\S+)\s*-->\s*(\S+)(.*)$", line)
+                            if m:
+                                s1, s2, rest = m.group(1), m.group(2), m.group(3) or ""
+                                t1 = _parse_vtt_timestamp(s1)
+                                t2 = _parse_vtt_timestamp(s2)
+                                if t1 is not None and t2 is not None:
+                                    t1n = max(0.0, t1 + delay_f)
+                                    t2n = max(0.0, t2 + delay_f)
+                                    line = f"{_format_vtt_timestamp(t1n)} --> {_format_vtt_timestamp(t2n)}{rest}"
+                        except Exception:
+                            pass
+                    yield (line + "\n").encode("utf-8")
+            else:
+                yield chunk
+    finally:
+        if delay_f and abs(delay_f) > 0.0005 and buf:
+            yield buf.encode("utf-8")
+        try:
+            if proc.returncode is None:
+                proc.kill()
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=0.5)
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(stderr_task, timeout=0.5)
+        except Exception:
+            try:
+                stderr_task.cancel()
+            except Exception:
+                pass
+
+        if produced == 0:
+            msg = (bytes(stderr_buf).decode("utf-8", errors="ignore") or "").strip()
+            if not msg:
+                msg = "Geen stderr output van ffmpeg."
+            print(
+                "FFMPEG subtitles gaf geen data terug\n"
+                f"input={input_value}\n"
+                f"stream_index={stream_index}\n"
+                f"returncode={proc.returncode}\n"
+                f"cmd={' '.join(cmd_seek)}\n"
+                f"{msg[:1800]}"
+            )
 
 
 async def _ffprobe_streams(input_value: str, is_path: bool) -> dict:
