@@ -13,6 +13,7 @@ function formatTime(sec) {
 export default function Player({ url, media, onProgress, startAt = 0, durationHint = 0, onEnded, onNext }) {
   const containerRef = useRef(null);
   const videoRef = useRef(null);
+  const trackElRef = useRef(null);
   const hlsRef = useRef(null);
   const hlsFallbackRef = useRef(false);
   const saveTimer = useRef(null);
@@ -351,7 +352,10 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       const tracks = v.textTracks || [];
       for (let i = 0; i < tracks.length; i++) tracks[i].mode = "disabled";
       if (subtitleSelected !== null && tracks.length > 0) {
-        tracks[tracks.length - 1].mode = "showing";
+        const target = tracks[tracks.length - 1];
+        try { target.mode = "disabled"; } catch {}
+        try { target.mode = "hidden"; } catch {}
+        try { target.mode = "showing"; } catch {}
       }
     } catch {}
   };
@@ -388,6 +392,29 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     const t = setTimeout(() => applySubtitleModeNow(), 800);
     return () => clearTimeout(t);
   }, [vttSrc, subtitleSelected]);
+
+  useEffect(() => {
+    const el = trackElRef.current;
+    if (!el) return;
+    const onLoad = () => {
+      applySubtitleModeNow();
+      setTimeout(() => applySubtitleModeNow(), 300);
+      setTimeout(() => applySubtitleModeNow(), 1200);
+    };
+    const onError = () => {
+      setTimeout(() => applySubtitleModeNow(), 500);
+    };
+    try {
+      el.addEventListener("load", onLoad);
+      el.addEventListener("error", onError);
+    } catch {}
+    return () => {
+      try {
+        el.removeEventListener("load", onLoad);
+        el.removeEventListener("error", onError);
+      } catch {}
+    };
+  }, [vttSrc]);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -579,6 +606,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         {vttSrc && (
           <track
             key={vttSrc}
+            ref={trackElRef}
             src={vttSrc}
             kind="subtitles"
             srcLang={(selectedTrackObj?.language || "und")}
