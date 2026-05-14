@@ -1,6 +1,7 @@
 import os
 import re
 import asyncio
+import time
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -11,99 +12,53 @@ router = APIRouter()
 MEDIA_ROOT = "/media"
 
 # Cache voor de bibliotheek om heavy disk I/O te voorkomen
+# We slaan de volledige lijst van genormaliseerde paden op voor razendsnel zoeken
 _LIBRARY_CACHE = {"items": [], "last_scan": 0}
 _SCAN_LOCK = asyncio.Lock()
+CACHE_TTL = 300 # 5 minuten
 
-def _scan_disk():
-    """Synchrone disk scan voor gebruik in threadpool."""
-    items = []
-    try:
-        for root, dirs, files in os.walk(MEDIA_ROOT):
-            dirs[:] = [d for d in dirs if not d.startswith('.')]
-            depth = root[len(MEDIA_ROOT):].count(os.sep)
-            if depth > 4:
-                continue
-            for file in files:
-                if file.lower().endswith(('.mp4', '.mkv', '.avi', '.mov', '.m4v')):
-                    full_path = os.path.join(root, file)
-                    items.append(full_path)
-    except Exception as e:
-        print(f"Disk scan fout: {e}")
-    return items
+def _normalize_text(s: str) -> str:
+    if not s: return ""
+    s = s.lower()
+    s = re.sub(r"[^a-z0-9]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+async def get_library_files():
+    """Geeft de lijst met bestanden terug. Scan is nu gedeactiveerd tijdens afspelen voor stabiliteit."""
+    return _LIBRARY_CACHE["items"]
 
 @router.get("/find")
 async def find_file(q: str):
-    """Zoekt een specifiek bestand op de mount gebaseerd op een query."""
-    q_clean = _normalize_text(q)
-    raw = (q or "").lower()
-    
-    # Gebruik asyncio.to_thread om de event loop niet te blokkeren tijdens disk I/O
-    def _do_find():
-        year_match = re.findall(r"\b(19\d{2}|20\d{2})\b", raw)
-        query_year = int(year_match[-1]) if year_match else None
-        
-        m = re.search(r"\bs(\d{1,2})e(\d{1,2})\b", raw)
-        ep = None
-        if m:
-            ss, ee = m.groups()
-            ep = (int(ss), int(ee))
-        else:
-            m = re.search(r"\b(\d{1,2})x(\d{1,2})\b", raw)
-            if m:
-                ss, ee = m.groups()
-                ep = (int(ss), int(ee))
-
-        ep_tokens = set()
-        if ep:
-            ss, ee = ep
-            ep_tokens = {f"s{ss:02d}e{ee:02d}", f"{ss}x{ee:02d}", f"{ss:02d}x{ee:02d}"}
-
-        words = [w for w in q_clean.split() if len(w) >= 2]
-        words = [w for w in words if not re.fullmatch(r"s\d{2}e\d{2}", w) and not re.fullmatch(r"\d{1,2}x\d{2}", w) and not re.fullmatch(r"(19\d{2}|20\d{2})", w)]
-        
-        if not words: return None
-
-        best_match = None
-        best_score = 0
-        min_score = len(words)
-
-        # Beperk de scan diepte en gebruik os.scandir voor snelheid indien mogelijk, 
-        # maar voor nu houden we os.walk in een thread.
-        for root, dirs, files in os.walk(MEDIA_ROOT):
-            dirs[:] = [d for d in dirs if not d.startswith('.')]
-            if root[len(MEDIA_ROOT):].count(os.sep) > 4: continue
-
-            for file in files:
-                if not file.lower().endswith(('.mp4', '.mkv', '.avi', '.mov', '.m4v')): continue
-                
-                candidate_path = os.path.join(root, file)
-                full_path_lower = _normalize_text(candidate_path)
-
-                if query_year and not ep_tokens:
-                    path_years = {int(y) for y in re.findall(r"\b(19\d{2}|20\d{2})\b", candidate_path)}
-                    if query_year not in path_years: continue
-
-                score = sum(1 for word in words if word in full_path_lower)
-                if score < min_score: continue
-                if ep_tokens and not any(t in full_path_lower for t in ep_tokens): continue
-                
-                if ep_tokens and any(t in _normalize_text(file) for t in ep_tokens):
-                    score += 5
-
-                if score > best_score:
-                    best_score = score
-                    best_match = candidate_path
-        return best_match
-
-    best_match = await asyncio.to_thread(_do_find)
-
-    if best_match:
-        rel_path = os.path.relpath(best_match, MEDIA_ROOT).replace("\\", "/")
-        import urllib.parse
-        encoded_path = urllib.parse.quote(rel_path)
-        return {"found": True, "path": rel_path, "stream_url": f"/api/library/stream?path={encoded_path}"}
-    
+    """
+    Zoekt een specifiek bestand. 
+    GEACTIVEERD: We doen geen schijf-scans meer tijdens het afspelen om crashes te voorkomen.
+    """
     return {"found": False}
+
+@router.get("/refresh")
+async def refresh_library():
+    """Handmatige verversing van de bibliotheek cache."""
+    global _LIBRARY_CACHE
+    async with _SCAN_LOCK:
+        print("Handmatige scan gestart...")
+        def _scan():
+            file_list = []
+            try:
+                if not os.path.exists(MEDIA_ROOT): return []
+                for root, dirs, files in os.walk(MEDIA_ROOT):
+                    dirs[:] = [d for d in dirs if not d.startswith('.')]
+                    if root[len(MEDIA_ROOT):].count(os.sep) > 3: continue
+                    for file in files:
+                        if file.lower().endswith(('.mp4', '.mkv', '.avi', '.mov', '.m4v')):
+                            full_path = os.path.join(root, file)
+                            file_list.append({"path": full_path, "name": file})
+            except Exception as e:
+                print(f"Scan fout: {e}")
+            return file_list
+        
+        items = await asyncio.to_thread(_scan)
+        _LIBRARY_CACHE = {"items": items, "last_scan": time.time()}
+        return {"status": "done", "count": len(items)}
 
 @router.get("/all")
 async def all_library_files():

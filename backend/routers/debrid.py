@@ -488,9 +488,10 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
 
         # --- STAP 0: Zoek op lokale Dumbarr mount ---
         from .library import find_file
-        # Zoek parallel op de mount voor de eerste 2 candidates
-        local_results = await asyncio.gather(*[find_file(c) for c in candidates[:2]])
-        for res in local_results:
+        # We zoeken nu sequentially op de mount om lock-contention te voorkomen
+        # find_file is nu razendsnel omdat het de cache gebruikt
+        for candidate in candidates[:2]:
+            res = await find_file(candidate)
             if res.get("found"):
                 encoded_path = urllib.parse.quote((res["path"] or "").replace("\\", "/"))
                 return {
