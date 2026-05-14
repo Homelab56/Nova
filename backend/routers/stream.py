@@ -187,21 +187,20 @@ async def _ffprobe_subtitle_streams(input_value: str, is_path: bool) -> list[dic
     if is_path:
         args[-1] = input_value
 
-    proc = await asyncio.create_subprocess_exec(
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    out, _err = await proc.communicate()
-    if proc.returncode != 0:
-        return []
     try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out, _err = await asyncio.wait_for(proc.communicate(), timeout=8)
+        if proc.returncode != 0:
+            return []
         data = json.loads(out.decode("utf-8", errors="ignore") or "{}")
         streams = data.get("streams") or []
-        if not isinstance(streams, list):
-            return []
         return [s for s in streams if isinstance(s, dict)]
-    except Exception:
+    except Exception as e:
+        print(f"FFProbe subtitle fout: {e}")
         return []
 
 def _parse_vtt_timestamp(value: str) -> float | None:
@@ -550,17 +549,17 @@ async def _ffprobe_streams(input_value: str, is_path: bool) -> dict:
     if is_path:
         args[-1] = input_value
 
-    proc = await asyncio.create_subprocess_exec(
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    out, _err = await proc.communicate()
-    if proc.returncode != 0:
-        return {}
     try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out, _err = await asyncio.wait_for(proc.communicate(), timeout=8)
+        if proc.returncode != 0: return {}
         return json.loads(out.decode("utf-8"))
-    except Exception:
+    except Exception as e:
+        print(f"FFProbe streams fout: {e}")
         return {}
 
 
