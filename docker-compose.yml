@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     env_file: .env
     ports:
-      - "8080:8000"
+      - "8002:8000"
     volumes:
       - nova_data:/app/data
       - ${MEDIA_PATH}:/media:ro  # Gebruik het pad uit .env
