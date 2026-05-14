@@ -367,62 +367,7 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
             ep_variants = {ep_token, f"{ssi}x{eei:02d}", f"{ssi:02d}x{eei:02d}"}
 
     from .library import find_file
-    for candidate in candidates:
-        try:
-            local_check = await find_file(candidate)
-            if local_check.get("found"):
-                p = local_check.get("path") or ""
-                years = _extract_years(p)
-                if is_movie and base_year and years and base_year not in years:
-                    continue
-                return {"available": True, "filename": p, "source": "local"}
-        except Exception:
-            pass
-
-    async with httpx.AsyncClient() as client:
-        r = await client.get(
-            f"{RD_BASE}/torrents",
-            headers=rd_headers(),
-            params={"limit": 500}
-        )
-        if r.status_code != 200:
-            return {"available": False}
-
-        torrents = r.json()
-
-    for torrent in torrents:
-        filename_raw = torrent.get("filename", "") or ""
-        filename = _normalize_text(filename_raw)
-        filename_years = _extract_years(filename_raw)
-        if ep_variants and not any(t in filename for t in ep_variants):
-            continue
-        best_score = 0
-        best_min = 999
-        for words, candidate_q in word_sets:
-            cy = _candidate_year(candidate_q)
-            if cy and filename_years and cy not in filename_years:
-                continue
-            if base_year and not cy and filename_years and base_year not in filename_years:
-                continue
-            if is_movie and base_year and filename_years and base_year not in filename_years:
-                continue
-            score = sum(1 for word in words if word in filename)
-            min_score = _required_score(words, media_type, base_year, is_library=True)
-            if score >= min_score and (score > best_score or (score == best_score and min_score < best_min)):
-                best_score = score
-                best_min = min_score
-        if best_score > 0 and torrent.get("status") == "downloaded":
-            try:
-                async with httpx.AsyncClient() as client:
-                    info_r = await client.get(f"{RD_BASE}/torrents/info/{torrent.get('id')}", headers=rd_headers(), timeout=10)
-                if info_r.status_code == 200:
-                    info = info_r.json()
-                    link_idx = _select_best_link_index(info, q, media_type, base_year)
-                    if link_idx is not None:
-                        return {"available": True, "filename": filename_raw}
-            except Exception:
-                pass
-
+    # GEACTIVEERD: Geen lokale checks meer om crashes te voorkomen
     return {"available": False}
 
 
