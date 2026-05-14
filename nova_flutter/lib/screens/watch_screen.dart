@@ -3,8 +3,8 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:video_player/video_player.dart';
-import 'package:chewie/chewie.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import '../widgets/nova_image.dart';
 import '../services/tmdb_service.dart';
 import '../services/debrid_service.dart';
@@ -34,8 +34,34 @@ class _WatchScreenState extends State<WatchScreen> {
   String _status = '';
   bool _inWatchlist = false;
   bool? _isAvailable; // null = nog niet gecheckt
-  VideoPlayerController? _vpCtrl;
-  ChewieController? _chewieCtrl;
+  late final Player _player;
+  late final VideoController _controller;
+  bool _showPlayer = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _player = Player();
+    _controller = VideoController(_player);
+    _loadDetails();
+    _checkWatchlist();
+    if (isMovie) _checkAvailability();
+    
+    // Luister naar player updates voor progress
+    int lastSave = -1;
+    _player.stream.position.listen((pos) {
+      final dur = _player.state.duration;
+      final sec = pos.inSeconds;
+      if (dur.inSeconds > 0 && sec > 0 && sec % 10 == 0 && sec != lastSave) {
+        lastSave = sec;
+        UserDataService.saveProgress(
+          widget.media, 
+          sec.toDouble(), 
+          dur.inSeconds.toDouble()
+        );
+      }
+    });
+  }
 
   Future<bool> _tryStartProcess(String exe, List<String> args) async {
     try {
@@ -83,14 +109,6 @@ class _WatchScreenState extends State<WatchScreen> {
   String get year {
     final d = (widget.media['release_date'] ?? widget.media['first_air_date'] ?? '') as String;
     return d.length >= 4 ? d.substring(0, 4) : '';
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _loadDetails();
-    _checkWatchlist();
-    if (isMovie) _checkAvailability();
   }
 
   Future<void> _checkAvailability() async {
@@ -152,75 +170,91 @@ class _WatchScreenState extends State<WatchScreen> {
   }
 
   Future<void> _play({Map? episode}) async {
-    setState(() { _loadingStream = true; _status = 'Zoeken naar streams...'; });
+    setState(() { 
+      _loadingStream = true; 
+      _status = 'Zoeken naar streams...'; 
+      _showPlayer = false;
+    });
+    
     final q = episode != null
       ? '$title S${_selectedSeason.toString().padLeft(2,'0')}E${(episode['episode_number'] as int).toString().padLeft(2,'0')}'
       : '$title $year';
 
     try {
-      // De backend API doet nu het zware werk (library + scraper + cache check)
-      final baseUrl = await SettingsService.getBackendUrl();
-      final response = await http.get(Uri.parse('$baseUrl/api/debrid/search?q=${Uri.encodeComponent(q)}&tmdb_id=${widget.media['id']}&media_type=${isMovie ? "movie" : "tv"}&client=windows'));
+      final baseUrl = (await SettingsService.getBackendUrl()).trim().replaceAll(RegExp(r'/$'), '');
       
-      if (response.statusCode != 200) {
-        throw 'Server gaf een foutmelding: ${response.statusCode}';
+      final apiPaths = ['/api/debrid/search', '/debrid/search'];
+      String? url;
+      String? source;
+      String? errorMessage;
+      
+      for (final path in apiPaths) {
+        try {
+          final apiUrl = '$baseUrl$path?q=${Uri.encodeComponent(q)}&tmdb_id=${widget.media['id']}&media_type=${isMovie ? "movie" : "tv"}&client=windows';
+          final response = await http.get(Uri.parse(apiUrl)).timeout(const Duration(seconds: 25));
+          
+          if (response.statusCode == 200) {
+            final data = jsonDecode(response.body);
+            final direct = data['direct_url'] as String?;
+            final stream = data['stream_url'] as String?;
+            url = (direct != null && direct.isNotEmpty) ? direct : stream;
+            source = data['source'] ?? 'unknown';
+            if (url != null) break;
+            errorMessage = data['message'];
+          } else {
+            errorMessage = 'Server fout: ${response.statusCode}';
+          }
+        } catch (e) {
+          errorMessage = 'Verbindingsfout: $e';
+          continue;
+        }
       }
-
-      final data = jsonDecode(response.body);
-      final direct = data['direct_url'] as String?;
-      final stream = data['stream_url'] as String?;
-      String? url = (direct != null && direct.isNotEmpty) ? direct : stream;
 
       if (url == null) {
         setState(() {
-          _status = data['message'] ?? 'Geen stream gevonden.';
+          _status = errorMessage ?? 'Geen stream gevonden voor deze titel.';
           _loadingStream = false;
         });
         return;
       }
 
-      // Fix relative URLs (bijv. van de lokale mount)
       if (url.startsWith('/')) {
-        url = baseUrl.replaceAll(RegExp(r'/$'), '') + url;
+        url = baseUrl + url;
       }
 
-      final source = data['source'] ?? 'unknown';
       setState(() { 
         _status = source == 'scraper' ? 'Gevonden op internet. Laden...' : 'Gevonden in bibliotheek. Laden...'; 
       });
 
-      if (Platform.isWindows) {
-        setState(() { _status = 'Openen in Windows player...'; });
-        await _openExternalPlayer(url);
-        setState(() { _loadingStream = false; _status = 'Gestart in externe player.'; });
-        return;
-      }
-
-      _vpCtrl?.dispose();
-      _chewieCtrl?.dispose();
-      _vpCtrl = VideoPlayerController.networkUrl(Uri.parse(url));
-      await _vpCtrl!.initialize().timeout(const Duration(seconds: 15), onTimeout: () {
-        throw 'Time-out bij het laden van de video. Probeer het opnieuw.';
+      // Player configureren voor betere compatibiliteit
+      await _player.open(Media(url, httpHeaders: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      }));
+      
+      _player.stream.error.listen((err) {
+        if (mounted) {
+          setState(() {
+            _status = 'Video fout: $err';
+            _showPlayer = false;
+            _loadingStream = false;
+          });
+        }
       });
-      _chewieCtrl = ChewieController(
-        videoPlayerController: _vpCtrl!,
-        autoPlay: true,
-        allowFullScreen: true,
-        allowMuting: true,
-        showControlsOnInitialize: false,
-        errorBuilder: (context, errorMessage) {
-          return Center(
-            child: Text(
-              'Fout bij het afspelen: $errorMessage',
-              style: const TextStyle(color: Colors.white),
-            ),
-          );
-        },
-      );
-      setState(() { _streamUrl = url; _loadingStream = false; _status = ''; });
+
+      UserDataService.saveProgress(widget.media, 0, 100); 
+
+      if (mounted) {
+        setState(() { 
+          _streamUrl = url; 
+          _loadingStream = false; 
+          _status = ''; 
+          _showPlayer = true;
+        });
+      }
+      
     } catch (e) {
       setState(() {
-        _status = 'Fout: $e';
+        _status = 'Fout bij afspelen: $e';
         _loadingStream = false;
       });
     }
@@ -228,8 +262,7 @@ class _WatchScreenState extends State<WatchScreen> {
 
   @override
   void dispose() {
-    _vpCtrl?.dispose();
-    _chewieCtrl?.dispose();
+    _player.dispose();
     super.dispose();
   }
 
@@ -248,8 +281,11 @@ class _WatchScreenState extends State<WatchScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Player of backdrop
-              if (_streamUrl != null && _chewieCtrl != null)
-                AspectRatio(aspectRatio: 16/9, child: Chewie(controller: _chewieCtrl!))
+              if (_showPlayer)
+                AspectRatio(
+                  aspectRatio: 16/9, 
+                  child: Video(controller: _controller)
+                )
               else if (backdrop != null)
                 Stack(children: [
                   NovaImage(path: '$tmdbBackdrop$backdrop',

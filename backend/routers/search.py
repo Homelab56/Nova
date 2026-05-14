@@ -161,7 +161,7 @@ async def tmdb_list(
     path: str,
     page: int = 1,
     params: dict = {},
-    prefetch_pages: int = 5,
+    prefetch_pages: int = 3, # Verlaagd van 5 naar 3 voor stabiliteit
     media_type: str | None = None,
     suggestion_mode: bool = True,
     allow_kids: bool = False,
@@ -169,17 +169,24 @@ async def tmdb_list(
     import asyncio
     base_params = dict(params)
     if page <= 1:
+        # Haal eerst pagina 1 op om te weten hoeveel pagina's er zijn
         first = await tmdb_get(path, {**base_params, "page": 1})
         total_pages = int(first.get("total_pages") or 1)
         total_results = int(first.get("total_results") or 0)
+        
         max_page = max(1, min(prefetch_pages, total_pages))
         pages = [first]
+        
         if max_page > 1:
-            pages.extend(
-                await asyncio.gather(
-                    *[tmdb_get(path, {**base_params, "page": p}) for p in range(2, max_page + 1)]
-                )
-            )
+            # Gebruik een semaphoor om parallelle verzoeken te beperken
+            sem = asyncio.Semaphore(3)
+            async def _fetch(p):
+                async with sem:
+                    return await tmdb_get(path, {**base_params, "page": p})
+            
+            extra_pages = await asyncio.gather(*[_fetch(p) for p in range(2, max_page + 1)])
+            pages.extend(extra_pages)
+            
         items, seen = [], set()
         for data in pages:
             for it in data.get("results", []) or []:
