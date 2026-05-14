@@ -837,6 +837,9 @@ async def meta(url: str | None = None, path: str | None = None):
     return {"duration": dur or 0.0}
 
 
+# Limiet op het aantal gelijktijdige transcoderingen om de server te beschermen
+TRANSCODE_SEMAPHORE = asyncio.Semaphore(3)
+
 @router.get("/play")
 async def play(
     request: Request,
@@ -850,6 +853,11 @@ async def play(
     is_path = path is not None
     input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
 
+    async def _stream_with_semaphore():
+        async with TRANSCODE_SEMAPHORE:
+            async for chunk in _ffmpeg_stream(input_value, is_path=is_path, start=start):
+                yield chunk
+
     try:
         client_host = (request.client.host if request.client else "") or ""
     except Exception:
@@ -859,7 +867,7 @@ async def play(
         _LAST_START[key] = (time.time(), float(start))
 
     return StreamingResponse(
-        _ffmpeg_stream(input_value, is_path=is_path, start=start),
+        _stream_with_semaphore(),
         media_type="video/mp4",
     )
 
