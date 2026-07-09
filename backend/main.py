@@ -3,7 +3,11 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from routers import search, debrid, stream, settings, userdata, library, seerr
 
-app = FastAPI(title="Nova API", version="1.0.0")
+app = FastAPI(title="Nova API", version="1.1.0")
+
+@app.get("/version")
+async def get_version():
+    return {"version": "1.1.0", "status": "stable", "features": ["semaphores", "aiostreams", "no-local-search"]}
 
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):

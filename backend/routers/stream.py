@@ -203,6 +203,42 @@ async def _ffprobe_subtitle_streams(input_value: str, is_path: bool) -> list[dic
         print(f"FFProbe subtitle fout: {e}")
         return []
 
+
+async def _ffprobe_audio_streams(input_value: str, is_path: bool) -> list[dict]:
+    args = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "a",
+        "-show_entries",
+        "stream=index,codec_name,channels:stream_tags=language,title",
+        "-of",
+        "json",
+        input_value,
+    ]
+    if _is_http_url(input_value):
+        args.insert(4, "5000000")
+        args.insert(4, "-rw_timeout")
+    if is_path:
+        args[-1] = input_value
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out, _err = await asyncio.wait_for(proc.communicate(), timeout=8)
+        if proc.returncode != 0:
+            return []
+        data = json.loads(out.decode("utf-8", errors="ignore") or "{}")
+        streams = data.get("streams") or []
+        return [s for s in streams if isinstance(s, dict)]
+    except Exception as e:
+        print(f"FFProbe audio fout: {e}")
+        return []
+
 def _parse_vtt_timestamp(value: str) -> float | None:
     v = (value or "").strip()
     if not v:
@@ -609,7 +645,7 @@ def _choose_mode(probe: dict) -> str:
     return "transcode"
 
 
-async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
+async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0, audio_stream_index: int | None = None):
     probe = await _ffprobe_streams(input_value, is_path=is_path)
     streams = (probe or {}).get("streams") or []
     v = next((s for s in streams if s.get("codec_type") == "video"), None) or {}
@@ -676,8 +712,15 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         f"{seek_post:.3f}",
         "-map",
         "0:v:0",
-        "-map",
-        "0:a:0?",
+    ]
+    
+    # Add audio stream mapping
+    if audio_stream_index is not None:
+        cmd += ["-map", f"0:{int(audio_stream_index)}"]
+    else:
+        cmd += ["-map", "0:a:0?"]
+        
+    cmd += [
         "-sn",
         "-fflags",
         "+genpts",
@@ -833,7 +876,71 @@ async def meta(url: str | None = None, path: str | None = None):
     is_path = path is not None
     input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
     dur = await _ffprobe_duration_seconds(input_value, is_path=is_path)
-    return {"duration": dur or 0.0}
+    
+    # Get subtitle tracks
+    subtitle_streams = await _ffprobe_subtitle_streams(input_value, is_path=is_path)
+    bitmap_codecs = {
+        "hdmv_pgs_subtitle",
+        "dvd_subtitle",
+        "dvb_subtitle",
+        "xsub",
+    }
+    subtitle_tracks = []
+    for s in subtitle_streams:
+        idx = s.get("index")
+        codec = s.get("codec_name") or ""
+        codec_l = str(codec).lower().strip()
+        if codec_l in bitmap_codecs:
+            continue
+        tags = s.get("tags") or {}
+        if not isinstance(tags, dict):
+            tags = {}
+        lang = tags.get("language") or ""
+        title = tags.get("title") or ""
+        try:
+            idx_i = int(idx)
+        except Exception:
+            continue
+        subtitle_tracks.append(
+            {
+                "stream_index": idx_i,
+                "language": str(lang),
+                "title": str(title),
+                "codec": str(codec),
+            }
+        )
+    
+    # Get audio tracks
+    audio_streams = await _ffprobe_audio_streams(input_value, is_path=is_path)
+    audio_tracks = []
+    for s in audio_streams:
+        idx = s.get("index")
+        codec = s.get("codec_name") or ""
+        channels = s.get("channels") or 0
+        tags = s.get("tags") or {}
+        if not isinstance(tags, dict):
+            tags = {}
+        lang = tags.get("language") or ""
+        title = tags.get("title") or ""
+        try:
+            idx_i = int(idx)
+        except Exception:
+            continue
+        audio_tracks.append(
+            {
+                "stream_index": idx_i,
+                "language": str(lang),
+                "title": str(title),
+                "codec": str(codec),
+                "channels": int(channels),
+            }
+        )
+    
+    return {
+        "duration": dur or 0.0,
+        "subtitle_tracks": subtitle_tracks,
+        "audio_tracks": audio_tracks,
+    }
 
 
 # Limiet op het aantal gelijktijdige transcoderingen om de server te beschermen
@@ -845,6 +952,7 @@ async def play(
     url: str | None = None,
     path: str | None = None,
     start: float = Query(default=0.0, ge=0.0),
+    audio_stream_index: int | None = Query(default=None),
 ):
     if not url and not path:
         raise HTTPException(status_code=400, detail="url of path is verplicht")
@@ -852,9 +960,14 @@ async def play(
     is_path = path is not None
     input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
 
+    # Voor externe HTTP URLs (zoals AIOStreams), redirect direct (proxying is onbetrouwbaar)
+    if not is_path and (input_value.startswith("http://") or input_value.startswith("https://")):
+        print(f"Redirect naar externe URL: {input_value[:200]}...")
+        return RedirectResponse(url=input_value, status_code=302)
+
     async def _stream_with_semaphore():
         async with TRANSCODE_SEMAPHORE:
-            async for chunk in _ffmpeg_stream(input_value, is_path=is_path, start=start):
+            async for chunk in _ffmpeg_stream(input_value, is_path=is_path, start=start, audio_stream_index=audio_stream_index):
                 yield chunk
 
     try:
@@ -869,6 +982,96 @@ async def play(
         _stream_with_semaphore(),
         media_type="video/mp4",
     )
+
+
+async def _proxy_external_url(url: str, request: Request, start: float = 0.0):
+    """Proxy externe HTTP URL met range request support voor seeken"""
+    # Haal start parameter uit URL query string (voeg toe door frontend)
+    parsed = urllib.parse.urlparse(url)
+    query_params = urllib.parse.parse_qs(parsed.query)
+    url_start = query_params.get("start", [None])[0]
+    
+    # Verwijder start parameter uit URL
+    query_params.pop("start", None)
+    new_query = urllib.parse.urlencode(query_params, doseq=True)
+    clean_url = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
+    
+    range_header = request.headers.get("range") or request.headers.get("Range") or ""
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+    if range_header:
+        headers["Range"] = range_header
+    
+    # Gebruik een nog grotere timeout voor streaming
+    timeout = httpx.Timeout(600.0, connect=120.0)
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=False) as client:
+                async with client.stream("GET", clean_url, headers=headers) as response:
+                    if response.status_code not in [200, 206]:
+                        print(f"Externe URL fout: {response.status_code} (poging {attempt + 1}/{max_retries})")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                            continue
+                        raise HTTPException(status_code=response.status_code, detail=f"Externe URL fout: {response.status_code}")
+                    
+                    content_type = response.headers.get("content-type", "video/mp4")
+                    content_length = response.headers.get("content-length")
+                    accept_ranges = response.headers.get("accept-ranges", "")
+                    
+                    response_headers = {
+                        "Content-Type": content_type,
+                        "Cache-Control": "no-cache",
+                    }
+                    
+                    if content_length:
+                        response_headers["Content-Length"] = content_length
+                    
+                    # Altijd Accept-Ranges: bytes doorgeven als de server dat ondersteunt
+                    if accept_ranges == "bytes":
+                        response_headers["Accept-Ranges"] = "bytes"
+                    
+                    if response.status_code == 206:
+                        content_range = response.headers.get("content-range")
+                        if content_range:
+                            response_headers["Content-Range"] = content_range
+                    
+                    async def iter_chunks():
+                        try:
+                            async for chunk in response.aiter_bytes(chunk_size=256 * 1024):
+                                yield chunk
+                        except Exception as e:
+                            print(f"Stream error: {e}")
+                            raise
+                    
+                    return StreamingResponse(
+                        iter_chunks(),
+                        status_code=response.status_code,
+                        media_type=content_type,
+                        headers=response_headers
+                    )
+        except httpx.ConnectError as e:
+            print(f"Connect error naar {clean_url}: {e} (poging {attempt + 1}/{max_retries})")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            raise HTTPException(status_code=502, detail="Kan geen verbinding maken met stream server")
+        except httpx.TimeoutException as e:
+            print(f"Timeout naar {clean_url}: {e} (poging {attempt + 1}/{max_retries})")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            raise HTTPException(status_code=504, detail="Stream server timeout")
+        except Exception as e:
+            print(f"Proxy fout: {e} (poging {attempt + 1}/{max_retries})")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            raise HTTPException(status_code=500, detail=f"Proxy fout: {str(e)}")
 
 
 @router.get("/file")

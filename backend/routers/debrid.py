@@ -3,18 +3,128 @@ import os
 import re
 import asyncio
 import urllib.parse
+import base64
+import time
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from .config_loader import get_rd_token, get_tmdb_key
+from .config_loader import get_rd_token, get_tmdb_key, get_aiostreams_config
 
 router = APIRouter()
 
 RD_BASE = "https://api.real-debrid.com/rest/1.0"
 TMDB_BASE = "https://api.themoviedb.org/3"
 
+# Cache om te voorkomen dat dezelfde zoekopdracht te vaak wordt uitgevoerd
+_search_cache = {}
+_cache_ttl = 30  # 30 seconden cache
+
 
 def rd_headers():
     return {"Authorization": f"Bearer {get_rd_token()}"}
+
+
+def _aiostreams_request_headers(cfg: dict) -> dict:
+    h: dict[str, str] = {}
+    b64_ud = (cfg.get("user_data_b64") or "").strip()
+    if b64_ud:
+        h["x-aiostreams-user-data"] = b64_ud
+        return h
+    user = (cfg.get("username") or "").strip()
+    password = (cfg.get("password") or "").strip()
+    if user and password:
+        token = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
+        h["Authorization"] = f"Basic {token}"
+    return h
+
+
+def _aiostreams_search_id(media_type: str | None, tmdb_id: int, q: str) -> tuple[str | None, str | None]:
+    """Geeft (aio_type, id_param) voor GET /api/v1/search of (None, None) als niet te bouwen."""
+    if not tmdb_id or media_type not in {"movie", "tv"}:
+        return None, None
+    if media_type == "movie":
+        return "movie", f"tmdb:{int(tmdb_id)}"
+    ep = _episode_token(q or "")
+    if not ep:
+        return None, None
+    m = re.fullmatch(r"s(\d{2})e(\d{2})", ep)
+    if not m:
+        return None, None
+    season = int(m.group(1))
+    episode = int(m.group(2))
+    return "series", f"tmdb:{int(tmdb_id)}:{season}:{episode}"
+
+
+def _aio_rank_result(item: dict) -> tuple[int, int]:
+    name = (
+        str(item.get("name") or "")
+        + " "
+        + str(item.get("filename") or "")
+        + " "
+        + str((item.get("parsedFile") or {}).get("resolution") or "")
+    ).lower()
+    size = 0
+    try:
+        size = int(item.get("size") or 0)
+    except Exception:
+        size = 0
+    tier = 0
+    if any(x in name for x in ("2160", "4k", "uhd", "4320")):
+        tier = 4000
+    elif "1440" in name or "1080" in name:
+        tier = 3000
+    elif "720" in name:
+        tier = 2000
+    elif "480" in name:
+        tier = 1000
+    if item.get("cached"):
+        tier += 50
+    return (tier, size)
+
+
+async def _fetch_aiostreams_results(
+    cfg: dict,
+    aio_type: str,
+    aio_id: str,
+    timeout: float = 55.0,
+) -> list[dict]:
+    base = (cfg.get("base_url") or "").rstrip("/")
+    if not base:
+        return []
+    params = {"type": aio_type, "id": aio_id, "format": "true"}
+    headers = _aiostreams_request_headers(cfg)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.get(f"{base}/api/v1/search", params=params, headers=headers)
+    except Exception as e:
+        print(f"AIOStreams search fout: {e}")
+        return []
+    try:
+        payload = r.json()
+    except Exception:
+        return []
+    if not payload.get("success"):
+        print(f"AIOStreams API: {payload.get('error') or r.status_code}")
+        return []
+    data = payload.get("data") or {}
+    results = data.get("results") or []
+    return [x for x in results if isinstance(x, dict)]
+
+
+def _pick_best_aiostream_url(results: list[dict]) -> tuple[str | None, dict | None]:
+    with_url = [x for x in results if (x.get("url") or "").strip()]
+    if not with_url:
+        return None, None
+    with_url.sort(key=_aio_rank_result, reverse=True)
+    best = with_url[0]
+    url = (best.get("url") or "").strip()
+    if not url:
+        return None, None
+    not_ready = bool(best.get("notWebReady"))
+    if not_ready or url.startswith("magnet:"):
+        enc = urllib.parse.quote(url, safe="")
+        return f"/api/stream/play?url={enc}", best
+    return url, best
+
 
 _VIDEO_EXTS = (".mkv", ".mp4", ".m4v", ".avi", ".mov", ".webm", ".ts")
 
@@ -342,7 +452,7 @@ async def get_library():
 @router.get("/check")
 async def check_availability(q: str, tmdb_id: int | None = None, media_type: str | None = None):
     """
-    Checkt of een titel beschikbaar is in de RD bibliotheek zonder te unrestricten.
+    Checkt of er waarschijnlijk een stream is (AIOStreams en/of Real-Debrid bibliotheek).
     """
     candidates = await _candidate_queries(q, tmdb_id, media_type)
     is_movie = (media_type == "movie")
@@ -366,63 +476,36 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
             eei = int(ee)
             ep_variants = {ep_token, f"{ssi}x{eei:02d}", f"{ssi:02d}x{eei:02d}"}
 
-    from .library import find_file
-    for candidate in candidates:
+    aio_cfg = get_aiostreams_config()
+    if aio_cfg.get("base_url") and tmdb_id:
+        aio_type, aio_id = _aiostreams_search_id(media_type, int(tmdb_id), q)
+        if aio_type and aio_id:
+            aio_res = await _fetch_aiostreams_results(aio_cfg, aio_type, aio_id, timeout=25.0)
+            stream_u, _picked = _pick_best_aiostream_url(aio_res)
+            if stream_u:
+                return {"available": True}
+
+    async with httpx.AsyncClient(timeout=15) as client:
         try:
-            local_check = await find_file(candidate)
-            if local_check.get("found"):
-                p = local_check.get("path") or ""
-                years = _extract_years(p)
-                if is_movie and base_year and years and base_year not in years:
+            r = await client.get(f"{RD_BASE}/torrents", headers=rd_headers(), params={"limit": 250})
+            if r.status_code != 200:
+                return {"available": False}
+            torrents = r.json()
+            primary_word_sets = _filter_candidates_for_year(word_sets, base_year)
+            for torrent in torrents:
+                if torrent.get("status") != "downloaded":
                     continue
-                return {"available": True, "filename": p, "source": "local"}
-        except Exception:
-            pass
-
-    async with httpx.AsyncClient() as client:
-        r = await client.get(
-            f"{RD_BASE}/torrents",
-            headers=rd_headers(),
-            params={"limit": 500}
-        )
-        if r.status_code != 200:
-            return {"available": False}
-
-        torrents = r.json()
-
-    for torrent in torrents:
-        filename_raw = torrent.get("filename", "") or ""
-        filename = _normalize_text(filename_raw)
-        filename_years = _extract_years(filename_raw)
-        if ep_variants and not any(t in filename for t in ep_variants):
-            continue
-        best_score = 0
-        best_min = 999
-        for words, candidate_q in word_sets:
-            cy = _candidate_year(candidate_q)
-            if cy and filename_years and cy not in filename_years:
-                continue
-            if base_year and not cy and filename_years and base_year not in filename_years:
-                continue
-            if is_movie and base_year and filename_years and base_year not in filename_years:
-                continue
-            score = sum(1 for word in words if word in filename)
-            min_score = _required_score(words, media_type, base_year, is_library=True)
-            if score >= min_score and (score > best_score or (score == best_score and min_score < best_min)):
-                best_score = score
-                best_min = min_score
-        if best_score > 0 and torrent.get("status") == "downloaded":
-            try:
-                async with httpx.AsyncClient() as client:
-                    info_r = await client.get(f"{RD_BASE}/torrents/info/{torrent.get('id')}", headers=rd_headers(), timeout=10)
-                if info_r.status_code == 200:
-                    info = info_r.json()
-                    link_idx = _select_best_link_index(info, q, media_type, base_year)
-                    if link_idx is not None:
-                        return {"available": True, "filename": filename_raw}
-            except Exception:
-                pass
-
+                filename_raw = torrent.get("filename", "") or ""
+                filename = _normalize_text(filename_raw)
+                if ep_variants and not any(t in filename for t in ep_variants):
+                    continue
+                for words, _ in primary_word_sets:
+                    score = sum(1 for word in words if word in filename)
+                    min_score = _required_score(words, media_type, base_year, is_library=True)
+                    if score >= min_score:
+                        return {"available": True}
+        except Exception as e:
+            print(f"check RD bibliotheek: {e}")
     return {"available": False}
 
 
@@ -434,7 +517,19 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
     """
     Zoekt automatisch naar een beschikbare stream voor een titel.
     Met semaphore om de server te beschermen tegen overbelasting.
+    Met cache om te voorkomen dat dezelfde zoekopdracht te vaak wordt uitgevoerd.
     """
+    # Cache key
+    cache_key = f"{q}:{tmdb_id}:{media_type}"
+    current_time = time.time()
+    
+    # Check cache
+    if cache_key in _search_cache:
+        cached_result, cached_time = _search_cache[cache_key]
+        if current_time - cached_time < _cache_ttl:
+            print(f"Cache hit voor: {q}")
+            return cached_result
+    
     async with SEARCH_SEMAPHORE:
         print(f"--- Start zoekopdracht voor: {q} ({media_type}) ---")
         async with httpx.AsyncClient(timeout=15) as client:
@@ -445,12 +540,16 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
             
             if is_movie and not base_year:
                 print(f"Geen jaar gevonden voor film: {q}")
-                return {"stream_url": None, "message": f"Geen jaar gevonden voor '{q}'."}
+                result = {"stream_url": None, "message": f"Geen jaar gevonden voor '{q}'."}
+                _search_cache[cache_key] = (result, current_time)
+                return result
                 
             word_sets = [(_words(c), c) for c in candidates]
             word_sets = [(w, c) for (w, c) in word_sets if w]
             if not word_sets:
-                return {"stream_url": None, "message": "Ongeldige zoekopdracht."}
+                result = {"stream_url": None, "message": "Ongeldige zoekopdracht."}
+                _search_cache[cache_key] = (result, current_time)
+                return result
                 
             ep_token = _episode_token(q or "") if media_type == "tv" else None
             ep_variants = None
@@ -459,6 +558,31 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                 if m:
                     ss, ee = m.groups()
                     ep_variants = {ep_token, f"{int(ss)}x{int(ee):02d}", f"{int(ss):02d}x{int(ee):02d}"}
+
+            aio_cfg = get_aiostreams_config()
+            if aio_cfg.get("base_url") and tmdb_id:
+                aio_type, aio_id = _aiostreams_search_id(media_type, int(tmdb_id), q)
+                if aio_type and aio_id:
+                    print(f"AIOStreams: {aio_type} {aio_id}")
+                    aio_res = await _fetch_aiostreams_results(aio_cfg, aio_type, aio_id, timeout=55.0)
+                    print(f"AIOStreams resultaten: {len(aio_res)} items")
+                    stream_url, picked = _pick_best_aiostream_url(aio_res)
+                    if stream_url:
+                        label = (picked or {}).get("name") or (picked or {}).get("filename") or q
+                        print(f"AIOStreams stream URL: {stream_url[:200]}...")
+                        # Vervang poort 8086 met 3003 (AIOStreams draait op 3003)
+                        stream_url = stream_url.replace(":8086", ":3003")
+                        # Proxy door backend (browser heeft geen toegang tot AIOStreams)
+                        result = {
+                            "stream_url": f"/api/stream/play?url={urllib.parse.quote(stream_url)}",
+                            "direct_url": stream_url,
+                            "source": "aiostreams",
+                            "title": str(label)[:500],
+                        }
+                        _search_cache[cache_key] = (result, current_time)
+                        return result
+                    else:
+                        print("AIOStreams: geen geldige stream URL gevonden")
 
             # --- STAP 1: Zoek in eigen RD bibliotheek ---
             print("Checken van Real-Debrid bibliotheek...")
@@ -494,11 +618,13 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                                 ur = await client.post(f"{RD_BASE}/unrestrict/link", headers=rd_headers(), data={"link": links[link_idx]})
                                 if ur.status_code == 200:
                                     print("Bibliotheek match succesvol unresticted.")
-                                    return {
+                                    result = {
                                         "stream_url": ur.json()["download"], # Directe link voor Windows App
                                         "direct_url": ur.json()["download"],
                                         "source": "library",
                                     }
+                                    _search_cache[cache_key] = (result, current_time)
+                                    return result
             except Exception as e:
                 print(f"Fout bij bibliotheek check: {e}")
 
@@ -533,7 +659,9 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
 
             if not external_torrents:
                 print("Geen externe torrents gevonden.")
-                return {"stream_url": None, "message": "Geen streams gevonden."}
+                result = {"stream_url": None, "message": "Geen streams gevonden."}
+                _search_cache[cache_key] = (result, current_time)
+                return result
 
             # --- STAP 3: RD Cache Check ---
             print(f"Cache check op {min(len(external_torrents), 15)} torrents...")
@@ -558,32 +686,16 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                                     if links:
                                         ur = await client.post(f"{RD_BASE}/unrestrict/link", headers=rd_headers(), data={"link": links[0]})
                                         if ur.status_code == 200:
-                                            return {"stream_url": ur.json()["download"], "direct_url": ur.json()["download"], "source": "scraper"}
+                                            result = {"stream_url": ur.json()["download"], "direct_url": ur.json()["download"], "source": "scraper"}
+                                            _search_cache[cache_key] = (result, current_time)
+                                            return result
             except Exception as e:
                 print(f"Cache check fout: {e}")
 
             print("Geen afspeelbare streams gevonden na alle stappen.")
-            return {"stream_url": None, "message": "Geen direct afspeelbare streams gevonden."}
-
-
-async def check_availability(magnet: str):
-    """
-    Checkt of een magnet link instant beschikbaar is op Real-Debrid.
-    Geeft True terug als je hem direct kan streamen zonder te wachten.
-    """
-    # Haal de hash uit de magnet link
-    hash_part = magnet.lower().split("urn:btih:")[1].split("&")[0]
-
-    async with httpx.AsyncClient() as client:
-        r = await client.get(
-            f"{RD_BASE}/torrents/instantAvailability/{hash_part}",
-            headers=rd_headers()
-        )
-        data = r.json()
-
-    # RD geeft een geneste dict terug - als de hash erin zit is het beschikbaar
-    available = bool(data.get(hash_part, {}).get("rd"))
-    return {"hash": hash_part, "available": available}
+            result = {"stream_url": None, "message": "Geen direct afspeelbare streams gevonden."}
+            _search_cache[cache_key] = (result, current_time)
+            return result
 
 
 @router.post("/add")

@@ -90,7 +90,7 @@ async def all_library_files():
 
 @router.get("/scan")
 async def scan_library(path: str = ""):
-    """Scant de /media directory (Dumbarr mount) voor bestanden."""
+    """Scant de /media directory (lokale videomount) voor bestanden."""
     def _do_scan():
         full_path = os.path.join(MEDIA_ROOT, path.lstrip("/"))
         if not os.path.exists(full_path): return []

@@ -41,6 +41,10 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const [subtitleLabel, setSubtitleLabel] = useState("");
   const [subMenuOpen, setSubMenuOpen] = useState(false);
   const [subtitleDelay, setSubtitleDelay] = useState(0);
+  const [audioTracks, setAudioTracks] = useState([]);
+  const [audioSelected, setAudioSelected] = useState(null);
+  const [audioLabel, setAudioLabel] = useState("");
+  const [audioMenuOpen, setAudioMenuOpen] = useState(false);
   const [prefs, setPrefs] = useState({
     default_audio_lang: "en",
     default_sub_lang_1: "nl",
@@ -65,7 +69,10 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   }, [effectiveTotal]);
 
   useEffect(() => {
-    const onDoc = () => setSubMenuOpen(false);
+    const onDoc = () => {
+      setSubMenuOpen(false);
+      setAudioMenuOpen(false);
+    };
     document.addEventListener("click", onDoc);
     return () => document.removeEventListener("click", onDoc);
   }, []);
@@ -119,11 +126,11 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     };
   }, []);
 
-  const buildSubtitlesListUrl = () => {
+  const buildMetaUrl = () => {
     const u = new URL(url, window.location.origin);
     u.searchParams.delete("start");
     const apiPrefix = u.pathname.startsWith("/api/") ? "/api" : "";
-    u.pathname = `${apiPrefix}/stream/subtitles`;
+    u.pathname = `${apiPrefix}/stream/meta`;
     return u.toString();
   };
 
@@ -165,7 +172,23 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     return tracks[0];
   };
 
-  const buildSrc = (startSeconds) => {
+  const chooseDefaultAudio = (tracks) => {
+    if (!tracks || tracks.length === 0) return null;
+    const prefer = [
+      prefs.default_audio_lang,
+      "en",
+      "eng",
+    ].filter(Boolean);
+    const norm = (s) => String(s || "").toLowerCase().trim().replaceAll("_", "-");
+    const prefNorm = prefer.map(norm);
+    const byLang = tracks.find(t => prefNorm.includes(norm(t.language)));
+    if (byLang) return byLang;
+    const byTitle = tracks.find(t => prefNorm.some(p => norm(t.title).includes(p)));
+    if (byTitle) return byTitle;
+    return tracks[0];
+  };
+
+  const buildSrc = (startSeconds, audioStreamIndex = null) => {
     const u = new URL(url, window.location.origin);
     if (startSeconds && startSeconds > 0) {
       const p = u.pathname || "";
@@ -180,6 +203,11 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       u.searchParams.set("start", String(startSeconds.toFixed(3)));
     } else {
       u.searchParams.delete("start");
+    }
+    if (audioStreamIndex !== null) {
+      u.searchParams.set("audio_stream_index", String(audioStreamIndex));
+    } else {
+      u.searchParams.delete("audio_stream_index");
     }
     return u.toString();
   };
@@ -234,6 +262,11 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
 
     v.src = src;
     v.load();
+    
+    // Voor redirect URLs, stel currentTime in voor resume
+    if (src && (src.startsWith("http://") || src.startsWith("https://")) && startAt > 0) {
+      v.currentTime = startAt;
+    }
   };
 
   const tryPlay = async () => {
@@ -249,19 +282,53 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     }
   };
 
+  const selectAudioTrack = async (streamIndex) => {
+    const v = videoRef.current;
+    if (!v) return;
+
+    setAudioSelected(streamIndex);
+    if (streamIndex !== null) {
+      const track = audioTracks.find(t => t.stream_index === streamIndex);
+      setAudioLabel(track?.language || track?.title || "Audio");
+    } else {
+      setAudioLabel("");
+    }
+
+    const currentTime = absTimeRef.current;
+    // Voor backend proxy URLs, reload the source with new audio track
+    if (!(url && (url.startsWith("http://") || url.startsWith("https://")))) {
+      const src = buildSrc(currentTime, streamIndex);
+      baseUrlRef.current = src;
+      await setSource(src);
+      if (playing) await tryPlay();
+    }
+    setAudioMenuOpen(false);
+  };
+
   const seekTo = async (seconds) => {
     const v = videoRef.current;
     if (!v) return;
     const t = Math.max(0, Number(seconds) || 0);
     startOffsetRef.current = t;
     absTimeRef.current = t;
-    const src = buildSrc(t);
-    baseUrlRef.current = src;
-    await setSource(src);
-    setError(null);
-    setAbsTime(t);
-    reportProgress(t);
-    await tryPlay();
+    
+    // Voor redirect URLs, gebruik direct currentTime seeking
+    if (url && (url.startsWith("http://") || url.startsWith("https://"))) {
+      v.currentTime = t;
+      setError(null);
+      setAbsTime(t);
+      reportProgress(t);
+      await tryPlay();
+    } else {
+      // Voor backend proxy URLs, gebruik buildSrc
+      const src = buildSrc(t, audioSelected);
+      baseUrlRef.current = src;
+      await setSource(src);
+      setError(null);
+      setAbsTime(t);
+      reportProgress(t);
+      await tryPlay();
+    }
   };
 
   const showControlsTemporarily = () => {
@@ -281,7 +348,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     setError(null);
     hlsFallbackRef.current = false;
     startOffsetRef.current = Math.max(0, Number(startAt) || 0);
-    const src = buildSrc(startOffsetRef.current);
+    const src = buildSrc(startOffsetRef.current, audioSelected);
     baseUrlRef.current = src;
     setSource(src);
     setAbsTime(startOffsetRef.current);
@@ -295,7 +362,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         hlsRef.current = null;
       }
     };
-  }, [url, startAt]);
+  }, [url, startAt, audioSelected]);
 
   useEffect(() => {
     if (!url) return;
@@ -305,24 +372,39 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     setSubtitleTracks([]);
     setSubtitleSelected(null);
     setSubtitleLabel("");
-    fetch(buildSubtitlesListUrl(), { signal: ac.signal })
+    setAudioTracks([]);
+    setAudioSelected(null);
+    setAudioLabel("");
+    fetch(buildMetaUrl(), { signal: ac.signal })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        const tracks = Array.isArray(data?.tracks) ? data.tracks : [];
         if (ac.signal.aborted) return;
-        setSubtitleTracks(tracks);
-        const def = chooseDefaultSubtitle(tracks);
-        if (def) {
-          setSubtitleSelected(def.stream_index);
-          setSubtitleLabel(def.language || def.title || "Subtitles");
+        
+        const subTracks = Array.isArray(data?.subtitle_tracks) ? data.subtitle_tracks : [];
+        setSubtitleTracks(subTracks);
+        const defSub = chooseDefaultSubtitle(subTracks);
+        if (defSub) {
+          setSubtitleSelected(defSub.stream_index);
+          setSubtitleLabel(defSub.language || defSub.title || "Subtitles");
         } else {
           setSubtitleSelected(null);
           setSubtitleLabel("");
         }
+
+        const audTracks = Array.isArray(data?.audio_tracks) ? data.audio_tracks : [];
+        setAudioTracks(audTracks);
+        const defAud = chooseDefaultAudio(audTracks);
+        if (defAud) {
+          setAudioSelected(defAud.stream_index);
+          setAudioLabel(defAud.language || defAud.title || "Audio");
+        } else {
+          setAudioSelected(null);
+          setAudioLabel("");
+        }
       })
       .catch(() => {});
     return () => ac.abort();
-  }, [url, prefs.default_sub_lang_1, prefs.default_sub_lang_2, prefs.subtitles_enabled]);
+  }, [url, prefs.default_sub_lang_1, prefs.default_sub_lang_2, prefs.default_audio_lang, prefs.subtitles_enabled]);
 
   const selectedTrackObj = subtitleSelected !== null
     ? subtitleTracks.find(t => t.stream_index === subtitleSelected) || null
@@ -431,11 +513,21 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       reportProgress();
     };
     const onTime = () => {
-      const t = startOffsetRef.current + (v.currentTime || 0);
-      setAbsTime(t);
-      absTimeRef.current = t;
-      lastTimeRef.current = v.currentTime || 0;
-      lastTimeTsRef.current = Date.now();
+      // Voor redirect URLs, gebruik direct currentTime
+      if (url && (url.startsWith("http://") || url.startsWith("https://"))) {
+        const t = v.currentTime || 0;
+        setAbsTime(t);
+        absTimeRef.current = t;
+        lastTimeRef.current = t;
+        lastTimeTsRef.current = Date.now();
+      } else {
+        // Voor backend proxy URLs, gebruik startOffset
+        const t = startOffsetRef.current + (v.currentTime || 0);
+        setAbsTime(t);
+        absTimeRef.current = t;
+        lastTimeRef.current = v.currentTime || 0;
+        lastTimeTsRef.current = Date.now();
+      }
       if (buffering) setBuffering(false);
       if (!media || !onProgress) return;
       if (effectiveTotal <= 0) {
@@ -722,6 +814,63 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
                           className={`w-full text-left px-4 py-2 text-sm ${active ? "bg-white/15 text-white" : "text-white/90 hover:bg-white/10"}`}
                         >
                           {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {audioTracks.length > 0 && (
+            <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={() => setAudioMenuOpen(v => !v)}
+                className="bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg px-2.5 py-2 text-sm font-semibold"
+                title="Audio"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M11 5L6 9H3v6h3l5 4V5Z"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M15.5 8.5a4 4 0 0 1 0 7"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M18.5 5.5a7 7 0 0 1 0 13"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+
+              {audioMenuOpen && (
+                <div className="absolute right-0 bottom-12 w-56 bg-black/90 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50">
+                  <div className="max-h-72 overflow-y-auto">
+                    {audioTracks.map((t) => {
+                      const idx = t.stream_index;
+                      const label = t.language || t.title || `Track ${idx}`;
+                      const active = audioSelected === idx;
+                      return (
+                        <button
+                          key={idx}
+                          onClick={() => selectAudioTrack(idx)}
+                          className={`w-full text-left px-4 py-2 text-sm ${active ? "bg-white/15 text-white" : "text-white/90 hover:bg-white/10"}`}
+                        >
+                          {label}
+                          {t.channels && (
+                            <span className="text-xs text-white/60 ml-2">
+                              ({t.channels}ch)
+                            </span>
+                          )}
                         </button>
                       );
                     })}
