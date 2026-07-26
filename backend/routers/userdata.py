@@ -7,23 +7,42 @@ router = APIRouter()
 DATA_FILE = "/app/data/userdata.json"
 
 
-def load() -> dict:
+import os
+import json
+import asyncio
+from fastapi import APIRouter
+from pydantic import BaseModel
+
+router = APIRouter()
+DATA_FILE = "/app/data/userdata.json"
+
+def _load_sync() -> dict:
     if os.path.exists(DATA_FILE):
-        with open(DATA_FILE) as f:
-            data = json.load(f)
-            if isinstance(data, dict):
-                data.setdefault("watchlist", [])
-                data.setdefault("progress", {})
-                data.setdefault("prefs", {})
-                return data
+        try:
+            with open(DATA_FILE, "r") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    data.setdefault("watchlist", [])
+                    data.setdefault("progress", {})
+                    data.setdefault("prefs", {})
+                    return data
+        except Exception as e:
+            print(f"Fout bij laden userdata: {e}")
     return {"watchlist": [], "progress": {}, "prefs": {}}
 
+def _save_sync(data: dict):
+    try:
+        os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
+        with open(DATA_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        print(f"Fout bij opslaan userdata: {e}")
 
-def save(data: dict):
-    os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+async def load() -> dict:
+    return await asyncio.to_thread(_load_sync)
 
+async def save(data: dict):
+    await asyncio.to_thread(_save_sync, data)
 
 class WatchlistItem(BaseModel):
     id: int
@@ -35,7 +54,6 @@ class WatchlistItem(BaseModel):
     first_air_date: str = ""
     vote_average: float = 0.0
     overview: str = ""
-
 
 class ProgressItem(BaseModel):
     id: int | str
@@ -52,69 +70,63 @@ class ProgressItem(BaseModel):
     season_number: int | None = None
     episode_number: int | None = None
 
-
 class UserPrefs(BaseModel):
     default_audio_lang: str = "en"
     default_sub_lang_1: str = "nl"
     default_sub_lang_2: str = "nl-be"
     subtitles_enabled: bool = True
 
-
 # --- Watchlist ---
 
 @router.get("/watchlist")
-def get_watchlist():
-    return load()["watchlist"]
-
+async def get_watchlist():
+    data = await load()
+    return data["watchlist"]
 
 @router.post("/watchlist")
-def add_to_watchlist(item: WatchlistItem):
-    data = load()
+async def add_to_watchlist(item: WatchlistItem):
+    data = await load()
     if not any(w["id"] == item.id for w in data["watchlist"]):
         data["watchlist"].insert(0, item.dict())
-        save(data)
+        await save(data)
     return {"ok": True}
-
 
 @router.delete("/watchlist/{item_id}")
-def remove_from_watchlist(item_id: int):
-    data = load()
+async def remove_from_watchlist(item_id: int):
+    data = await load()
     data["watchlist"] = [w for w in data["watchlist"] if w["id"] != item_id]
-    save(data)
+    await save(data)
     return {"ok": True}
-
 
 # --- Voortgang ---
 
 @router.get("/progress")
-def get_all_progress():
-    return list(load()["progress"].values())
-
+async def get_all_progress():
+    data = await load()
+    return list(data["progress"].values())
 
 @router.post("/progress")
-def save_progress(item: ProgressItem):
-    data = load()
+async def save_progress(item: ProgressItem):
+    data = await load()
     data["progress"][str(item.id)] = item.dict()
-    save(data)
+    await save(data)
     return {"ok": True}
-
 
 @router.delete("/progress/{item_id}")
-def delete_progress(item_id: str):
-    data = load()
+async def delete_progress(item_id: str):
+    data = await load()
     data["progress"].pop(str(item_id), None)
-    save(data)
+    await save(data)
     return {"ok": True}
 
-
 @router.get("/prefs")
-def get_prefs():
-    return load().get("prefs") or {}
-
+async def get_prefs():
+    data = await load()
+    return data.get("prefs") or {}
 
 @router.post("/prefs")
-def save_prefs(prefs: UserPrefs):
-    data = load()
+async def save_prefs(prefs: UserPrefs):
+    data = await load()
     data["prefs"] = prefs.dict()
-    save(data)
+    await save(data)
     return {"ok": True}

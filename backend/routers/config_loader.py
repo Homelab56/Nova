@@ -53,3 +53,30 @@ def get_seerr_config() -> dict:
     url = os.getenv("SEERR_URL", "").strip().replace("`", "").rstrip("/")
     key = os.getenv("SEERR_API_KEY", "").strip().replace("`", "")
     return {"url": url, "api_key": key}
+
+
+def get_aiostreams_config() -> dict:
+    """AIOStreams (Stremio-aggregator) basis-URL en optionele auth."""
+    url = ""
+    user = ""
+    password = ""
+    user_data_b64 = ""
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE) as f:
+            data = json.load(f)
+        url = (data.get("aio_streams_url") or "").strip().replace("`", "").rstrip("/")
+        user = (data.get("aio_streams_user") or "").strip().replace("`", "")
+        password = (data.get("aio_streams_password") or "").strip().replace("`", "")
+        user_data_b64 = (data.get("aio_streams_user_data_b64") or "").strip().replace("`", "")
+
+    url = url or os.getenv("AIOSTREAMS_URL", "").strip().replace("`", "").rstrip("/")
+    user = user or os.getenv("AIOSTREAMS_USER", "").strip().replace("`", "")
+    password = password or os.getenv("AIOSTREAMS_PASSWORD", "").strip().replace("`", "")
+    user_data_b64 = user_data_b64 or os.getenv("AIOSTREAMS_USER_DATA_B64", "").strip().replace("`", "")
+
+    return {
+        "base_url": url,
+        "username": user,
+        "password": password,
+        "user_data_b64": user_data_b64,
+    }

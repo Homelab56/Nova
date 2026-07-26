@@ -161,7 +161,7 @@ async def tmdb_list(
     path: str,
     page: int = 1,
     params: dict = {},
-    prefetch_pages: int = 5,
+    prefetch_pages: int = 3, # Verlaagd van 5 naar 3 voor stabiliteit
     media_type: str | None = None,
     suggestion_mode: bool = True,
     allow_kids: bool = False,
@@ -169,17 +169,24 @@ async def tmdb_list(
     import asyncio
     base_params = dict(params)
     if page <= 1:
+        # Haal eerst pagina 1 op om te weten hoeveel pagina's er zijn
         first = await tmdb_get(path, {**base_params, "page": 1})
         total_pages = int(first.get("total_pages") or 1)
         total_results = int(first.get("total_results") or 0)
+        
         max_page = max(1, min(prefetch_pages, total_pages))
         pages = [first]
+        
         if max_page > 1:
-            pages.extend(
-                await asyncio.gather(
-                    *[tmdb_get(path, {**base_params, "page": p}) for p in range(2, max_page + 1)]
-                )
-            )
+            # Gebruik een semaphoor om parallelle verzoeken te beperken
+            sem = asyncio.Semaphore(3)
+            async def _fetch(p):
+                async with sem:
+                    return await tmdb_get(path, {**base_params, "page": p})
+            
+            extra_pages = await asyncio.gather(*[_fetch(p) for p in range(2, max_page + 1)])
+            pages.extend(extra_pages)
+            
         items, seen = [], set()
         for data in pages:
             for it in data.get("results", []) or []:
@@ -419,6 +426,46 @@ async def search_tv(q: str = Query(..., min_length=1), page: int = 1):
         "page": page,
         "total_pages": data.get("total_pages", 1),
         "total_results": data.get("total_results", 0),
+    }
+
+@router.get("/multi")
+async def search_multi(q: str = Query(..., min_length=1), page: int = 1):
+    import asyncio
+
+    def _keep(it: dict) -> bool:
+        mt = (it.get("media_type") or "").lower().strip()
+        return mt in {"movie", "tv"}
+
+    if page == 1:
+        tasks = [tmdb_get("/search/multi", {"query": q, "page": p, "include_adult": "false"}) for p in range(1, 6)]
+        pages = await asyncio.gather(*tasks)
+        items, seen = [], set()
+        for pg in pages:
+            for item in pg.get("results", []) or []:
+                if not isinstance(item, dict) or not _keep(item):
+                    continue
+                k = f"{item.get('media_type')}:{item.get('id')}"
+                if not item.get("id") or k in seen:
+                    continue
+                seen.add(k)
+                items.append(item)
+        first = pages[0] if pages else {}
+        filtered = _filter_items(items, media_type=None, suggestion_mode=False, allow_kids=True)
+        return {
+            "items": filtered,
+            "page": 5,
+            "total_pages": int(first.get("total_pages") or 1),
+            "total_results": len(filtered),
+        }
+
+    data = await tmdb_get("/search/multi", {"query": q, "page": page, "include_adult": "false"})
+    items = [it for it in (data.get("results", []) or []) if isinstance(it, dict) and _keep(it)]
+    filtered = _filter_items(items, media_type=None, suggestion_mode=False, allow_kids=True)
+    return {
+        "items": filtered,
+        "page": page,
+        "total_pages": int(data.get("total_pages") or 1),
+        "total_results": int(data.get("total_results") or 0),
     }
 
 

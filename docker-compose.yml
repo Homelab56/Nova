@@ -1,24 +1,34 @@
 version: "3.9"
 
+# Homelab (Debian): stack in bv. /docker/nova-kopie
+# - Browser: http://192.168.1.75:8004  (frontend host-poort)
+# - API rechtstreeks testen: http://192.168.1.75:8005/docs
+# - Tussen containers: altijd servicenaam "backend" + poort 8000 (niet container_name, niet host-poort)
+
 services:
   backend:
     build: ./backend
-    container_name: nova_backend
+    container_name: nova_test_backend
     restart: unless-stopped
     env_file: .env
-    ports:
-      - "8002:8000"
+    environment:
+      AIOSTREAMS_URL: ${AIOSTREAMS_URL:-http://192.168.1.75:3003}
+    network_mode: host
+    command: uvicorn main:app --host 0.0.0.0 --port 8005
     volumes:
       - nova_data:/app/data
-      - ${MEDIA_PATH}:/media:ro  # Gebruik het pad uit .env
-      - ${MEDIA_PATH}:${MEDIA_PATH}:ro  # Nodig voor absolute symlinks (decypharr_symlinks -> /docker/dumbarr/...)
+      - ${MEDIA_PATH}:/media:ro
+      - ${MEDIA_PATH}:${MEDIA_PATH}:ro
 
   frontend:
     build: ./frontend
-    container_name: nova_frontend
+    container_name: nova_test_frontend
     restart: unless-stopped
+    environment:
+      # Vite proxy: gebruik host poort 8005 voor backend
+      VITE_DEV_PROXY_TARGET: ${VITE_DEV_PROXY_TARGET:-http://192.168.1.75:8005}
     ports:
-      - "8001:5173"
+      - "8004:5173"
     depends_on:
       - backend
 

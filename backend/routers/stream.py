@@ -21,6 +21,28 @@ _HLS_ROOT = "/tmp/nova_hls"
 _HLS_SESSIONS: dict[str, dict] = {}
 _LAST_START: dict[str, tuple[float, float]] = {}
 
+_ALLOWED_LANG_PREFIXES = (
+    "en", "eng", "english", "engels",
+    "nl", "nld", "dut", "vla", "vlaams", "flemish", "nederlands",
+)
+
+
+def _norm_lang(s: str) -> str:
+    return (s or "").lower().strip().replace("_", "-")
+
+
+def _is_allowed_lang(language: str, title: str = "") -> bool:
+    l = _norm_lang(language)
+    t = _norm_lang(title)
+    if not l and not t:
+        return True
+    for a in _ALLOWED_LANG_PREFIXES:
+        if l and (l.startswith(a) or a.startswith(l) and len(l) >= 2):
+            return True
+        if t and a in t:
+            return True
+    return False
+
 
 def _hls_cleanup():
     now = time.time()
@@ -169,6 +191,7 @@ def _parse_range_header(value: str, size: int) -> tuple[int, int] | None:
     return start, end
 
 async def _ffprobe_subtitle_streams(input_value: str, is_path: bool) -> list[dict]:
+    http = _is_http_url(input_value)
     args = [
         "ffprobe",
         "-v",
@@ -179,29 +202,89 @@ async def _ffprobe_subtitle_streams(input_value: str, is_path: bool) -> list[dic
         "stream=index,codec_name:stream_tags=language,title",
         "-of",
         "json",
-        input_value,
     ]
-    if _is_http_url(input_value):
-        args.insert(4, "5000000")
-        args.insert(4, "-rw_timeout")
+    if http:
+        args.extend([
+            "-rw_timeout", "60000000",
+            "-timeout", "90000000",
+            "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+            "-headers", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36\r\nAccept: */*\r\nConnection: keep-alive\r\n",
+            "-analyzeduration", "120000000",
+            "-probesize", "120000000",
+            "-reconnect", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "5",
+        ])
+    args.append(input_value)
     if is_path:
         args[-1] = input_value
 
-    proc = await asyncio.create_subprocess_exec(
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    out, _err = await proc.communicate()
-    if proc.returncode != 0:
-        return []
     try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        timeout = 60 if http else 20
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        if proc.returncode != 0:
+            msg = (err or b"").decode("utf-8", errors="ignore").strip() or "geen stderr"
+            print(f"ffprobe subtitle streams failed for {input_value[:120]}: returncode {proc.returncode}: {msg[:400]}")
+            return []
         data = json.loads(out.decode("utf-8", errors="ignore") or "{}")
         streams = data.get("streams") or []
-        if not isinstance(streams, list):
-            return []
         return [s for s in streams if isinstance(s, dict)]
-    except Exception:
+    except Exception as e:
+        print(f"FFProbe subtitle fout voor {input_value[:120]}: {e}")
+        return []
+
+
+async def _ffprobe_audio_streams(input_value: str, is_path: bool) -> list[dict]:
+    http = _is_http_url(input_value)
+    args = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "a",
+        "-show_entries",
+        "stream=index,codec_name,channels:stream_tags=language,title",
+        "-of",
+        "json",
+    ]
+    if http:
+        args.extend([
+            "-rw_timeout", "60000000",
+            "-timeout", "90000000",
+            "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+            "-headers", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36\r\nAccept: */*\r\nConnection: keep-alive\r\n",
+            "-analyzeduration", "120000000",
+            "-probesize", "120000000",
+            "-reconnect", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "5",
+        ])
+    args.append(input_value)
+    if is_path:
+        args[-1] = input_value
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        timeout = 60 if http else 20
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        if proc.returncode != 0:
+            msg = (err or b"").decode("utf-8", errors="ignore").strip() or "geen stderr"
+            print(f"ffprobe audio streams failed for {input_value[:120]}: returncode {proc.returncode}: {msg[:400]}")
+            return []
+        data = json.loads(out.decode("utf-8", errors="ignore") or "{}")
+        streams = data.get("streams") or []
+        return [s for s in streams if isinstance(s, dict)]
+    except Exception as e:
+        print(f"FFProbe audio fout voor {input_value[:120]}: {e}")
         return []
 
 def _parse_vtt_timestamp(value: str) -> float | None:
@@ -306,6 +389,7 @@ async def _ffmpeg_subtitle_vtt(
     start: float = 0.0,
     delay: float = 0.0,
 ):
+    http = _is_http_url(input_value)
     try:
         start_f = float(start or 0.0)
     except Exception:
@@ -316,6 +400,23 @@ async def _ffmpeg_subtitle_vtt(
     except Exception:
         delay_f = 0.0
 
+    http_common = [
+        "-rw_timeout",
+        "60000000",
+        "-timeout",
+        "90000000",
+        "-user_agent",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        "-headers",
+        "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36\r\nAccept: */*\r\nConnection: keep-alive\r\n",
+        "-reconnect",
+        "1",
+        "-reconnect_streamed",
+        "1",
+        "-reconnect_delay_max",
+        "5",
+    ]
+
     if not (start_f and start_f > 0):
         cmd = [
             "ffmpeg",
@@ -323,6 +424,10 @@ async def _ffmpeg_subtitle_vtt(
             "-loglevel",
             "error",
             "-nostdin",
+        ]
+        if http:
+            cmd.extend(http_common)
+        cmd.extend([
             "-i",
             input_value,
             "-map",
@@ -332,19 +437,7 @@ async def _ffmpeg_subtitle_vtt(
             "-f",
             "webvtt",
             "pipe:1",
-        ]
-        if _is_http_url(input_value):
-            insert_at = cmd.index("-i")
-            cmd[insert_at:insert_at] = [
-                "-rw_timeout",
-                "15000000",
-                "-reconnect",
-                "1",
-                "-reconnect_streamed",
-                "1",
-                "-reconnect_delay_max",
-                "2",
-            ]
+        ])
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -409,73 +502,120 @@ async def _ffmpeg_subtitle_vtt(
                 )
         return
 
-    cmd = [
+    cmd_seek = [
         "ffmpeg",
         "-hide_banner",
         "-loglevel",
         "error",
         "-nostdin",
-        "-i",
-        input_value,
+    ]
+    if http:
+        cmd_seek.extend(http_common)
+    cmd_seek.extend([
         "-ss",
         f"{start_f:.3f}",
+        "-i",
+        input_value,
         "-map",
         f"0:{int(stream_index)}",
         "-c:s",
         "webvtt",
+        "-copyts",
+        "-start_at_zero",
         "-avoid_negative_ts",
         "make_zero",
         "-f",
         "webvtt",
         "pipe:1",
-    ]
-    if _is_http_url(input_value):
-        insert_at = cmd.index("-i")
-        cmd[insert_at:insert_at] = [
-            "-rw_timeout",
-            "15000000",
-            "-reconnect",
-            "1",
-            "-reconnect_streamed",
-            "1",
-            "-reconnect_delay_max",
-            "2",
-        ]
+    ])
 
     proc = await asyncio.create_subprocess_exec(
-        *cmd,
+        *cmd_seek,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=25)
-    except Exception:
+
+    stderr_buf = bytearray()
+
+    async def _drain_stderr():
+        if not proc.stderr:
+            return
         try:
-            proc.kill()
+            while True:
+                chunk = await proc.stderr.read(4096)
+                if not chunk:
+                    break
+                stderr_buf.extend(chunk)
+                if len(stderr_buf) > 128_000:
+                    del stderr_buf[:-128_000]
+        except Exception:
+            return
+
+    stderr_task = asyncio.create_task(_drain_stderr())
+    produced = 0
+    buf = ""
+    try:
+        while True:
+            chunk = await proc.stdout.read(64 * 1024)
+            if not chunk:
+                break
+            produced += len(chunk)
+            if delay_f and abs(delay_f) > 0.0005:
+                try:
+                    buf += chunk.decode("utf-8", errors="ignore")
+                except Exception:
+                    yield chunk
+                    continue
+                while "\n" in buf:
+                    line, buf = buf.split("\n", 1)
+                    if "-->" in line:
+                        try:
+                            m = re.match(r"^\s*(\S+)\s*-->\s*(\S+)(.*)$", line)
+                            if m:
+                                s1, s2, rest = m.group(1), m.group(2), m.group(3) or ""
+                                t1 = _parse_vtt_timestamp(s1)
+                                t2 = _parse_vtt_timestamp(s2)
+                                if t1 is not None and t2 is not None:
+                                    t1n = max(0.0, t1 + delay_f)
+                                    t2n = max(0.0, t2 + delay_f)
+                                    line = f"{_format_vtt_timestamp(t1n)} --> {_format_vtt_timestamp(t2n)}{rest}"
+                        except Exception:
+                            pass
+                    yield (line + "\n").encode("utf-8")
+            else:
+                yield chunk
+    finally:
+        if delay_f and abs(delay_f) > 0.0005 and buf:
+            yield buf.encode("utf-8")
+        try:
+            if proc.returncode is None:
+                proc.kill()
         except Exception:
             pass
-        return
-    if proc.returncode != 0 or not out:
-        msg = (err.decode("utf-8", errors="ignore") or "").strip()
-        if not msg:
-            msg = "Geen stderr output van ffmpeg."
-        print(
-            "FFMPEG subtitles gaf geen data terug\n"
-            f"input={input_value}\n"
-            f"stream_index={stream_index}\n"
-            f"returncode={proc.returncode}\n"
-            f"cmd={' '.join(cmd)}\n"
-            f"{msg[:1800]}"
-        )
-        return
-    try:
-        text = out.decode("utf-8", errors="ignore")
-    except Exception:
-        yield out
-        return
-    if delay_f and abs(delay_f) > 0.0005:
-        text = _shift_webvtt(text, delay_f)
-    yield text.encode("utf-8")
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=0.5)
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(stderr_task, timeout=0.5)
+        except Exception:
+            try:
+                stderr_task.cancel()
+            except Exception:
+                pass
+
+        if produced == 0:
+            msg = (bytes(stderr_buf).decode("utf-8", errors="ignore") or "").strip()
+            if not msg:
+                msg = "Geen stderr output van ffmpeg."
+            print(
+                "FFMPEG subtitles gaf geen data terug\n"
+                f"input={input_value}\n"
+                f"stream_index={stream_index}\n"
+                f"returncode={proc.returncode}\n"
+                f"cmd={' '.join(cmd_seek)}\n"
+                f"{msg[:1800]}"
+            )
 
 
 async def _ffprobe_streams(input_value: str, is_path: bool) -> dict:
@@ -495,17 +635,17 @@ async def _ffprobe_streams(input_value: str, is_path: bool) -> dict:
     if is_path:
         args[-1] = input_value
 
-    proc = await asyncio.create_subprocess_exec(
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    out, _err = await proc.communicate()
-    if proc.returncode != 0:
-        return {}
     try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out, _err = await asyncio.wait_for(proc.communicate(), timeout=8)
+        if proc.returncode != 0: return {}
         return json.loads(out.decode("utf-8"))
-    except Exception:
+    except Exception as e:
+        print(f"FFProbe streams fout: {e}")
         return {}
 
 
@@ -555,7 +695,7 @@ def _choose_mode(probe: dict) -> str:
     return "transcode"
 
 
-async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
+async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0, audio_stream: int | None = None):
     probe = await _ffprobe_streams(input_value, is_path=is_path)
     streams = (probe or {}).get("streams") or []
     v = next((s for s in streams if s.get("codec_type") == "video"), None) or {}
@@ -573,6 +713,14 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
 
     copy_video = v_codec == "h264"
     copy_audio = a_codec in {"aac", "mp3"}
+    try:
+        start_f = float(start or 0.0)
+    except Exception:
+        start_f = 0.0
+    start_f = max(0.0, start_f)
+    if start_f > 0:
+        copy_video = False
+        copy_audio = False
     try:
         max_h = int(os.getenv("TRANSCODE_MAX_HEIGHT", "1080") or "0")
     except Exception:
@@ -592,8 +740,14 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         "-nostdin",
     ]
 
-    if start and start > 0:
-        cmd += ["-ss", f"{float(start):.3f}"]
+    seek_pre = 0.0
+    seek_post = 0.0
+    if start_f > 0:
+        seek_back = min(10.0, start_f)
+        seek_pre = max(0.0, start_f - seek_back)
+        seek_post = seek_back
+        if seek_pre > 0:
+            cmd += ["-ss", f"{seek_pre:.3f}"]
 
     cmd += [
         "-analyzeduration",
@@ -602,10 +756,18 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
         "10000000",
         "-i",
         input_value,
+        "-max_interleave_delta",
+        "0",
+        "-ss",
+        f"{seek_post:.3f}",
         "-map",
         "0:v:0",
-        "-map",
-        "0:a:0?",
+    ]
+    if audio_stream is not None:
+        cmd += ["-map", f"0:a:{audio_stream}?"]
+    else:
+        cmd += ["-map", "0:a:0?"]
+    cmd += [
         "-sn",
         "-fflags",
         "+genpts",
@@ -642,6 +804,8 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0):
             "0",
             "-vf",
             vf,
+            "-vsync",
+            "1",
             "-crf",
             crf,
             "-pix_fmt",
@@ -762,18 +926,32 @@ async def meta(url: str | None = None, path: str | None = None):
     return {"duration": dur or 0.0}
 
 
+# Limiet op het aantal gelijktijdige transcoderingen om de server te beschermen
+TRANSCODE_SEMAPHORE = asyncio.Semaphore(3)
+
 @router.get("/play")
 async def play(
     request: Request,
     url: str | None = None,
     path: str | None = None,
     start: float = Query(default=0.0, ge=0.0),
+    audio_stream: int | None = Query(default=None),
 ):
     if not url and not path:
         raise HTTPException(status_code=400, detail="url of path is verplicht")
 
     is_path = path is not None
     input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
+
+    # Voor externe HTTP URLs (zoals AIOStreams), redirect direct (proxying is onbetrouwbaar)
+    if not is_path and (input_value.startswith("http://") or input_value.startswith("https://")):
+        print(f"Redirect naar externe URL: {input_value[:200]}...")
+        return RedirectResponse(url=input_value, status_code=302)
+
+    async def _stream_with_semaphore():
+        async with TRANSCODE_SEMAPHORE:
+            async for chunk in _ffmpeg_stream(input_value, is_path=is_path, start=start, audio_stream=audio_stream):
+                yield chunk
 
     try:
         client_host = (request.client.host if request.client else "") or ""
@@ -784,9 +962,99 @@ async def play(
         _LAST_START[key] = (time.time(), float(start))
 
     return StreamingResponse(
-        _ffmpeg_stream(input_value, is_path=is_path, start=start),
+        _stream_with_semaphore(),
         media_type="video/mp4",
     )
+
+
+async def _proxy_external_url(url: str, request: Request, start: float = 0.0):
+    """Proxy externe HTTP URL met range request support voor seeken"""
+    # Haal start parameter uit URL query string (voeg toe door frontend)
+    parsed = urllib.parse.urlparse(url)
+    query_params = urllib.parse.parse_qs(parsed.query)
+    url_start = query_params.get("start", [None])[0]
+    
+    # Verwijder start parameter uit URL
+    query_params.pop("start", None)
+    new_query = urllib.parse.urlencode(query_params, doseq=True)
+    clean_url = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
+    
+    range_header = request.headers.get("range") or request.headers.get("Range") or ""
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+    if range_header:
+        headers["Range"] = range_header
+    
+    # Gebruik een nog grotere timeout voor streaming
+    timeout = httpx.Timeout(600.0, connect=120.0)
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=False) as client:
+                async with client.stream("GET", clean_url, headers=headers) as response:
+                    if response.status_code not in [200, 206]:
+                        print(f"Externe URL fout: {response.status_code} (poging {attempt + 1}/{max_retries})")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                            continue
+                        raise HTTPException(status_code=response.status_code, detail=f"Externe URL fout: {response.status_code}")
+                    
+                    content_type = response.headers.get("content-type", "video/mp4")
+                    content_length = response.headers.get("content-length")
+                    accept_ranges = response.headers.get("accept-ranges", "")
+                    
+                    response_headers = {
+                        "Content-Type": content_type,
+                        "Cache-Control": "no-cache",
+                    }
+                    
+                    if content_length:
+                        response_headers["Content-Length"] = content_length
+                    
+                    # Altijd Accept-Ranges: bytes doorgeven als de server dat ondersteunt
+                    if accept_ranges == "bytes":
+                        response_headers["Accept-Ranges"] = "bytes"
+                    
+                    if response.status_code == 206:
+                        content_range = response.headers.get("content-range")
+                        if content_range:
+                            response_headers["Content-Range"] = content_range
+                    
+                    async def iter_chunks():
+                        try:
+                            async for chunk in response.aiter_bytes(chunk_size=256 * 1024):
+                                yield chunk
+                        except Exception as e:
+                            print(f"Stream error: {e}")
+                            raise
+                    
+                    return StreamingResponse(
+                        iter_chunks(),
+                        status_code=response.status_code,
+                        media_type=content_type,
+                        headers=response_headers
+                    )
+        except httpx.ConnectError as e:
+            print(f"Connect error naar {clean_url}: {e} (poging {attempt + 1}/{max_retries})")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            raise HTTPException(status_code=502, detail="Kan geen verbinding maken met stream server")
+        except httpx.TimeoutException as e:
+            print(f"Timeout naar {clean_url}: {e} (poging {attempt + 1}/{max_retries})")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            raise HTTPException(status_code=504, detail="Stream server timeout")
+        except Exception as e:
+            print(f"Proxy fout: {e} (poging {attempt + 1}/{max_retries})")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            raise HTTPException(status_code=500, detail=f"Proxy fout: {str(e)}")
 
 
 @router.get("/file")
@@ -836,7 +1104,10 @@ async def subtitles(url: str | None = None, path: str | None = None):
     if not url and not path:
         raise HTTPException(status_code=400, detail="url of path is verplicht")
     is_path = path is not None
-    input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
+    if is_path:
+        input_value = _resolve_media_file(path)
+    else:
+        input_value = urllib.parse.unquote(url)
     streams = await _ffprobe_subtitle_streams(input_value, is_path=is_path)
     bitmap_codecs = {
         "hdmv_pgs_subtitle",
@@ -860,6 +1131,8 @@ async def subtitles(url: str | None = None, path: str | None = None):
             idx_i = int(idx)
         except Exception:
             continue
+        if not _is_allowed_lang(str(lang), str(title)):
+            continue
         tracks.append(
             {
                 "stream_index": idx_i,
@@ -868,6 +1141,50 @@ async def subtitles(url: str | None = None, path: str | None = None):
                 "codec": str(codec),
             }
         )
+    print(f"[subtitles] {input_value[:80]} -> {len(tracks)} tracks (na filter)")
+    return {"tracks": tracks}
+
+
+@router.get("/audio")
+async def audio(url: str | None = None, path: str | None = None):
+    if not url and not path:
+        raise HTTPException(status_code=400, detail="url of path is verplicht")
+    is_path = path is not None
+    if is_path:
+        input_value = _resolve_media_file(path)
+    else:
+        input_value = urllib.parse.unquote(url)
+    streams = await _ffprobe_audio_streams(input_value, is_path=is_path)
+    tracks = []
+    for s in streams:
+        idx = s.get("index")
+        codec = s.get("codec_name") or ""
+        channels = s.get("channels") or ""
+        tags = s.get("tags") or {}
+        if not isinstance(tags, dict):
+            tags = {}
+        lang = tags.get("language") or ""
+        title = tags.get("title") or ""
+        try:
+            idx_i = int(idx)
+        except Exception:
+            continue
+        try:
+            channels_i = int(channels)
+        except Exception:
+            channels_i = 0
+        if not _is_allowed_lang(str(lang), str(title)):
+            continue
+        tracks.append(
+            {
+                "stream_index": idx_i,
+                "language": str(lang),
+                "title": str(title),
+                "codec": str(codec),
+                "channels": channels_i,
+            }
+        )
+    print(f"[audio] {input_value[:80]} -> {len(tracks)} tracks (na filter)")
     return {"tracks": tracks}
 
 
@@ -883,7 +1200,10 @@ async def subtitle_vtt(
     if not url and not path:
         raise HTTPException(status_code=400, detail="url of path is verplicht")
     is_path = path is not None
-    input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
+    if is_path:
+        input_value = _resolve_media_file(path)
+    else:
+        input_value = urllib.parse.unquote(url)
     streams = await _ffprobe_subtitle_streams(input_value, is_path=is_path)
     for s in streams:
         try:
@@ -954,6 +1274,7 @@ async def _ensure_hls_session(session_id: str, input_value: str):
 
     start = float(s.get("start") or 0.0)
     is_path = bool(s.get("is_path"))
+    audio_stream = s.get("audio_stream")
 
     probe = await _ffprobe_streams(input_value, is_path=is_path)
     streams = (probe or {}).get("streams") or []
@@ -1005,8 +1326,12 @@ async def _ensure_hls_session(session_id: str, input_value: str):
         input_value,
         "-map",
         "0:v:0",
-        "-map",
-        "0:a:0?",
+    ]
+    if audio_stream is not None:
+        cmd += ["-map", f"0:a:{audio_stream}?"]
+    else:
+        cmd += ["-map", "0:a:0?"]
+    cmd += [
         "-sn",
         "-fflags",
         "+genpts",
@@ -1126,6 +1451,7 @@ async def hls(
     url: str | None = None,
     path: str | None = None,
     start: float = Query(default=0.0, ge=0.0),
+    audio_stream: int | None = Query(default=None),
 ):
     if not url and not path:
         raise HTTPException(status_code=400, detail="url of path is verplicht")
@@ -1137,11 +1463,13 @@ async def hls(
         if url is not None:
             qs.append(f"url={urllib.parse.quote(url)}")
         qs.append(f"start={urllib.parse.quote(str(float(start)))}")
+        if audio_stream is not None:
+            qs.append(f"audio_stream={audio_stream}")
         return RedirectResponse(url=f"/api/stream/play?{'&'.join(qs)}", status_code=302)
 
     is_path = path is not None
     input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
-    sid_seed = f"{input_value}|{float(start):.3f}|{os.getenv('TRANSCODE_MAX_HEIGHT','')}"
+    sid_seed = f"{input_value}|{float(start):.3f}|{os.getenv('TRANSCODE_MAX_HEIGHT','')}|{audio_stream or ''}"
     sid = hashlib.sha1(sid_seed.encode("utf-8", errors="ignore")).hexdigest()[:16]
 
     s = _HLS_SESSIONS.get(sid) or {}
@@ -1150,6 +1478,7 @@ async def hls(
         "input": input_value,
         "is_path": is_path,
         "start": float(start or 0.0),
+        "audio_stream": audio_stream,
         "dir": os.path.join(_HLS_ROOT, sid),
         "playlist": os.path.join(_HLS_ROOT, sid, "index.m3u8"),
         "last_access": time.time(),

@@ -38,38 +38,49 @@ class _WatchlistScreenState extends State<WatchlistScreen> {
             SizedBox(height: 8),
             Text('Druk op + bij een film of serie', style: TextStyle(color: Colors.grey, fontSize: 13)),
           ]))
-        : GridView.builder(
-            padding: const EdgeInsets.all(12),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3, childAspectRatio: 0.62, crossAxisSpacing: 8, mainAxisSpacing: 8),
-            itemCount: _list.length,
-            itemBuilder: (_, i) {
-              final item = _list[i];
-              final poster = item['poster_path'];
-              return GestureDetector(
-                onTap: () => Navigator.push(context, MaterialPageRoute(
-                  builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))).then((_) => _load()),
-                child: Stack(children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: poster != null
-                      ? NovaImage(path: '$tmdbPoster$poster', fit: BoxFit.cover, width: double.infinity, height: double.infinity)
-                      : Container(color: const Color(0xFF0f1520), child: const Icon(Icons.movie, color: Colors.grey)),
-                  ),
-                  Positioned(top: 4, right: 4,
-                    child: GestureDetector(
-                      onTap: () async {
-                        await UserDataService.removeFromWatchlist(item['id'] as int);
-                        _load();
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(20)),
-                        child: const Icon(Icons.close, size: 14, color: Colors.white),
+        : LayoutBuilder(
+            builder: (context, constraints) {
+              int crossAxisCount = (constraints.maxWidth / 160).floor();
+              if (crossAxisCount < 2) crossAxisCount = 2;
+              
+              return GridView.builder(
+                padding: const EdgeInsets.all(12),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: crossAxisCount, 
+                  childAspectRatio: 0.67, 
+                  crossAxisSpacing: 12, 
+                  mainAxisSpacing: 12
+                ),
+                itemCount: _list.length,
+                itemBuilder: (_, i) {
+                  final item = _list[i];
+                  final poster = item['poster_path'];
+                  return GestureDetector(
+                    onTap: () => Navigator.push(context, MaterialPageRoute(
+                      builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))).then((_) => _load()),
+                    child: Stack(children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: poster != null
+                          ? NovaImage(path: '$tmdbPoster$poster', fit: BoxFit.cover, width: double.infinity, height: double.infinity)
+                          : Container(color: const Color(0xFF0f1520), child: const Icon(Icons.movie, color: Colors.grey)),
                       ),
-                    ),
-                  ),
-                ]),
+                      Positioned(top: 4, right: 4,
+                        child: GestureDetector(
+                          onTap: () async {
+                            await UserDataService.removeFromWatchlist(item['id'] as int);
+                            _load();
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(20)),
+                            child: const Icon(Icons.close, size: 14, color: Colors.white),
+                          ),
+                        ),
+                      ),
+                    ]),
+                  );
+                },
               );
             },
           ),

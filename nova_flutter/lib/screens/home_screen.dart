@@ -18,7 +18,8 @@ class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0;
   List _trending = [], _popularMovies = [], _popularTv = [];
   List _trendMovies = [], _trendTv = [], _topMovies = [], _topTv = [];
-  List _rdLibrary = [];
+  List _kidsMovies = [], _kidsTv = [];
+  List _rdLibrary = [], _progress = [];
   bool _loading = true;
 
   @override
@@ -34,7 +35,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final r = await Future.wait([
+    final results = await Future.wait([
       _safeList(TmdbService.getTrending()),
       _safeList(TmdbService.getPopularMovies()),
       _safeList(TmdbService.getPopularTv()),
@@ -43,35 +44,51 @@ class _HomeScreenState extends State<HomeScreen> {
       _safeList(TmdbService.getTopRatedMovies()),
       _safeList(TmdbService.getTopRatedTv()),
       _safeList(DebridService.getLibrary()),
+      UserDataService.getProgress(),
+      _safeList(TmdbService.getKidsMovies()),
+      _safeList(TmdbService.getKidsTv()),
     ]);
     if (!mounted) return;
     setState(() {
-      _trending = r[0];
-      _popularMovies = r[1];
-      _popularTv = r[2];
-      _trendMovies = r[3];
-      _trendTv = r[4];
-      _topMovies = r[5];
-      _topTv = r[6];
-      _rdLibrary = r[7];
+      _trending = results[0];
+      _popularMovies = results[1];
+      _popularTv = results[2];
+      _trendMovies = results[3];
+      _trendTv = results[4];
+      _topMovies = results[5];
+      _topTv = results[6];
+      _rdLibrary = results[7];
+      _progress = (results[8] as List).reversed.toList();
+      _kidsMovies = results[9];
+      _kidsTv = results[10];
       _loading = false;
     });
   }
 
   List<Map<String, dynamic>> get _rows {
-    final List<Map<String, dynamic>> baseRows;
+    final List<Map<String, dynamic>> baseRows = [];
+    
+    // Voeg Verder kijken altijd als eerste rij toe
+    if (_progress.isNotEmpty) {
+      baseRows.add({'title': 'Verder kijken', 'items': _progress, 'is_progress': true});
+    }
+
     switch (_tab) {
-      case 1: baseRows = [
+      case 1: baseRows.addAll([
         {'title': 'Populaire films', 'items': _popularMovies},
         {'title': 'Trending films', 'items': _trendMovies},
         {'title': 'Best beoordeeld', 'items': _topMovies},
-      ]; break;
-      case 2: baseRows = [
+      ]); break;
+      case 2: baseRows.addAll([
         {'title': 'Populaire series', 'items': _popularTv},
         {'title': 'Trending series', 'items': _trendTv},
         {'title': 'Best beoordeeld', 'items': _topTv},
-      ]; break;
-      default: baseRows = [
+      ]); break;
+      case 4: baseRows.addAll([
+        {'title': 'Kinderfilms', 'items': _kidsMovies},
+        {'title': 'Kinderseries', 'items': _kidsTv},
+      ]); break;
+      default: baseRows.addAll([
         {'title': 'Trending deze week', 'items': _trending},
         {'title': 'Populaire films', 'items': _popularMovies},
         {'title': 'Populaire series', 'items': _popularTv},
@@ -79,17 +96,16 @@ class _HomeScreenState extends State<HomeScreen> {
         {'title': 'Trending series', 'items': _trendTv},
         {'title': 'Best beoordeelde films', 'items': _topMovies},
         {'title': 'Best beoordeelde series', 'items': _topTv},
-      ];
+      ]);
     }
 
     if (_rdLibrary.isNotEmpty) {
-      // Voeg bibliotheek toe na de eerste rij
-      baseRows.insert(1, {'title': 'Mijn Real-Debrid Bibliotheek', 'items': _rdLibrary, 'is_rd': true});
+      baseRows.add({'title': 'Mijn Real-Debrid Bibliotheek', 'items': _rdLibrary, 'is_rd': true});
     }
     return baseRows;
   }
 
-  List get _heroItems => _tab == 1 ? _popularMovies : _tab == 2 ? _popularTv : _trending;
+  List get _heroItems => _tab == 1 ? _popularMovies : _tab == 2 ? _popularTv : _tab == 4 ? _kidsMovies : _trending;
 
   @override
   Widget build(BuildContext context) {
@@ -103,30 +119,138 @@ class _HomeScreenState extends State<HomeScreen> {
               color: const Color(0xFF00b4d8),
               child: CustomScrollView(
                 slivers: [
-                  SliverToBoxAdapter(child: _buildAppBar()),
+                  SliverPersistentHeader(
+                    pinned: true,
+                    delegate: _NavbarDelegate(
+                      child: _buildAppBar(),
+                    ),
+                  ),
                   if (_heroItems.isNotEmpty) SliverToBoxAdapter(child: _buildHero(_heroItems[0])),
                   ..._rows.map((r) => SliverToBoxAdapter(
-                    child: _buildRow(r['title'] as String, r['items'] as List, isRd: r['is_rd'] == true))),
-                  const SliverToBoxAdapter(child: SizedBox(height: 20)),
+                    child: _buildRow(r['title'] as String, r['items'] as List, 
+                      isRd: r['is_rd'] == true, 
+                      isProgress: r['is_progress'] == true))),
+                  const SliverToBoxAdapter(child: SizedBox(height: 50)),
                 ],
               ),
             ),
       ),
-      bottomNavigationBar: _buildBottomNav(),
     );
   }
 
   Widget _buildAppBar() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    return Container(
+      color: const Color(0xFF080c14).withOpacity(0.9),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(children: [
-        Image.asset('assets/logo.png', height: 36),
+        Image.asset('assets/logo.png', height: 32),
+        const SizedBox(width: 24),
+        _buildNavBtn('Home', 0),
+        _buildNavBtn('Films', 1),
+        _buildNavBtn('Series', 2),
+        _buildNavBtn('Kids', 4),
+        _buildNavBtn('Watchlist', 3),
+        
+        const SizedBox(width: 12),
+        // Genres knop
+        PopupMenuButton<int>(
+          offset: const Offset(0, 40),
+          color: const Color(0xFF0f1520),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.white12)),
+          onSelected: (id) async {
+            final names = {
+              28: 'Actie', 12: 'Avontuur', 16: 'Animatie', 35: 'Komedie', 80: 'Misdaad',
+              99: 'Documentaire', 18: 'Drama', 10751: 'Familie', 14: 'Fantasy',
+              27: 'Horror', 9648: 'Mystery', 10749: 'Romantiek', 878: 'Sci-Fi',
+              53: 'Thriller', 10752: 'Oorlog'
+            };
+            final name = names[id] ?? 'Genre';
+            // Open search screen met genre filter
+            Navigator.push(context, MaterialPageRoute(
+              builder: (_) => SearchScreen(genreId: id, genreName: name)
+            ));
+          },
+          itemBuilder: (context) => [
+            28, 12, 16, 35, 80, 99, 18, 10751, 14, 27, 9648, 10749, 878, 53, 10752
+          ].map((id) {
+            final names = {
+              28: 'Actie', 12: 'Avontuur', 16: 'Animatie', 35: 'Komedie', 80: 'Misdaad',
+              99: 'Documentaire', 18: 'Drama', 10751: 'Familie', 14: 'Fantasy',
+              27: 'Horror', 9648: 'Mystery', 10749: 'Romantiek', 878: 'Sci-Fi',
+              53: 'Thriller', 10752: 'Oorlog'
+            };
+            return PopupMenuItem(
+              value: id,
+              child: Text(names[id] ?? '', style: const TextStyle(color: Colors.white, fontSize: 13)),
+            );
+          }).toList(),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.white24),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.menu, size: 16, color: Colors.grey),
+                SizedBox(width: 8),
+                Text('Genres', style: TextStyle(color: Colors.grey, fontSize: 13)),
+              ],
+            ),
+          ),
+        ),
+        
         const Spacer(),
-        IconButton(icon: const Icon(Icons.search, color: Colors.white),
+        IconButton(icon: const Icon(Icons.search, color: Colors.white, size: 22),
           onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SearchScreen()))),
-        IconButton(icon: const Icon(Icons.settings_outlined, color: Colors.grey),
+        IconButton(icon: const Icon(Icons.settings_outlined, color: Colors.grey, size: 22),
           onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()))),
       ]),
+    );
+  }
+
+  Widget _buildNavBtn(String label, int index) {
+    final bool active = _tab == index;
+    return InkWell(
+      onTap: () {
+        if (index == 3) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const WatchlistScreen(),
+              settings: const RouteSettings(name: 'watchlist'),
+            ),
+          ).then((_) => _load());
+        } else {
+          setState(() {
+            _tab = index;
+          });
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                color: active ? const Color(0xFF00b4d8) : Colors.grey,
+                fontWeight: active ? FontWeight.bold : FontWeight.normal,
+                fontSize: 15,
+              ),
+            ),
+            const SizedBox(height: 4),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              height: 2,
+              width: active ? 20 : 0,
+              color: const Color(0xFF00b4d8),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -178,7 +302,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildRow(String title, List items, {bool isRd = false}) {
+  Widget _buildRow(String title, List items, {bool isRd = false, bool isProgress = false}) {
     if (items.isEmpty) return const SizedBox.shrink();
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Padding(
@@ -188,22 +312,57 @@ class _HomeScreenState extends State<HomeScreen> {
           color: isRd ? const Color(0xFF00b4d8) : Colors.white)),
       ),
       SizedBox(
-        height: 185,
+        height: isProgress ? 160 : 185,
         child: ListView.builder(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           itemCount: items.length,
-          itemBuilder: (_, i) => _buildCard(items[i], isRd: isRd),
+          itemBuilder: (_, i) => _buildCard(items[i], isRd: isRd, isProgress: isProgress),
         ),
       ),
     ]);
   }
 
-  Widget _buildCard(Map item, {bool isRd = false}) {
+  Widget _buildCard(Map item, {bool isRd = false, bool isProgress = false}) {
     final poster = item['poster_path'] as String?;
+    final backdrop = item['backdrop_path'] as String?;
     final title = item['title'] ?? item['name'] ?? item['filename'] ?? '';
     final year = ((item['release_date'] ?? item['first_air_date'] ?? '') as String);
     final yearStr = year.length >= 4 ? year.substring(0, 4) : '';
+    
+    // Voor progress tonen we een horizontale kaart (backdrop) zoals in de browser
+    if (isProgress) {
+      final double progress = (item['current_time'] ?? 0) / (item['duration'] ?? 1);
+      
+      return GestureDetector(
+        onTap: () => _openWatch(item),
+        child: Container(
+          width: 200, margin: const EdgeInsets.symmetric(horizontal: 4),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Stack(children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: NovaImage(path: backdrop, width: 200, height: 112, baseUrl: 'https://image.tmdb.org/t/p/w300'),
+              ),
+              Positioned(bottom: 0, left: 0, right: 0,
+                child: Container(
+                  height: 3, color: Colors.white24,
+                  child: FractionallySizedBox(
+                    alignment: Alignment.centerLeft,
+                    widthFactor: progress.clamp(0.0, 1.0),
+                    child: Container(color: const Color(0xFF00b4d8)),
+                  ),
+                ),
+              ),
+              const Positioned.fill(child: Center(child: Icon(Icons.play_circle_outline, color: Colors.white70, size: 30))),
+            ]),
+            const SizedBox(height: 6),
+            Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w500)),
+          ]),
+        ),
+      );
+    }
 
     return GestureDetector(
       onTap: () => _openWatch(item),
@@ -227,29 +386,28 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _openWatch(Map item) => Navigator.push(context,
-    MaterialPageRoute(builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item))));
-
-  Widget _buildBottomNav() {
-    return BottomNavigationBar(
-      currentIndex: _tab,
-      onTap: (i) {
-        if (i == 3) {
-          Navigator.push(context, MaterialPageRoute(builder: (_) => const WatchlistScreen()));
-        } else {
-          setState(() => _tab = i);
-        }
-      },
-      backgroundColor: const Color(0xFF0f1520),
-      selectedItemColor: const Color(0xFF00b4d8),
-      unselectedItemColor: Colors.grey,
-      type: BottomNavigationBarType.fixed,
-      items: const [
-        BottomNavigationBarItem(icon: Icon(Icons.home_outlined), activeIcon: Icon(Icons.home), label: 'Home'),
-        BottomNavigationBarItem(icon: Icon(Icons.movie_outlined), activeIcon: Icon(Icons.movie), label: 'Films'),
-        BottomNavigationBarItem(icon: Icon(Icons.tv_outlined), activeIcon: Icon(Icons.tv), label: 'Series'),
-        BottomNavigationBarItem(icon: Icon(Icons.bookmark_outline), activeIcon: Icon(Icons.bookmark), label: 'Watchlist'),
-      ],
-    );
+  void _openWatch(Map item) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item))),
+    ).then((_) => _load()); // Herlaad progress bij terugkomst
   }
+}
+
+class _NavbarDelegate extends SliverPersistentHeaderDelegate {
+  final Widget child;
+  _NavbarDelegate({required this.child});
+
+  @override
+  double get minExtent => 60;
+  @override
+  double get maxExtent => 60;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    return child;
+  }
+
+  @override
+  bool shouldRebuild(covariant _NavbarDelegate oldDelegate) => true;
 }

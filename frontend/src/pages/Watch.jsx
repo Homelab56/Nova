@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import Navbar from "../components/Navbar";
 import Player from "../components/Player";
 import Row from "../components/Row";
 import { useUserData } from "../context/UserDataContext";
@@ -433,8 +434,10 @@ export default function Watch() {
 
       if (data.source === "scraper") {
         setStatus(`Gevonden op internet: ${data.title || searchTitle}. Laden...`);
+      } else if (data.source === "aiostreams") {
+        setStatus(`Stream via AIOStreams (${data.title || searchTitle}). Laden...`);
       } else if (data.source === "local") {
-        setStatus(`Gevonden op Dumbarr mount: ${data.title || searchTitle}. Starten...`);
+        setStatus(`Lokaal bestand: ${data.title || searchTitle}. Starten...`);
       } else {
         setStatus("Gevonden in bibliotheek. Starten...");
       }
@@ -633,6 +636,14 @@ export default function Watch() {
 
   return (
     <div className="min-h-screen bg-nova-bg">
+      <Navbar
+        onSearch={(q) => navigate(`/?mode=all&q=${encodeURIComponent(q)}`)}
+        onClear={() => navigate("/")}
+        hasResults={false}
+        onGenre={() => navigate("/")}
+        mode={type}
+        onMode={(m) => navigate(`/?mode=${encodeURIComponent(m)}`)}
+      />
       {backdrop && !streamUrl && (
         <div className="relative w-full h-[45vh] md:h-[55vh] overflow-hidden">
           <img src={backdrop} alt={title} className="w-full h-full object-cover object-top" />
@@ -641,14 +652,21 @@ export default function Watch() {
         </div>
       )}
 
-      <div className={`px-4 md:px-10 pb-20 ${streamUrl ? "pt-6" : "-mt-32 relative z-10"}`}>
+      <div className={`px-4 md:px-10 pb-20 pt-24 ${streamUrl ? "" : "-mt-32 relative z-10"}`}>
         <button onClick={() => navigate(-1)} className="text-gray-400 hover:text-white text-sm mb-6 flex items-center gap-1">
           ← Terug
         </button>
 
         {streamUrl && (
           <div className="mb-10">
-            <Player url={streamUrl} media={progressItem || media} startAt={startAt} durationHint={durationHint} onProgress={(t, d) => saveProgress(progressItem || media, t, d)} onEnded={handleEnded} onNext={hasNext ? handleNext : null} />
+            <div className="max-w-5xl mx-auto">
+              <div className="mb-3">
+                <h1 className="text-lg md:text-2xl font-black leading-tight">
+                  {progressItem?.title || title}
+                </h1>
+              </div>
+              <Player url={streamUrl} media={progressItem || media} startAt={startAt} durationHint={durationHint} onProgress={(t, d) => saveProgress(progressItem || media, t, d)} onEnded={handleEnded} onNext={hasNext ? handleNext : null} />
+            </div>
             <div className="mt-4 flex flex-wrap items-center gap-4">
               <button onClick={() => { setStreamUrl(null); setStatus(""); setStartAt(0); setDurationHint(0); }} className="text-sm text-gray-500 hover:text-white flex items-center gap-1">
                 ← Terug naar info

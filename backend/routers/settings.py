@@ -17,7 +17,11 @@ def load_config() -> dict:
         "tmdb_api_key": "",
         "rd_api_token": "",
         "jackett_url": "",
-        "jackett_api_key": ""
+        "jackett_api_key": "",
+        "aio_streams_url": "",
+        "aio_streams_user": "",
+        "aio_streams_password": "",
+        "aio_streams_user_data_b64": "",
     }
 
 
@@ -33,6 +37,10 @@ class Config(BaseModel):
     jackett_url: str = ""
     jackett_api_key: str = ""
     media_path: str = "/mnt/debrid"
+    aio_streams_url: str = ""
+    aio_streams_user: str = ""
+    aio_streams_password: str = ""
+    aio_streams_user_data_b64: str = ""
 
 
 @router.get("/test/media")
@@ -50,37 +58,92 @@ async def test_media():
         return {"ok": False, "message": f"Fout bij lezen van /media: {str(e)}"}
 
 
+async def test_aiostreams():
+    from .config_loader import get_aiostreams_config
+    import base64 as _b64
+
+    cfg = get_aiostreams_config()
+    base = (cfg.get("base_url") or "").rstrip("/")
+    if not base:
+        return {"ok": False, "message": "Geen AIOStreams-URL. Zet AIOSTREAMS_URL in .env (bijv. http://192.168.1.75:3003)."}
+
+    headers: dict[str, str] = {}
+    b64_ud = (cfg.get("user_data_b64") or "").strip()
+    if b64_ud:
+        headers["x-aiostreams-user-data"] = b64_ud
+    else:
+        user = (cfg.get("username") or "").strip()
+        password = (cfg.get("password") or "").strip()
+        if user and password:
+            token = _b64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
+            headers["Authorization"] = f"Basic {token}"
+
+    try:
+        async with httpx.AsyncClient(timeout=12) as client:
+            r = await client.get(
+                f"{base}/api/v1/search",
+                params={"type": "movie", "id": "tmdb:550", "format": "false"},
+                headers=headers,
+            )
+    except Exception as e:
+        return {"ok": False, "message": f"Geen verbinding met AIOStreams: {e}"}
+
+    if r.status_code == 401:
+        return {
+            "ok": False,
+            "message": "Authenticatie mislukt. Vul AIOSTREAMS_USER en AIOSTREAMS_PASSWORD of AIOSTREAMS_USER_DATA_B64 in.",
+        }
+
+    try:
+        data = r.json()
+    except Exception:
+        return {"ok": False, "message": "Ongeldig antwoord van AIOStreams."}
+
+    if data.get("success"):
+        return {"ok": True, "message": f"AIOStreams bereikbaar op {base}."}
+    err = (data.get("error") or {}).get("message") or r.text[:200]
+    return {"ok": False, "message": f"AIOStreams: {err}"}
+
+
 @router.get("/status")
 async def get_all_status():
     tmdb = await test_tmdb()
     rd = await test_rd()
     jackett = await test_jackett()
     media = await test_media()
-    
+    aiostreams = await test_aiostreams()
+
     from .seerr import test_seerr
     seerr = await test_seerr()
-    
+
     return {
         "tmdb": tmdb,
         "rd": rd,
         "jackett": jackett,
         "media": media,
-        "seerr": seerr
+        "aiostreams": aiostreams,
+        "seerr": seerr,
     }
 
 
 @router.get("/")
 def get_settings():
     config = load_config()
+    aio_url = (config.get("aio_streams_url") or os.getenv("AIOSTREAMS_URL", "")).strip()
     return {
         "tmdb_api_key": config.get("tmdb_api_key", ""),
         "rd_api_token": config.get("rd_api_token", ""),
         "jackett_url": config.get("jackett_url", ""),
         "jackett_api_key": config.get("jackett_api_key", ""),
         "media_path": config.get("media_path", os.getenv("MEDIA_PATH", "/mnt/debrid")),
+        "aio_streams_url": config.get("aio_streams_url", ""),
+        "aio_streams_user": config.get("aio_streams_user", ""),
+        "aio_streams_password": config.get("aio_streams_password", ""),
+        "aio_streams_user_data_b64": config.get("aio_streams_user_data_b64", ""),
         "tmdb_configured": bool(config.get("tmdb_api_key")),
         "rd_configured": bool(config.get("rd_api_token")),
         "jackett_configured": bool(config.get("jackett_url") and config.get("jackett_api_key")),
+        "aio_streams_configured": bool(aio_url),
     }
 
 
@@ -97,6 +160,14 @@ def save_settings(body: Config):
         config["jackett_api_key"] = body.jackett_api_key
     if body.media_path:
         config["media_path"] = body.media_path
+    if body.aio_streams_url:
+        config["aio_streams_url"] = body.aio_streams_url.strip()
+    if body.aio_streams_user:
+        config["aio_streams_user"] = body.aio_streams_user.strip()
+    if body.aio_streams_password:
+        config["aio_streams_password"] = body.aio_streams_password.strip()
+    if body.aio_streams_user_data_b64:
+        config["aio_streams_user_data_b64"] = body.aio_streams_user_data_b64.strip()
     save_config(config)
     return {"ok": True}
 

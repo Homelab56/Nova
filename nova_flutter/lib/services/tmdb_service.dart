@@ -17,12 +17,25 @@ class TmdbService {
 
   static Future<dynamic> _backendGet(String path, [Map<String, dynamic> query = const {}]) async {
     final base = await _backendBase();
-    final uri = Uri.parse('$base$path').replace(
-      queryParameters: query.map((k, v) => MapEntry(k, v.toString())),
-    );
-    final r = await http.get(uri).timeout(const Duration(seconds: 12));
-    if (r.statusCode == 200) return jsonDecode(r.body);
-    throw Exception('Backend $path failed: ${r.statusCode}');
+    
+    // We proberen het pad met en zonder /api prefix
+    final paths = path.startsWith('/api') ? [path, path.replaceFirst('/api', '')] : [path, '/api$path'];
+    
+    String? lastError;
+    for (final p in paths) {
+      try {
+        final uri = Uri.parse('$base$p').replace(
+          queryParameters: query.map((k, v) => MapEntry(k, v.toString())),
+        );
+        final r = await http.get(uri).timeout(const Duration(seconds: 12));
+        if (r.statusCode == 200) return jsonDecode(r.body);
+        lastError = 'Backend $p failed: ${r.statusCode}';
+      } catch (e) {
+        lastError = 'Connection to $p failed: $e';
+        continue;
+      }
+    }
+    throw Exception(lastError ?? 'Backend $path failed');
   }
 
   static Future<List> getTrending() async {
@@ -72,6 +85,21 @@ class TmdbService {
   }
 
   static Future<Map<String, dynamic>> discoverGenre(int genreId, String type, {int page = 1}) async {
+    if (type == 'all') {
+      final movies = await _backendGet('/api/search/genre/$genreId', {'type': 'movie', 'page': page});
+      final tv = await _backendGet('/api/search/genre/$genreId', {'type': 'tv', 'page': page});
+      
+      final items = [..._extractItems(movies), ..._extractItems(tv)];
+      // Sorteer op populariteit aangezien we twee lijsten mergen
+      items.sort((a, b) => ((b['popularity'] ?? 0) as num).compareTo((a['popularity'] ?? 0) as num));
+      
+      return {
+        'items': items,
+        'total_pages': (movies['total_pages'] as int? ?? 1),
+        'total_results': (movies['total_results'] as int? ?? 0) + (tv['total_results'] as int? ?? 0),
+      };
+    }
+    
     final d = await _backendGet('/api/search/genre/$genreId', {'type': type, 'page': page});
     return {
       'items': _extractItems(d),
@@ -97,6 +125,16 @@ class TmdbService {
 
   static Future<Map> getSeason(int id, int season) async {
     return await _backendGet('/api/search/tv/$id/season/$season') as Map;
+  }
+
+  static Future<List> getKidsMovies() async {
+    final d = await _backendGet('/api/search/kids/movies');
+    return _extractItems(d);
+  }
+
+  static Future<List> getKidsTv() async {
+    final d = await _backendGet('/api/search/kids/tv');
+    return _extractItems(d);
   }
 
   static Future<bool> testKey(String key) async {

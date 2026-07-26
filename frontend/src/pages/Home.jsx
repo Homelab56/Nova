@@ -1,4 +1,6 @@
-import { useState, useEffect, useRef } from "react";import Navbar from "../components/Navbar";
+import { useState, useEffect, useRef } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import Navbar from "../components/Navbar";
 import HeroBanner from "../components/HeroBanner";
 import Row from "../components/Row";
 import MediaCard from "../components/MediaCard";
@@ -112,6 +114,8 @@ function _withPage(path, page) {
 }
 
 export default function Home() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [mode, setMode] = useState("all");
   const [rowData, setRowData] = useState({});
   const [loadingFixed, setLoadingFixed] = useState(true);
@@ -129,6 +133,7 @@ export default function Home() {
   const overlayMeta = useRef({});  // query of genre id+type
   const genreCache = useRef({});
   const sessionSeed = useRef(Math.floor(Math.random() * 1e9));
+  const initFromUrlRef = useRef(false);
 
   const { watchlist, progress, progressMap } = useUserData();
   const inProgressRaw = progress.filter(p => {
@@ -158,6 +163,21 @@ export default function Home() {
     }
   });
   const inProgress = Array.from(inProgressMap.values()).reverse();
+
+  useEffect(() => {
+    if (initFromUrlRef.current) return;
+    initFromUrlRef.current = true;
+    try {
+      const params = new URLSearchParams(location.search || "");
+      const m = (params.get("mode") || "").toLowerCase().trim();
+      const q = (params.get("q") || "").trim();
+      if (m && ["all", "movie", "tv", "watchlist"].includes(m)) setMode(m);
+      if (q) {
+        handleSearch(q);
+      }
+      if (m || q) navigate("/", { replace: true });
+    } catch {}
+  }, []);
 
   function findRowConfig(key) {
     const rows = [...(FIXED_ROWS[mode] || []), ...(KIDS_ROWS[mode] || [])];
@@ -290,17 +310,7 @@ export default function Home() {
     overlayMeta.current = { query };
 
     const fetchSearch = async (q, page) => {
-      if (mode === "movie") {
-        return fetch(`/api/search/movie?q=${encodeURIComponent(q)}&page=${page}`).then(r => r.json());
-      } else if (mode === "tv") {
-        return fetch(`/api/search/tv?q=${encodeURIComponent(q)}&page=${page}`).then(r => r.json());
-      } else {
-        const [m, t] = await Promise.all([
-          fetch(`/api/search/movie?q=${encodeURIComponent(q)}&page=${page}`).then(r => r.json()),
-          fetch(`/api/search/tv?q=${encodeURIComponent(q)}&page=${page}`).then(r => r.json()),
-        ]);
-        return { items: [...m.items, ...t.items], total_pages: Math.max(m.total_pages, t.total_pages), total_results: m.total_results + t.total_results, page };
-      }
+      return fetch(`/api/search/multi?q=${encodeURIComponent(q)}&page=${page}`).then(r => r.json());
     };
 
     const data = await fetchSearch(query, 1);
@@ -357,18 +367,7 @@ export default function Home() {
 
     if (overlayType.current === "search") {
       const { query } = overlayMeta.current;
-      let items;
-      if (mode === "movie") {
-        items = await fetchPages(p => `/api/search/movie?q=${encodeURIComponent(query)}&page=${p}`);
-      } else if (mode === "tv") {
-        items = await fetchPages(p => `/api/search/tv?q=${encodeURIComponent(query)}&page=${p}`);
-      } else {
-        const [m, t] = await Promise.all([
-          fetchPages(p => `/api/search/movie?q=${encodeURIComponent(query)}&page=${p}`),
-          fetchPages(p => `/api/search/tv?q=${encodeURIComponent(query)}&page=${p}`),
-        ]);
-        items = [...m, ...t];
-      }
+      const items = await fetchPages(p => `/api/search/multi?q=${encodeURIComponent(query)}&page=${p}`);
       setSearchResults(prev => [...prev, ...items]);
     } else {
       const { genre } = overlayMeta.current;
@@ -408,7 +407,7 @@ export default function Home() {
 
   const showOverlay = searchResults || genreResults;
   const overlayItems = searchResults || genreResults || [];
-  const modeLabel = mode === "movie" ? "Films" : mode === "tv" ? "Series" : "";
+  const modeLabel = searchResults ? "" : (mode === "movie" ? "Films" : mode === "tv" ? "Series" : "");
   const overlayTitle = searchResults ? `Resultaten voor "${searchQuery}"` : activeGenre?.name || "";
 
   const heroItems = mode === "movie"
