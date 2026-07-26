@@ -765,7 +765,7 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0, au
         "0:v:0",
     ]
     if audio_stream is not None:
-        cmd += ["-map", f"0:a:{audio_stream}?"]
+        cmd += ["-map", f"0:{int(audio_stream)}"]
     else:
         cmd += ["-map", "0:a:0?"]
     cmd += [
@@ -1393,7 +1393,7 @@ async def _ensure_hls_session(session_id: str, input_value: str):
         "0:v:0",
     ]
     if audio_stream is not None:
-        cmd += ["-map", f"0:a:{audio_stream}?"]
+        cmd += ["-map", f"0:{int(audio_stream)}"]
     else:
         cmd += ["-map", "0:a:0?"]
     cmd += [

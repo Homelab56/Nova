@@ -298,9 +298,9 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     } else {
       u.searchParams.delete("start");
     }
-    const effectiveAudio = audioOverride !== undefined ? audioOverride : audioSelected;
-    if (effectiveAudio !== null && effectiveAudio !== undefined) {
-      u.searchParams.set("audio_stream", String(effectiveAudio));
+    // Alleen audio_stream toevoegen als expliciet meegegeven (niet bij initiële load)
+    if (audioOverride !== undefined && audioOverride !== null) {
+      u.searchParams.set("audio_stream", String(audioOverride));
     } else {
       u.searchParams.delete("audio_stream");
     }
@@ -390,7 +390,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     }
 
     const currentTime = absTimeRef.current;
-    // Voor backend proxy URLs, reload the source with new audio track
+    // Voor backend proxy URLs, reload the source with new audio track (absolute stream index)
     if (!(url && (url.startsWith("http://") || url.startsWith("https://")))) {
       const src = buildSrc(currentTime, streamIndex);
       baseUrlRef.current = src;
@@ -517,7 +517,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   useEffect(() => {
     if (!url || audioSelected === null) return;
     if (url.startsWith("http://") || url.startsWith("https://")) return;
-    const src = buildSrc(startOffsetRef.current);
+    const src = buildSrc(startOffsetRef.current, audioSelected);
     baseUrlRef.current = src;
     setSource(src);
   }, [audioSelected]);
