@@ -287,6 +287,7 @@ async def _ffprobe_audio_streams(input_value: str, is_path: bool) -> list[dict]:
         print(f"FFProbe audio fout voor {input_value[:120]}: {e}")
         return []
 
+
 def _parse_vtt_timestamp(value: str) -> float | None:
     v = (value or "").strip()
     if not v:
@@ -923,7 +924,71 @@ async def meta(url: str | None = None, path: str | None = None):
     is_path = path is not None
     input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
     dur = await _ffprobe_duration_seconds(input_value, is_path=is_path)
-    return {"duration": dur or 0.0}
+    
+    # Get subtitle tracks
+    subtitle_streams = await _ffprobe_subtitle_streams(input_value, is_path=is_path)
+    bitmap_codecs = {
+        "hdmv_pgs_subtitle",
+        "dvd_subtitle",
+        "dvb_subtitle",
+        "xsub",
+    }
+    subtitle_tracks = []
+    for s in subtitle_streams:
+        idx = s.get("index")
+        codec = s.get("codec_name") or ""
+        codec_l = str(codec).lower().strip()
+        if codec_l in bitmap_codecs:
+            continue
+        tags = s.get("tags") or {}
+        if not isinstance(tags, dict):
+            tags = {}
+        lang = tags.get("language") or ""
+        title = tags.get("title") or ""
+        try:
+            idx_i = int(idx)
+        except Exception:
+            continue
+        subtitle_tracks.append(
+            {
+                "stream_index": idx_i,
+                "language": str(lang),
+                "title": str(title),
+                "codec": str(codec),
+            }
+        )
+    
+    # Get audio tracks
+    audio_streams = await _ffprobe_audio_streams(input_value, is_path=is_path)
+    audio_tracks = []
+    for s in audio_streams:
+        idx = s.get("index")
+        codec = s.get("codec_name") or ""
+        channels = s.get("channels") or 0
+        tags = s.get("tags") or {}
+        if not isinstance(tags, dict):
+            tags = {}
+        lang = tags.get("language") or ""
+        title = tags.get("title") or ""
+        try:
+            idx_i = int(idx)
+        except Exception:
+            continue
+        audio_tracks.append(
+            {
+                "stream_index": idx_i,
+                "language": str(lang),
+                "title": str(title),
+                "codec": str(codec),
+                "channels": int(channels),
+            }
+        )
+    
+    return {
+        "duration": dur or 0.0,
+        "subtitle_tracks": subtitle_tracks,
+        "audio_tracks": audio_tracks,
+    }
 
 
 # Limiet op het aantal gelijktijdige transcoderingen om de server te beschermen

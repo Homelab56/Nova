@@ -376,6 +376,29 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     }
   };
 
+  const selectAudioTrack = async (streamIndex) => {
+    const v = videoRef.current;
+    if (!v) return;
+
+    setAudioSelected(streamIndex);
+    if (streamIndex !== null) {
+      const track = audioTracks.find(t => t.stream_index === streamIndex);
+      setAudioLabel(track?.language || track?.title || "Audio");
+    } else {
+      setAudioLabel("");
+    }
+
+    const currentTime = absTimeRef.current;
+    // Voor backend proxy URLs, reload the source with new audio track
+    if (!(url && (url.startsWith("http://") || url.startsWith("https://")))) {
+      const src = buildSrc(currentTime, streamIndex);
+      baseUrlRef.current = src;
+      await setSource(src);
+      if (playing) await tryPlay();
+    }
+    setAudioMenuOpen(false);
+  };
+
   const seekTo = async (seconds) => {
     const v = videoRef.current;
     if (!v) return;
@@ -419,7 +442,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     setError(null);
     hlsFallbackRef.current = false;
     startOffsetRef.current = Math.max(0, Number(startAt) || 0);
-    const src = buildSrc(startOffsetRef.current);
+    const src = buildSrc(startOffsetRef.current, audioSelected);
     baseUrlRef.current = src;
     setSource(src);
     setAbsTime(startOffsetRef.current);
@@ -433,7 +456,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         hlsRef.current = null;
       }
     };
-  }, [url, startAt]);
+  }, [url, startAt, audioSelected]);
 
   useEffect(() => {
     if (!url) return;
@@ -443,6 +466,9 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     setSubtitleTracks([]);
     setSubtitleSelected(null);
     setSubtitleLabel("");
+    setAudioTracks([]);
+    setAudioSelected(null);
+    setAudioLabel("");
     fetch(buildSubtitlesListUrl(), { signal: ac.signal })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
@@ -460,17 +486,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         }
       })
       .catch(() => {});
-    return () => ac.abort();
-  }, [url, prefs.default_sub_lang_1, prefs.default_sub_lang_2, prefs.subtitles_enabled]);
 
-  useEffect(() => {
-    if (!url) return;
-    if (subsAbortRef.current) subsAbortRef.current.abort();
-    const ac = new AbortController();
-    subsAbortRef.current = ac;
-    setAudioTracks([]);
-    setAudioSelected(null);
-    setAudioLabel("");
     fetch(buildAudioListUrl(), { signal: ac.signal })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
@@ -478,10 +494,10 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         const filtered = allTracks.filter(t => isAllowedLang(t?.language, t?.title));
         if (ac.signal.aborted) return;
         setAudioTracks(filtered);
-        const def = chooseDefaultAudio(filtered);
-        if (def) {
-          setAudioSelected(def.stream_index);
-          setAudioLabel(prettyLang(def.language, def.title) || `Audio ${def.stream_index}`);
+        const defAud = chooseDefaultAudio(filtered);
+        if (defAud) {
+          setAudioSelected(defAud.stream_index);
+          setAudioLabel(prettyLang(defAud.language, defAud.title) || `Audio ${defAud.stream_index}`);
         } else {
           setAudioSelected(null);
           setAudioLabel("");
@@ -489,7 +505,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       })
       .catch(() => {});
     return () => ac.abort();
-  }, [url, prefs.default_audio_lang]);
+  }, [url, prefs.default_sub_lang_1, prefs.default_sub_lang_2, prefs.default_audio_lang, prefs.subtitles_enabled]);
 
   const selectedTrackObj = subtitleSelected !== null
     ? subtitleTracks.find(t => t.stream_index === subtitleSelected) || null
