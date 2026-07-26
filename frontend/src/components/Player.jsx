@@ -372,7 +372,15 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     } catch (e) {
       if (e?.name === "NotAllowedError" && !v.muted) {
         v.muted = true;
-        try { await v.play(); } catch {}
+        try {
+          await v.play();
+          // Probeer na korte vertraging te unmuten (autoplay policy omzeilen)
+          setTimeout(() => {
+            if (videoRef.current) {
+              videoRef.current.muted = false;
+            }
+          }, 500);
+        } catch {}
       }
     }
   };
@@ -830,6 +838,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         autoPlay
         playsInline
         preload="auto"
+        crossOrigin="anonymous"
         className="w-full h-full nova-video"
         onDoubleClick={toggleFullscreen}
         onClick={toggle}

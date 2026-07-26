@@ -1008,10 +1008,10 @@ async def play(
     is_path = path is not None
     input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
 
-    # Voor externe HTTP URLs (zoals AIOStreams), redirect direct (proxying is onbetrouwbaar)
+    # Voor externe HTTP URLs (zoals AIOStreams), proxy met CORS headers voor crossOrigin video+track support
     if not is_path and (input_value.startswith("http://") or input_value.startswith("https://")):
-        print(f"Redirect naar externe URL: {input_value[:200]}...")
-        return RedirectResponse(url=input_value, status_code=302)
+        print(f"Proxy externe URL: {input_value[:200]}...")
+        return await _proxy_external_url(input_value, request)
 
     async def _stream_with_semaphore():
         async with TRANSCODE_SEMAPHORE:
@@ -1074,6 +1074,10 @@ async def _proxy_external_url(url: str, request: Request, start: float = 0.0):
                     response_headers = {
                         "Content-Type": content_type,
                         "Cache-Control": "no-cache",
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+                        "Access-Control-Allow-Headers": "Range, Content-Type",
+                        "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
                     }
                     
                     if content_length:
