@@ -830,7 +830,6 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         autoPlay
         playsInline
         preload="auto"
-        crossOrigin="anonymous"
         className="w-full h-full nova-video"
         onDoubleClick={toggleFullscreen}
         onClick={toggle}
