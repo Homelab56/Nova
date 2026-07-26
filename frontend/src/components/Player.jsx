@@ -282,7 +282,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     return tracks[0];
   };
 
-  const buildSrc = (startSeconds) => {
+  const buildSrc = (startSeconds, audioOverride = undefined) => {
     const u = new URL(url, window.location.origin);
     if (startSeconds && startSeconds > 0) {
       const p = u.pathname || "";
@@ -298,8 +298,9 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     } else {
       u.searchParams.delete("start");
     }
-    if (audioSelected !== null) {
-      u.searchParams.set("audio_stream", String(audioSelected));
+    const effectiveAudio = audioOverride !== undefined ? audioOverride : audioSelected;
+    if (effectiveAudio !== null && effectiveAudio !== undefined) {
+      u.searchParams.set("audio_stream", String(effectiveAudio));
     } else {
       u.searchParams.delete("audio_stream");
     }
@@ -442,7 +443,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     setError(null);
     hlsFallbackRef.current = false;
     startOffsetRef.current = Math.max(0, Number(startAt) || 0);
-    const src = buildSrc(startOffsetRef.current, audioSelected);
+    const src = buildSrc(startOffsetRef.current);
     baseUrlRef.current = src;
     setSource(src);
     setAbsTime(startOffsetRef.current);
@@ -456,7 +457,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         hlsRef.current = null;
       }
     };
-  }, [url, startAt, audioSelected]);
+  }, [url, startAt]);
 
   useEffect(() => {
     if (!url) return;
@@ -512,9 +513,10 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     : null;
   const vttSrc = selectedTrackObj ? buildSubtitleVttUrl(selectedTrackObj.stream_index) : null;
 
-  // Reload video when audio selection changes
+  // Reload video when audio selection changes (alleen voor backend proxy URLs, niet externe redirect URLs)
   useEffect(() => {
     if (!url || audioSelected === null) return;
+    if (url.startsWith("http://") || url.startsWith("https://")) return;
     const src = buildSrc(startOffsetRef.current);
     baseUrlRef.current = src;
     setSource(src);
