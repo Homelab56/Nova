@@ -307,6 +307,18 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     return u.toString();
   };
 
+  // Wraps een externe URL via de backend proxy zodat CORS + crossOrigin werkt
+  const toProxiedUrl = (src) => {
+    if (!src) return src;
+    // Al een backend URL - niet opnieuw wrappen
+    if (src.includes(window.location.host) || src.startsWith("/")) return src;
+    // Externe URL - stuur via backend proxy
+    if (src.startsWith("http://") || src.startsWith("https://")) {
+      return `/api/stream/play?url=${encodeURIComponent(src)}`;
+    }
+    return src;
+  };
+
   const setSource = async (src) => {
     const v = videoRef.current;
     if (!v) return;
@@ -315,7 +327,10 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       hlsRef.current = null;
     }
 
-    const isHlsSrc = src.includes("/api/stream/hls") || src.includes("/stream/hls") || src.endsWith(".m3u8");
+    // Route externe URLs via backend proxy voor CORS + crossOrigin ondersteuning
+    const effectiveSrc = toProxiedUrl(src);
+
+    const isHlsSrc = effectiveSrc.includes("/api/stream/hls") || effectiveSrc.includes("/stream/hls") || effectiveSrc.endsWith(".m3u8");
     if (isHlsSrc && Hls.isSupported()) {
       const hls = new Hls({
         maxBufferLength: 90,
@@ -324,7 +339,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         lowLatencyMode: false,
       });
       hlsRef.current = hls;
-      hls.loadSource(src);
+      hls.loadSource(effectiveSrc);
       hls.attachMedia(v);
       hls.on(Hls.Events.MANIFEST_PARSED, async () => {
         try { await tryPlay(); } catch {}
@@ -335,8 +350,8 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         const code = data?.response?.code;
         const toProgressive = (s) => s.replace("/api/stream/hls", "/api/stream/play").replace("/stream/hls", "/stream/play");
         if ((fatal || code === 502) && !hlsFallbackRef.current) {
-          const fallback = toProgressive(src);
-          if (fallback !== src) {
+          const fallback = toProgressive(effectiveSrc);
+          if (fallback !== effectiveSrc) {
             hlsFallbackRef.current = true;
             try {
               hls.destroy();
@@ -355,13 +370,8 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       return;
     }
 
-    v.src = src;
+    v.src = effectiveSrc;
     v.load();
-    
-    // Voor redirect URLs, stel currentTime in voor resume
-    if (src && (src.startsWith("http://") || src.startsWith("https://")) && startAt > 0) {
-      v.currentTime = startAt;
-    }
   };
 
   const tryPlay = async () => {
@@ -414,24 +424,13 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     const t = Math.max(0, Number(seconds) || 0);
     startOffsetRef.current = t;
     absTimeRef.current = t;
-    
-    // Voor redirect URLs, gebruik direct currentTime seeking
-    if (url && (url.startsWith("http://") || url.startsWith("https://"))) {
-      v.currentTime = t;
-      setError(null);
-      setAbsTime(t);
-      reportProgress(t);
-      await tryPlay();
-    } else {
-      // Voor backend proxy URLs, gebruik buildSrc
-      const src = buildSrc(t);
-      baseUrlRef.current = src;
-      await setSource(src);
-      setError(null);
-      setAbsTime(t);
-      reportProgress(t);
-      await tryPlay();
-    }
+    const src = buildSrc(t);
+    baseUrlRef.current = src;
+    await setSource(src);
+    setError(null);
+    setAbsTime(t);
+    reportProgress(t);
+    await tryPlay();
   };
 
   const showControlsTemporarily = () => {
@@ -660,21 +659,12 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       reportProgress();
     };
     const onTime = () => {
-      // Voor redirect URLs, gebruik direct currentTime
-      if (url && (url.startsWith("http://") || url.startsWith("https://"))) {
-        const t = v.currentTime || 0;
-        setAbsTime(t);
-        absTimeRef.current = t;
-        lastTimeRef.current = t;
-        lastTimeTsRef.current = Date.now();
-      } else {
-        // Voor backend proxy URLs, gebruik startOffset
-        const t = startOffsetRef.current + (v.currentTime || 0);
-        setAbsTime(t);
-        absTimeRef.current = t;
-        lastTimeRef.current = v.currentTime || 0;
-        lastTimeTsRef.current = Date.now();
-      }
+      // Altijd startOffset + currentTime (video gaat altijd via backend proxy)
+      const t = startOffsetRef.current + (v.currentTime || 0);
+      setAbsTime(t);
+      absTimeRef.current = t;
+      lastTimeRef.current = v.currentTime || 0;
+      lastTimeTsRef.current = Date.now();
       if (buffering) setBuffering(false);
       if (!media || !onProgress) return;
       if (effectiveTotal <= 0) {
