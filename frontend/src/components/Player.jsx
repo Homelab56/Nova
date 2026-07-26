@@ -443,7 +443,8 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     setError(null);
     hlsFallbackRef.current = false;
     startOffsetRef.current = Math.max(0, Number(startAt) || 0);
-    const src = buildSrc(startOffsetRef.current);
+    // Gebruik de url direct voor externe URLs om URL-encoding problemen te vermijden
+    const src = url;
     baseUrlRef.current = src;
     setSource(src);
     setAbsTime(startOffsetRef.current);
