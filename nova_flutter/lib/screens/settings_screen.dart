@@ -147,8 +147,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           else ...[
             _buildStatusCard('TMDB Metadata', _status!['tmdb']),
             _buildStatusCard('Real-Debrid', _status!['rd']),
+            _buildStatusCard('AIOStreams', (_status!['aiostreams'] as Map<String, dynamic>?) ?? {'ok': false, 'message': 'Niet geconfigureerd (zet AIOSTREAMS_URL op de server).'}),
             _buildStatusCard('Prowlarr / Jackett', _status!['jackett']),
-            _buildStatusCard('Dumbarr Mount', _status!['media']),
+            _buildStatusCard('Media-mount', _status!['media']),
           ],
         ],
       ),

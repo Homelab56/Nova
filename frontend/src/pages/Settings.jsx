@@ -139,21 +139,28 @@ export default function Settings() {
 
         <StatusCard
           title="Real-Debrid"
-          description="De stream provider die magnet links omzet naar snelle directe downloads."
+          description="Je RD-account: directe links uit je bibliotheek en fallback-torrents. Combineer met AIOStreams voor de beste 4K-keuze."
           status={status?.rd}
           loading={loading}
         />
 
         <StatusCard
+          title="AIOStreams"
+          description="Stroomaggregatie (Torrentio, RD, enz.) via je eigen instance. Zet AIOSTREAMS_URL in .env, bijv. http://192.168.1.75:3003"
+          status={status?.aiostreams}
+          loading={loading}
+        />
+
+        <StatusCard
           title="Prowlarr / Jackett"
-          description="De zoekmachine die torrents vindt op verschillende trackers als ze niet in je bibliotheek staan."
+          description="Optionele fallback: torrents zoeken als er nog geen stream via AIOStreams of RD-bibliotheek is."
           status={status?.jackett}
           loading={loading}
         />
 
         <StatusCard
-          title="Dumbarr Mount"
-          description="De lokale verbinding met je Real-Debrid bestanden via /media in de container."
+          title="Media-mount (/media)"
+          description="Optionele lokale videomount in de container (symlinks of bestanden op /media)."
           status={status?.media}
           loading={loading}
         />

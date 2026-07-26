@@ -434,8 +434,10 @@ export default function Watch() {
 
       if (data.source === "scraper") {
         setStatus(`Gevonden op internet: ${data.title || searchTitle}. Laden...`);
+      } else if (data.source === "aiostreams") {
+        setStatus(`Stream via AIOStreams (${data.title || searchTitle}). Laden...`);
       } else if (data.source === "local") {
-        setStatus(`Gevonden op Dumbarr mount: ${data.title || searchTitle}. Starten...`);
+        setStatus(`Lokaal bestand: ${data.title || searchTitle}. Starten...`);
       } else {
         setStatus("Gevonden in bibliotheek. Starten...");
       }

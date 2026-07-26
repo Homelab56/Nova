@@ -21,6 +21,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const flashTimer = useRef(null);
   const subsAbortRef = useRef(null);
   const bufferingTimerRef = useRef(null);
+  const subModeIntervalRef = useRef(null);
   const lastTimeRef = useRef(0);
   const lastTimeTsRef = useRef(0);
   const startOffsetRef = useRef(0);
@@ -41,6 +42,10 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const [subtitleLabel, setSubtitleLabel] = useState("");
   const [subMenuOpen, setSubMenuOpen] = useState(false);
   const [subtitleDelay, setSubtitleDelay] = useState(0);
+  const [audioTracks, setAudioTracks] = useState([]);
+  const [audioSelected, setAudioSelected] = useState(null);
+  const [audioLabel, setAudioLabel] = useState("");
+  const [audioMenuOpen, setAudioMenuOpen] = useState(false);
   const [prefs, setPrefs] = useState({
     default_audio_lang: "en",
     default_sub_lang_1: "nl",
@@ -65,7 +70,10 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   }, [effectiveTotal]);
 
   useEffect(() => {
-    const onDoc = () => setSubMenuOpen(false);
+    const onDoc = () => {
+      setSubMenuOpen(false);
+      setAudioMenuOpen(false);
+    };
     document.addEventListener("click", onDoc);
     return () => document.removeEventListener("click", onDoc);
   }, []);
@@ -119,26 +127,116 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     };
   }, []);
 
+  const ALLOWED_LANGS = [
+    "en", "eng", "english",
+    "nl", "nld", "dut", "vla", "vlaams", "nl-be", "nl_be", "nld-be", "flemish",
+  ];
+
+  const normLang = (s) => String(s || "").toLowerCase().trim().replaceAll("_", "-");
+
+  const isAllowedLang = (lang, title = "") => {
+    const l = normLang(lang);
+    const t = normLang(title);
+    if (!l && !t) return true;
+    for (const a of ALLOWED_LANGS) {
+      if (l && l.startsWith(a)) return true;
+      if (l && a.startsWith(l) && l.length >= 2) return true;
+      if (t.includes(a)) return true;
+    }
+    return false;
+  };
+
+  const prettyLang = (lang, title = "") => {
+    const l = normLang(lang);
+    const t = normLang(title);
+    const combined = `${l} ${t}`;
+    if (/nl|nld|dut|vla|vlaams|flemish|nederlands|vlaamsch/.test(combined)) {
+      if (/be|vla|vlaams|flemish/.test(combined)) return "🇧🇪  Vlaams";
+      return "🇳🇱  Nederlands";
+    }
+    if (/en|eng|english|engels/.test(combined)) return "🇬🇧  Engels";
+    const clean = (lang || title || "").trim();
+    return clean ? clean.charAt(0).toUpperCase() + clean.slice(1) : "";
+  };
+
+  const extractOriginalUrlParam = () => {
+    try {
+      const raw = String(url || "");
+      if (!raw) return null;
+      const u = new URL(raw, window.location.origin);
+      const fromQuery = u.searchParams.get("url");
+      if (fromQuery) return decodeURIComponent(fromQuery);
+      const path = u.searchParams.get("path");
+      if (path) return { path: decodeURIComponent(path) };
+      if (!raw.startsWith("http://") && !raw.startsWith("https://")) {
+        const parsedFromRelative = new URL(raw, window.location.origin);
+        const q = parsedFromRelative.searchParams.get("url");
+        if (q) return decodeURIComponent(q);
+        const p = parsedFromRelative.searchParams.get("path");
+        if (p) return { path: decodeURIComponent(p) };
+      }
+      if (raw.startsWith("http://") || raw.startsWith("https://")) {
+        if (raw.includes("audio_stream") || raw.includes("start=")) {
+          const stripped = new URL(raw);
+          stripped.searchParams.delete("audio_stream");
+          stripped.searchParams.delete("start");
+          return stripped.toString();
+        }
+        return raw;
+      }
+      return raw;
+    } catch {
+      return null;
+    }
+  };
+
   const buildSubtitlesListUrl = () => {
-    const u = new URL(url, window.location.origin);
-    u.searchParams.delete("start");
-    const apiPrefix = u.pathname.startsWith("/api/") ? "/api" : "";
-    u.pathname = `${apiPrefix}/stream/subtitles`;
+    const u = new URL("/api/stream/subtitles", window.location.origin);
+    const src = extractOriginalUrlParam();
+    if (src) {
+      if (typeof src === "object" && src.path) {
+        u.searchParams.set("path", src.path);
+      } else {
+        u.searchParams.set("url", String(src));
+      }
+    } else if (url) {
+      u.searchParams.set("url", String(url));
+    }
+    return u.toString();
+  };
+
+  const buildAudioListUrl = () => {
+    const u = new URL("/api/stream/audio", window.location.origin);
+    const src = extractOriginalUrlParam();
+    if (src) {
+      if (typeof src === "object" && src.path) {
+        u.searchParams.set("path", src.path);
+      } else {
+        u.searchParams.set("url", String(src));
+      }
+    } else if (url) {
+      u.searchParams.set("url", String(url));
+    }
     return u.toString();
   };
 
   const buildSubtitleVttUrl = (streamIndex) => {
-    const u = new URL(url, window.location.origin);
+    const u = new URL("/api/stream/subtitle.vtt", window.location.origin);
+    const src = extractOriginalUrlParam();
+    if (src) {
+      if (typeof src === "object" && src.path) {
+        u.searchParams.set("path", src.path);
+      } else {
+        u.searchParams.set("url", String(src));
+      }
+    } else if (url) {
+      u.searchParams.set("url", String(url));
+    }
     const start = Math.max(0, Number(startAt) || Number(startOffsetRef.current) || 0);
     if (start > 0) u.searchParams.set("start", String(start.toFixed(3)));
-    else u.searchParams.delete("start");
-    const apiPrefix = u.pathname.startsWith("/api/") ? "/api" : "";
-    u.pathname = `${apiPrefix}/stream/subtitle.vtt`;
     u.searchParams.set("stream_index", String(streamIndex));
     if (subtitleDelay && Math.abs(subtitleDelay) > 0.0005) {
       u.searchParams.set("delay", String(Number(subtitleDelay).toFixed(3)));
-    } else {
-      u.searchParams.delete("delay");
     }
     return u.toString();
   };
@@ -165,6 +263,25 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     return tracks[0];
   };
 
+  const chooseDefaultAudio = (tracks) => {
+    if (!tracks || tracks.length === 0) return null;
+    const prefer = [
+      prefs.default_audio_lang,
+      "en",
+      "eng",
+      "nl",
+      "nld",
+      "dut",
+    ].filter(Boolean);
+    const norm = (s) => String(s || "").toLowerCase().trim().replaceAll("_", "-");
+    const prefNorm = prefer.map(norm);
+    const byLang = tracks.find(t => prefNorm.includes(norm(t.language)));
+    if (byLang) return byLang;
+    const byTitle = tracks.find(t => prefNorm.some(p => norm(t.title).includes(p)));
+    if (byTitle) return byTitle;
+    return tracks[0];
+  };
+
   const buildSrc = (startSeconds) => {
     const u = new URL(url, window.location.origin);
     if (startSeconds && startSeconds > 0) {
@@ -180,6 +297,11 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       u.searchParams.set("start", String(startSeconds.toFixed(3)));
     } else {
       u.searchParams.delete("start");
+    }
+    if (audioSelected !== null) {
+      u.searchParams.set("audio_stream", String(audioSelected));
+    } else {
+      u.searchParams.delete("audio_stream");
     }
     return u.toString();
   };
@@ -234,6 +356,11 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
 
     v.src = src;
     v.load();
+    
+    // Voor redirect URLs, stel currentTime in voor resume
+    if (src && (src.startsWith("http://") || src.startsWith("https://")) && startAt > 0) {
+      v.currentTime = startAt;
+    }
   };
 
   const tryPlay = async () => {
@@ -255,13 +382,24 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     const t = Math.max(0, Number(seconds) || 0);
     startOffsetRef.current = t;
     absTimeRef.current = t;
-    const src = buildSrc(t);
-    baseUrlRef.current = src;
-    await setSource(src);
-    setError(null);
-    setAbsTime(t);
-    reportProgress(t);
-    await tryPlay();
+    
+    // Voor redirect URLs, gebruik direct currentTime seeking
+    if (url && (url.startsWith("http://") || url.startsWith("https://"))) {
+      v.currentTime = t;
+      setError(null);
+      setAbsTime(t);
+      reportProgress(t);
+      await tryPlay();
+    } else {
+      // Voor backend proxy URLs, gebruik buildSrc
+      const src = buildSrc(t);
+      baseUrlRef.current = src;
+      await setSource(src);
+      setError(null);
+      setAbsTime(t);
+      reportProgress(t);
+      await tryPlay();
+    }
   };
 
   const showControlsTemporarily = () => {
@@ -308,13 +446,14 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     fetch(buildSubtitlesListUrl(), { signal: ac.signal })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        const tracks = Array.isArray(data?.tracks) ? data.tracks : [];
+        const allTracks = Array.isArray(data?.tracks) ? data.tracks : [];
+        const filtered = allTracks.filter(t => isAllowedLang(t?.language, t?.title));
         if (ac.signal.aborted) return;
-        setSubtitleTracks(tracks);
-        const def = chooseDefaultSubtitle(tracks);
+        setSubtitleTracks(filtered);
+        const def = chooseDefaultSubtitle(filtered);
         if (def) {
           setSubtitleSelected(def.stream_index);
-          setSubtitleLabel(def.language || def.title || "Subtitles");
+          setSubtitleLabel(prettyLang(def.language, def.title) || "Ondertitels");
         } else {
           setSubtitleSelected(null);
           setSubtitleLabel("");
@@ -324,10 +463,46 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     return () => ac.abort();
   }, [url, prefs.default_sub_lang_1, prefs.default_sub_lang_2, prefs.subtitles_enabled]);
 
+  useEffect(() => {
+    if (!url) return;
+    if (subsAbortRef.current) subsAbortRef.current.abort();
+    const ac = new AbortController();
+    subsAbortRef.current = ac;
+    setAudioTracks([]);
+    setAudioSelected(null);
+    setAudioLabel("");
+    fetch(buildAudioListUrl(), { signal: ac.signal })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        const allTracks = Array.isArray(data?.tracks) ? data.tracks : [];
+        const filtered = allTracks.filter(t => isAllowedLang(t?.language, t?.title));
+        if (ac.signal.aborted) return;
+        setAudioTracks(filtered);
+        const def = chooseDefaultAudio(filtered);
+        if (def) {
+          setAudioSelected(def.stream_index);
+          setAudioLabel(prettyLang(def.language, def.title) || `Audio ${def.stream_index}`);
+        } else {
+          setAudioSelected(null);
+          setAudioLabel("");
+        }
+      })
+      .catch(() => {});
+    return () => ac.abort();
+  }, [url, prefs.default_audio_lang]);
+
   const selectedTrackObj = subtitleSelected !== null
     ? subtitleTracks.find(t => t.stream_index === subtitleSelected) || null
     : null;
   const vttSrc = selectedTrackObj ? buildSubtitleVttUrl(selectedTrackObj.stream_index) : null;
+
+  // Reload video when audio selection changes
+  useEffect(() => {
+    if (!url || audioSelected === null) return;
+    const src = buildSrc(startOffsetRef.current);
+    baseUrlRef.current = src;
+    setSource(src);
+  }, [audioSelected]);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -350,15 +525,42 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     if (!v) return;
     try {
       const tracks = v.textTracks || [];
-      for (let i = 0; i < tracks.length; i++) tracks[i].mode = "disabled";
-      if (subtitleSelected !== null && tracks.length > 0) {
-        const target = tracks[tracks.length - 1];
-        try { target.mode = "disabled"; } catch {}
-        try { target.mode = "hidden"; } catch {}
-        try { target.mode = "showing"; } catch {}
+      const len = tracks.length;
+      for (let i = 0; i < len; i++) {
+        try { tracks[i].mode = "disabled"; } catch {}
+      }
+      if (subtitleSelected !== null && len > 0) {
+        for (let i = 0; i < len; i++) {
+          try { tracks[i].mode = "disabled"; } catch {}
+        }
+        const target = tracks[len - 1];
+        if (target) {
+          try {
+            target.mode = "showing";
+          } catch (e) {
+            try { target.mode = "hidden"; } catch {}
+            try { target.mode = "showing"; } catch {}
+          }
+        }
       }
     } catch {}
   };
+
+  useEffect(() => {
+    if (subModeIntervalRef.current) {
+      clearInterval(subModeIntervalRef.current);
+      subModeIntervalRef.current = null;
+    }
+    if (subtitleSelected !== null) {
+      subModeIntervalRef.current = setInterval(() => applySubtitleModeNow(), 1200);
+    }
+    return () => {
+      if (subModeIntervalRef.current) {
+        clearInterval(subModeIntervalRef.current);
+        subModeIntervalRef.current = null;
+      }
+    };
+  }, [subtitleSelected]);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -431,11 +633,21 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       reportProgress();
     };
     const onTime = () => {
-      const t = startOffsetRef.current + (v.currentTime || 0);
-      setAbsTime(t);
-      absTimeRef.current = t;
-      lastTimeRef.current = v.currentTime || 0;
-      lastTimeTsRef.current = Date.now();
+      // Voor redirect URLs, gebruik direct currentTime
+      if (url && (url.startsWith("http://") || url.startsWith("https://"))) {
+        const t = v.currentTime || 0;
+        setAbsTime(t);
+        absTimeRef.current = t;
+        lastTimeRef.current = t;
+        lastTimeTsRef.current = Date.now();
+      } else {
+        // Voor backend proxy URLs, gebruik startOffset
+        const t = startOffsetRef.current + (v.currentTime || 0);
+        setAbsTime(t);
+        absTimeRef.current = t;
+        lastTimeRef.current = v.currentTime || 0;
+        lastTimeTsRef.current = Date.now();
+      }
       if (buffering) setBuffering(false);
       if (!media || !onProgress) return;
       if (effectiveTotal <= 0) {
@@ -599,20 +811,28 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         autoPlay
         playsInline
         preload="auto"
-        className="w-full h-full"
+        crossOrigin="anonymous"
+        className="w-full h-full nova-video"
         onDoubleClick={toggleFullscreen}
         onClick={toggle}
       >
-        {vttSrc && (
+        {vttSrc && subtitleSelected !== null && (
           <track
-            key={vttSrc}
+            key={`${vttSrc}__${subtitleDelay}__${startOffsetRef.current || 0}`}
             ref={trackElRef}
             src={vttSrc}
             kind="subtitles"
             srcLang={(selectedTrackObj?.language || "und")}
-            label={(selectedTrackObj?.language || selectedTrackObj?.title || subtitleLabel || "Subtitles")}
+            label={(prettyLang(selectedTrackObj?.language, selectedTrackObj?.title) || subtitleLabel || "Ondertitels")}
             default
-            onLoad={applySubtitleModeNow}
+            onLoad={() => {
+              setTimeout(() => applySubtitleModeNow(), 50);
+              setTimeout(() => applySubtitleModeNow(), 400);
+              setTimeout(() => applySubtitleModeNow(), 1500);
+            }}
+            onError={() => {
+              setTimeout(() => applySubtitleModeNow(), 300);
+            }}
           />
         )}
         Je browser ondersteunt geen video afspelen.
@@ -653,12 +873,77 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
             className="flex-1"
           />
 
+          {audioTracks.length > 0 && (
+            <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={() => { setSubMenuOpen(false); setAudioMenuOpen(v => !v); }}
+                className="bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg px-2.5 py-2 text-sm font-semibold flex items-center gap-2 min-w-[46px] justify-center"
+                title={audioLabel || "Audiospoor"}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                {audioLabel && <span className="text-xs font-semibold leading-none whitespace-nowrap max-w-[60px] truncate">{audioLabel.replace(/[🇦🇿🇧🇪🇨🇦🇩🇪🇪🇸🇫🇷🇬🇧🇮🇹🇯🇵🇰🇷🇳🇱🇵🇹🇷🇺🇺🇸]/g, "").trim()}</span>}
+              </button>
+
+              {audioMenuOpen && (
+                <div className="absolute right-0 bottom-14 w-64 bg-black/95 backdrop-blur border border-white/15 rounded-2xl shadow-2xl overflow-hidden z-50">
+                  <div className="px-4 py-3 border-b border-white/10">
+                    <div className="text-xs font-bold text-white/60 uppercase tracking-wide">Audiosporen</div>
+                  </div>
+                  <div className="max-h-72 overflow-y-auto py-1">
+                    {audioTracks.map((t) => {
+                      const idx = t.stream_index;
+                      const pretty = prettyLang(t.language, t.title);
+                      const sub = t.channels ? `${t.channels}Kanaals · ${t.codec || ""}`.trim() : (t.codec || "");
+                      const label = pretty || (t.title ? t.title : `Audio ${idx}`);
+                      const active = audioSelected === idx;
+                      return (
+                        <button
+                          key={idx}
+                          onClick={() => {
+                            setAudioSelected(idx);
+                            setAudioLabel(pretty || label);
+                            setAudioMenuOpen(false);
+                          }}
+                          className={`w-full text-left px-4 py-2.5 text-sm flex items-center gap-3 border-l-2 transition-colors ${
+                            active
+                              ? "bg-white/15 border-nova-accent text-white"
+                              : "border-transparent text-white/90 hover:bg-white/10"
+                          }`}
+                        >
+                          <span className="text-base leading-none flex-shrink-0 w-7 text-center">
+                            {active ? "✓" : (pretty?.includes("🇧🇪") ? "🇧🇪" : pretty?.includes("🇳🇱") ? "🇳🇱" : pretty?.includes("🇬🇧") ? "🇬🇧" : "")}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-semibold leading-tight truncate">
+                              {label}
+                            </div>
+                            {sub && <div className="text-xs text-white/50 leading-tight truncate">{sub}</div>}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {subtitleTracks.length > 0 && (
             <div className="relative" onClick={(e) => e.stopPropagation()}>
               <button
-                onClick={() => setSubMenuOpen(v => !v)}
-                className="bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg px-2.5 py-2 text-sm font-semibold"
-                title="Ondertitels"
+                onClick={() => { setAudioMenuOpen(false); setSubMenuOpen(v => !v); }}
+                className={`bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg px-2.5 py-2 text-sm font-semibold flex items-center gap-2 min-w-[46px] justify-center transition-colors ${
+                  subtitleSelected !== null ? "text-white ring-1 ring-nova-accent/40" : "text-white/70 hover:text-white"
+                }`}
+                title={subtitleSelected !== null ? subtitleLabel || "Ondertitels aan" : "Ondertitels"}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
                   <path
@@ -673,55 +958,106 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
                     strokeLinecap="round"
                   />
                 </svg>
+                {subtitleSelected !== null && subtitleLabel && (
+                  <span className="text-xs font-semibold leading-none whitespace-nowrap max-w-[60px] truncate">
+                    {subtitleLabel.replace(/[🇦🇿🇧🇪🇨🇦🇩🇪🇪🇸🇫🇷🇬🇧🇮🇹🇯🇵🇰🇷🇳🇱🇵🇹🇷🇺🇺🇸]/g, "").trim()}
+                  </span>
+                )}
+                {subtitleSelected === null && (
+                  <span className="text-[10px] font-bold leading-none text-white/30">UIT</span>
+                )}
               </button>
 
               {subMenuOpen && (
-                <div className="absolute right-0 bottom-12 w-56 bg-black/90 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50">
+                <div className="absolute right-0 bottom-14 w-64 bg-black/95 backdrop-blur border border-white/15 rounded-2xl shadow-2xl overflow-hidden z-50">
+                  <div className="px-4 py-3 border-b border-white/10">
+                    <div className="text-xs font-bold text-white/60 uppercase tracking-wide">Ondertitels</div>
+                  </div>
                   <button
                     onClick={() => { setSubtitleSelected(null); setSubtitleLabel(""); setSubMenuOpen(false); }}
-                    className={`w-full text-left px-4 py-2 text-sm ${subtitleSelected === null ? "bg-white/15 text-white" : "text-white/90 hover:bg-white/10"}`}
+                    className={`w-full text-left px-4 py-2.5 text-sm flex items-center gap-3 border-l-2 transition-colors ${
+                      subtitleSelected === null
+                        ? "bg-white/15 border-nova-accent text-white"
+                        : "border-transparent text-white/90 hover:bg-white/10"
+                    }`}
                   >
-                    Ondertitels uit
-                  </button>
-                  <div className="px-4 py-2 border-t border-white/10">
-                    <div className="text-xs text-white/70 mb-2">
-                      Sync: {subtitleDelay >= 0 ? "+" : ""}{Number(subtitleDelay).toFixed(1)}s
+                    <span className="text-base leading-none flex-shrink-0 w-7 text-center opacity-60">✕</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold leading-tight">Uit</div>
+                      <div className="text-xs text-white/50 leading-tight">Geen ondertitels</div>
                     </div>
-                    <div className="flex gap-2">
+                  </button>
+                  <div className="px-4 py-3 border-t border-white/10 bg-white/[0.03]">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-xs font-semibold text-white/70">Sync</div>
+                      <div className="text-xs tabular-nums text-white/90 font-mono">
+                        {subtitleDelay >= 0 ? "+" : ""}{Number(subtitleDelay).toFixed(1)}s
+                      </div>
+                    </div>
+                    <div className="flex gap-1.5">
                       <button
                         onClick={() => setSubtitleDelay(v => Math.max(-10, Number((Number(v) - 0.5).toFixed(3))))}
-                        className="flex-1 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg px-2 py-1 text-xs font-semibold"
+                        className="flex-1 bg-white/10 hover:bg-white/20 active:bg-white/25 border border-white/15 text-white rounded-lg px-2 py-1.5 text-xs font-bold transition-colors"
                         title="Ondertitels vroeger"
                       >
-                        -0.5s
+                        ← -0.5s
                       </button>
                       <button
                         onClick={() => setSubtitleDelay(0)}
-                        className="flex-1 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg px-2 py-1 text-xs font-semibold"
+                        className="px-3 bg-white/5 hover:bg-white/15 border border-white/10 text-white/80 hover:text-white rounded-lg py-1.5 text-xs font-bold transition-colors"
+                        title="Reset sync"
                       >
-                        Reset
+                        0
                       </button>
                       <button
                         onClick={() => setSubtitleDelay(v => Math.min(10, Number((Number(v) + 0.5).toFixed(3))))}
-                        className="flex-1 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg px-2 py-1 text-xs font-semibold"
+                        className="flex-1 bg-white/10 hover:bg-white/20 active:bg-white/25 border border-white/15 text-white rounded-lg px-2 py-1.5 text-xs font-bold transition-colors"
                         title="Ondertitels later"
                       >
-                        +0.5s
+                        +0.5s →
                       </button>
                     </div>
                   </div>
-                  <div className="max-h-72 overflow-y-auto">
+                  <div className="max-h-72 overflow-y-auto py-1 border-t border-white/10">
+                    {subtitleTracks.length === 0 && (
+                      <div className="px-4 py-3 text-sm text-white/40 text-center">
+                        Geen ondertitels gevonden
+                      </div>
+                    )}
                     {subtitleTracks.map((t) => {
                       const idx = t.stream_index;
-                      const label = t.language || t.title || `Track ${idx}`;
+                      const pretty = prettyLang(t.language, t.title);
+                      const sub = t.codec ? `Track ${idx} · ${t.codec}` : `Track ${idx}`;
+                      const label = pretty || (t.title ? t.title : `Ondertitels ${idx}`);
                       const active = subtitleSelected === idx;
                       return (
                         <button
                           key={idx}
-                          onClick={() => { setSubtitleSelected(idx); setSubtitleLabel(label); setSubMenuOpen(false); }}
-                          className={`w-full text-left px-4 py-2 text-sm ${active ? "bg-white/15 text-white" : "text-white/90 hover:bg-white/10"}`}
+                          onClick={() => {
+                            setSubtitleSelected(idx);
+                            setSubtitleLabel(pretty || label);
+                            setSubMenuOpen(false);
+                          }}
+                          className={`w-full text-left px-4 py-2.5 text-sm flex items-center gap-3 border-l-2 transition-colors ${
+                            active
+                              ? "bg-white/15 border-nova-accent text-white"
+                              : "border-transparent text-white/90 hover:bg-white/10"
+                          }`}
                         >
-                          {label}
+                          <span className="text-base leading-none flex-shrink-0 w-7 text-center">
+                            {active ? "✓" : (pretty?.includes("🇧🇪") ? "🇧🇪" : pretty?.includes("🇳🇱") ? "🇳🇱" : pretty?.includes("🇬🇧") ? "🇬🇧" : "")}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-semibold leading-tight truncate">
+                              {label}
+                            </div>
+                            {t.title && pretty !== t.title && t.title.length > 0 && (
+                              <div className="text-xs text-white/50 leading-tight truncate">{t.title}</div>
+                            )}
+                            {(!t.title || pretty === t.title) && sub && (
+                              <div className="text-xs text-white/50 leading-tight truncate">{sub}</div>
+                            )}
+                          </div>
                         </button>
                       );
                     })}

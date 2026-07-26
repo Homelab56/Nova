@@ -7,3 +7,38 @@ body {
   color: white;
   font-family: system-ui, sans-serif;
 }
+
+.nova-video {
+  outline: none;
+  object-fit: contain;
+  background: #000;
+}
+
+.nova-video::cue {
+  background-color: rgba(0, 0, 0, 0.82);
+  color: #ffffff;
+  color: #fff;
+  font-size: clamp(18px);
+  line-height: 1.4;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.9);
+  letter-spacing: 0.02em;
+  font-weight: 500;
+}
+
+@media (min-width: 768px) {
+  .nova-video::cue {
+    font-size: clamp(20px);
+  }
+}
+
+@media (min-width: 1280px) {
+  .nova-video::cue {
+    font-size: 24px;
+  }
+}
+
+.nova-video::-webkit-media-text-track-container {
+  transform: translateY(-10%);
+}
