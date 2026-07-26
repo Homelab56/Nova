@@ -26,8 +26,9 @@ fi
 echo "Project gevonden op: $PROJECT_DIR"
 cd "$PROJECT_DIR"
 
-echo "Git pull..."
-git pull origin main
+echo "Git pull (lokale wijzigingen worden weggegooid)..."
+git fetch origin main
+git reset --hard origin/main
 
 echo "Docker containers herstarten..."
 docker compose restart backend frontend 2>/dev/null || docker-compose restart backend frontend 2>/dev/null
