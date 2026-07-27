@@ -1008,11 +1008,11 @@ async def play(
     is_path = path is not None
     input_value = _resolve_media_file(path) if is_path else urllib.parse.unquote(url)
 
-    # Voor externe HTTP URLs (zoals AIOStreams), proxy met CORS headers voor crossOrigin video+track support
-    if not is_path and (input_value.startswith("http://") or input_value.startswith("https://")):
-        print(f"Proxy externe URL: {input_value[:200]}...")
-        return await _proxy_external_url(input_value, request)
-
+    # Altijd via ffmpeg (ook voor externe AIOStreams URLs): garandeert browser-afspeelbare
+    # H.264/AAC output. Bronnen met HEVC/EAC3 (bv. 4K/8K releases) kan een browser niet
+    # native decoderen; een kale proxy/redirect van zulke bronnen laat de video eeuwig laden.
+    # Compatibele bronnen (h264/aac) worden alsnog via "-c copy" doorgestreamd, dus geen
+    # onnodige CPU-kost voor streams die al afspeelbaar zijn.
     async def _stream_with_semaphore():
         async with TRANSCODE_SEMAPHORE:
             async for chunk in _ffmpeg_stream(input_value, is_path=is_path, start=start, audio_stream=audio_stream):
@@ -1029,6 +1029,10 @@ async def play(
     return StreamingResponse(
         _stream_with_semaphore(),
         media_type="video/mp4",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "no-cache",
+        },
     )
 
 
