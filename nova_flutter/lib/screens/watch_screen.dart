@@ -37,16 +37,41 @@ class _WatchScreenState extends State<WatchScreen> {
   late final Player _player;
   late final VideoController _controller;
   bool _showPlayer = false;
+  Tracks _tracks = const Tracks();
+  Track _currentTrack = const Track();
+  Map? _currentEpisode;
+  Map<String, dynamic> _prefs = {
+    'default_audio_lang': 'en',
+    'default_sub_lang_1': 'nl',
+    'default_sub_lang_2': '',
+    'subtitles_enabled': true,
+  };
+  bool _autoAppliedTracks = false;
 
   @override
   void initState() {
     super.initState();
     _player = Player();
     _controller = VideoController(_player);
+    // Ruimere netwerkbuffer zodat streamen van een externe (Real-Debrid) URL
+    // niet steeds hapert bij kleine snelheidsschommelingen.
+    final native = _player.platform;
+    if (native is NativePlayer) {
+      native.setProperty('cache', 'yes');
+      native.setProperty('cache-secs', '120');
+      native.setProperty('demuxer-max-bytes', '512MiB');
+      native.setProperty('demuxer-max-back-bytes', '64MiB');
+      native.setProperty('demuxer-readahead-secs', '60');
+      native.setProperty('network-timeout', '30');
+      // Hardware-decodering: zonder dit decodeert mpv HEVC/4K+ bronnen op de
+      // CPU, wat op hoge resolutie tot haperend beeld leidt ondanks vlotte audio.
+      native.setProperty('hwdec', 'auto-safe');
+    }
     _loadDetails();
     _checkWatchlist();
+    _loadPrefs();
     if (isMovie) _checkAvailability();
-    
+
     // Luister naar player updates voor progress
     int lastSave = -1;
     _player.stream.position.listen((pos) {
@@ -55,12 +80,179 @@ class _WatchScreenState extends State<WatchScreen> {
       if (dur.inSeconds > 0 && sec > 0 && sec % 10 == 0 && sec != lastSave) {
         lastSave = sec;
         UserDataService.saveProgress(
-          widget.media, 
-          sec.toDouble(), 
+          widget.media,
+          sec.toDouble(),
           dur.inSeconds.toDouble()
         );
       }
     });
+
+    // Luister naar beschikbare/geselecteerde audio- en ondertitelsporen
+    _player.stream.tracks.listen((t) {
+      if (mounted) setState(() => _tracks = t);
+      _autoApplyTrackPrefs();
+    });
+    _player.stream.track.listen((t) {
+      if (mounted) setState(() => _currentTrack = t);
+    });
+  }
+
+  Future<void> _loadPrefs() async {
+    final baseUrl = (await SettingsService.getBackendUrl()).trim().replaceAll(RegExp(r'/$'), '');
+    for (final path in ['/user/prefs', '/api/user/prefs']) {
+      try {
+        final r = await http.get(Uri.parse('$baseUrl$path')).timeout(const Duration(seconds: 5));
+        if (r.statusCode == 200) {
+          final data = jsonDecode(r.body) as Map<String, dynamic>;
+          if (data.isNotEmpty && mounted) {
+            setState(() => _prefs = {..._prefs, ...data});
+          }
+          return;
+        }
+      } catch (_) {
+        continue;
+      }
+    }
+  }
+
+  String _normLang(String s) => s.toLowerCase().trim().replaceAll('_', '-');
+
+  dynamic _matchTrack(List tracks, List<String> preferredLangs) {
+    final prefer = preferredLangs.where((e) => e.isNotEmpty).map(_normLang).toList();
+    for (final p in prefer) {
+      for (final t in tracks) {
+        final lang = _normLang(t.language as String? ?? '');
+        if (lang.isNotEmpty && (lang.startsWith(p) || p.startsWith(lang))) return t;
+      }
+    }
+    for (final p in prefer) {
+      for (final t in tracks) {
+        final title = (t.title as String? ?? '').toLowerCase();
+        if (title.contains(p)) return t;
+      }
+    }
+    return null;
+  }
+
+  // Past de opgeslagen standaard audio-/ondertiteltaal toe zodra mpv de
+  // beschikbare sporen van de zojuist geopende bron heeft gedetecteerd.
+  void _autoApplyTrackPrefs() {
+    if (_autoAppliedTracks) return;
+    final hasRealAudio = _tracks.audio.any((t) => t.id != 'auto' && t.id != 'no');
+    final hasRealSubs = _tracks.subtitle.any((t) => t.id != 'auto' && t.id != 'no');
+    if (!hasRealAudio && !hasRealSubs) return; // nog niet gedetecteerd
+    _autoAppliedTracks = true;
+
+    final audioLang = (_prefs['default_audio_lang'] as String? ?? '').trim();
+    final audioMatch = _matchTrack(_tracks.audio, [audioLang, 'en', 'eng']);
+    if (audioMatch != null) _player.setAudioTrack(audioMatch);
+
+    if (_prefs['subtitles_enabled'] == true) {
+      final sub1 = (_prefs['default_sub_lang_1'] as String? ?? '').trim();
+      final sub2 = (_prefs['default_sub_lang_2'] as String? ?? '').trim();
+      final subMatch = _matchTrack(_tracks.subtitle, [sub1, sub2, 'nl', 'nld', 'dut']);
+      if (subMatch != null) _player.setSubtitleTrack(subMatch);
+    }
+  }
+
+  // Vertaalt een taalcode naar een leesbare naam. mpv's "title" veld is vaak
+  // maar een vlag (Forced/Regular/SDH) i.p.v. de taal, dus die tonen we enkel
+  // als aanvulling, niet als hoofdlabel.
+  String _langName(String? lang) {
+    final l = _normLang(lang ?? '');
+    if (l.isEmpty) return '';
+    if (l.startsWith('nl') || l.startsWith('dut') || l.startsWith('vla')) return 'Nederlands';
+    if (l.startsWith('en')) return 'Engels';
+    return lang!;
+  }
+
+  String _trackLabel(dynamic track) {
+    final id = track.id as String;
+    if (id == 'no') return 'Uit';
+    if (id == 'auto') return 'Automatisch';
+    final lang = track.language as String?;
+    final title = track.title as String?;
+    final langName = _langName(lang);
+    if (langName.isNotEmpty) {
+      if (title != null && title.isNotEmpty && title.toLowerCase() != langName.toLowerCase()) {
+        return '$langName ($title)';
+      }
+      return langName;
+    }
+    return title ?? lang ?? 'Spoor $id';
+  }
+
+  static const _allowedLangPrefixes = [
+    'nl', 'nld', 'dut', 'vla', 'vlaams', 'dutch', 'flemish', 'nederlands',
+    'en', 'eng', 'english',
+  ];
+
+  bool _isAllowedLang(dynamic track) {
+    final id = track.id as String;
+    if (id == 'auto' || id == 'no') return true;
+    final lang = (track.language as String? ?? '').toLowerCase();
+    final title = (track.title as String? ?? '').toLowerCase();
+    if (lang.isEmpty && title.isEmpty) return true;
+    return _allowedLangPrefixes.any((p) => lang.startsWith(p) || title.contains(p));
+  }
+
+  bool _hasSelectableTracks(List tracks) =>
+      tracks.where((t) => _isAllowedLang(t) && t.id != 'auto' && t.id != 'no').isNotEmpty;
+
+  void _pickAudioTrack() {
+    final options = _tracks.audio.where(_isAllowedLang).toList();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF0f1520),
+      builder: (_) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Audio', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+            ),
+            for (final t in options)
+              ListTile(
+                title: Text(_trackLabel(t), style: const TextStyle(color: Colors.white)),
+                trailing: t == _currentTrack.audio ? const Icon(Icons.check, color: Color(0xFF00b4d8)) : null,
+                onTap: () {
+                  _player.setAudioTrack(t);
+                  Navigator.pop(context);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _pickSubtitleTrack() {
+    final options = _tracks.subtitle.where(_isAllowedLang).toList();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF0f1520),
+      builder: (_) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Ondertitels', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+            ),
+            for (final t in options)
+              ListTile(
+                title: Text(_trackLabel(t), style: const TextStyle(color: Colors.white)),
+                trailing: t == _currentTrack.subtitle ? const Icon(Icons.check, color: Color(0xFF00b4d8)) : null,
+                onTap: () {
+                  _player.setSubtitleTrack(t);
+                  Navigator.pop(context);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<bool> _tryStartProcess(String exe, List<String> args) async {
@@ -170,9 +362,10 @@ class _WatchScreenState extends State<WatchScreen> {
   }
 
   Future<void> _play({Map? episode}) async {
-    setState(() { 
-      _loadingStream = true; 
-      _status = 'Zoeken naar streams...'; 
+    _currentEpisode = episode;
+    setState(() {
+      _loadingStream = true;
+      _status = 'Zoeken naar streams...';
       _showPlayer = false;
     });
     
@@ -218,46 +411,181 @@ class _WatchScreenState extends State<WatchScreen> {
         return;
       }
 
-      if (url.startsWith('/')) {
-        url = baseUrl + url;
-      }
-
-      setState(() { 
-        _status = source == 'scraper' ? 'Gevonden op internet. Laden...' : 'Gevonden in bibliotheek. Laden...'; 
-      });
-
-      // Player configureren voor betere compatibiliteit
-      await _player.open(Media(url, httpHeaders: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      }));
-      
-      _player.stream.error.listen((err) {
-        if (mounted) {
-          setState(() {
-            _status = 'Video fout: $err';
-            _showPlayer = false;
-            _loadingStream = false;
-          });
-        }
-      });
-
-      UserDataService.saveProgress(widget.media, 0, 100); 
-
-      if (mounted) {
-        setState(() { 
-          _streamUrl = url; 
-          _loadingStream = false; 
-          _status = ''; 
-          _showPlayer = true;
-        });
-      }
-      
+      final statusLabel = source == 'scraper' ? 'Gevonden op internet. Laden...' : 'Gevonden in bibliotheek. Laden...';
+      await _playUrl(url, statusLabel: statusLabel);
     } catch (e) {
       setState(() {
         _status = 'Fout bij afspelen: $e';
         _loadingStream = false;
       });
     }
+  }
+
+  Future<void> _playUrl(String url, {String statusLabel = 'Laden...'}) async {
+    final baseUrl = (await SettingsService.getBackendUrl()).trim().replaceAll(RegExp(r'/$'), '');
+    if (url.startsWith('/')) {
+      url = baseUrl + url;
+    }
+
+    _autoAppliedTracks = false;
+    setState(() {
+      _status = statusLabel;
+      _loadingStream = true;
+      _tracks = const Tracks();
+      _currentTrack = const Track();
+    });
+
+    // Player configureren voor betere compatibiliteit
+    await _player.open(Media(url, httpHeaders: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    }));
+    final native = _player.platform;
+    if (native is NativePlayer) {
+      Future.delayed(const Duration(seconds: 2), () async {
+        try {
+          final hwdec = await native.getProperty('hwdec-current');
+          final vcodec = await native.getProperty('video-codec');
+          debugPrint('[Nova] hwdec-current=$hwdec video-codec=$vcodec');
+        } catch (_) {}
+      });
+    }
+
+    _player.stream.error.listen((err) {
+      if (mounted) {
+        setState(() {
+          _status = 'Video fout: $err';
+          _showPlayer = false;
+          _loadingStream = false;
+        });
+      }
+    });
+
+    UserDataService.saveProgress(widget.media, 0, 100);
+
+    if (mounted) {
+      setState(() {
+        _streamUrl = url;
+        _loadingStream = false;
+        _status = '';
+        _showPlayer = true;
+      });
+    }
+  }
+
+  String _formatSize(int bytes) {
+    if (bytes <= 0) return '';
+    final gb = bytes / (1024 * 1024 * 1024);
+    if (gb >= 1) return '${gb.toStringAsFixed(1)} GB';
+    final mb = bytes / (1024 * 1024);
+    return '${mb.toStringAsFixed(0)} MB';
+  }
+
+  Future<void> _pickSource({Map? episode}) async {
+    final q = episode != null
+      ? '$title S${_selectedSeason.toString().padLeft(2,'0')}E${(episode['episode_number'] as int).toString().padLeft(2,'0')}'
+      : '$title $year';
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF0f1520),
+      isScrollControlled: true,
+      builder: (sheetContext) => FutureBuilder<List>(
+        future: _fetchSources(q),
+        builder: (context, snapshot) {
+          return SafeArea(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text('Kies een bron', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                  ),
+                  if (snapshot.connectionState == ConnectionState.waiting)
+                    const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Center(child: CircularProgressIndicator(color: Color(0xFF00b4d8))),
+                    )
+                  else if ((snapshot.data ?? []).isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text('Geen bronnen gevonden.', style: TextStyle(color: Colors.grey)),
+                    )
+                  else
+                    for (final s in snapshot.data!)
+                      ListTile(
+                        title: Text(s['title'] as String, maxLines: 2, overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: Colors.white, fontSize: 13)),
+                        subtitle: Text(
+                          [
+                            if ((s['resolution'] as String).isNotEmpty) s['resolution'],
+                            if (s['cached'] == true) 'Direct beschikbaar',
+                            _formatSize(s['size_bytes'] as int),
+                            switch (s['has_nl_subs']) {
+                              true => '✓ NL ondertitels',
+                              false => 'geen NL ondertitels',
+                              _ => '',
+                            },
+                          ].where((e) => (e as String).isNotEmpty).join(' · '),
+                          style: TextStyle(
+                            color: s['has_nl_subs'] == true ? const Color(0xFF00b4d8) : Colors.grey,
+                            fontSize: 11,
+                          ),
+                        ),
+                        onTap: () {
+                          Navigator.pop(sheetContext);
+                          final direct = s['direct_url'] as String?;
+                          final stream = s['stream_url'] as String?;
+                          final chosen = (direct != null && direct.isNotEmpty) ? direct : stream;
+                          if (chosen != null) _playUrl(chosen, statusLabel: 'Bron laden...');
+                        },
+                      ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<List> _fetchSources(String q) async {
+    try {
+      final baseUrl = (await SettingsService.getBackendUrl()).trim().replaceAll(RegExp(r'/$'), '');
+      for (final path in ['/api/debrid/sources', '/debrid/sources']) {
+        try {
+          final apiUrl = '$baseUrl$path?q=${Uri.encodeComponent(q)}&tmdb_id=${widget.media['id']}&media_type=${isMovie ? "movie" : "tv"}';
+          final response = await http.get(Uri.parse(apiUrl)).timeout(const Duration(seconds: 25));
+          if (response.statusCode == 200) {
+            final data = jsonDecode(response.body);
+            final sources = data['sources'] as List?;
+            if (sources != null) return sources;
+          }
+        } catch (_) {
+          continue;
+        }
+      }
+    } catch (_) {}
+    return const [];
+  }
+
+  Widget _trackButton(IconData icon, VoidCallback onTap, String tooltip) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.black54,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, color: Colors.white, size: 18),
+        ),
+      ),
+    );
   }
 
   @override
@@ -283,8 +611,24 @@ class _WatchScreenState extends State<WatchScreen> {
               // Player of backdrop
               if (_showPlayer)
                 AspectRatio(
-                  aspectRatio: 16/9, 
-                  child: Video(controller: _controller)
+                  aspectRatio: 16/9,
+                  child: Stack(children: [
+                    Video(controller: _controller),
+                    Positioned(
+                      top: 8, right: 8,
+                      child: Row(children: [
+                        _trackButton(Icons.dns_outlined, () => _pickSource(episode: _currentEpisode), 'Andere bron'),
+                        if (_hasSelectableTracks(_tracks.audio)) ...[
+                          const SizedBox(width: 8),
+                          _trackButton(Icons.multitrack_audio, _pickAudioTrack, 'Audio'),
+                        ],
+                        if (_hasSelectableTracks(_tracks.subtitle)) ...[
+                          const SizedBox(width: 8),
+                          _trackButton(Icons.subtitles, _pickSubtitleTrack, 'Ondertitels'),
+                        ],
+                      ]),
+                    ),
+                  ]),
                 )
               else if (backdrop != null)
                 Stack(children: [
@@ -343,7 +687,20 @@ class _WatchScreenState extends State<WatchScreen> {
                                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                               ),
                             ),
-                          if (isMovie) const SizedBox(width: 8),
+                          if (isMovie) ...[
+                            const SizedBox(width: 8),
+                            OutlinedButton.icon(
+                              onPressed: _loadingStream ? null : () => _pickSource(),
+                              icon: const Icon(Icons.dns_outlined, size: 16, color: Colors.white),
+                              label: const Text('Bronnen', style: TextStyle(color: Colors.white, fontSize: 13)),
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: Colors.white38),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(width: 8),
                           OutlinedButton.icon(
                             onPressed: _toggleWatchlist,
                             icon: Icon(_inWatchlist ? Icons.bookmark : Icons.bookmark_outline, size: 16,
@@ -497,6 +854,14 @@ class _WatchScreenState extends State<WatchScreen> {
               style: const TextStyle(color: Colors.grey, fontSize: 11, height: 1.4)),
           ])),
           const SizedBox(width: 6),
+          GestureDetector(
+            onTap: () => _pickSource(episode: ep),
+            child: const Padding(
+              padding: EdgeInsets.all(4),
+              child: Icon(Icons.dns_outlined, color: Colors.grey, size: 18),
+            ),
+          ),
+          const SizedBox(width: 4),
           const Icon(Icons.play_arrow, color: Color(0xFF00b4d8), size: 20),
         ]),
       ),

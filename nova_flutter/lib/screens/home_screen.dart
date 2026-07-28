@@ -112,28 +112,29 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF080c14),
       body: SafeArea(
-        child: _loading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFF00b4d8)))
-          : RefreshIndicator(
-              onRefresh: _load,
-              color: const Color(0xFF00b4d8),
-              child: CustomScrollView(
-                slivers: [
-                  SliverPersistentHeader(
-                    pinned: true,
-                    delegate: _NavbarDelegate(
-                      child: _buildAppBar(),
+        child: Column(
+          children: [
+            _buildAppBar(),
+            Expanded(
+              child: _loading
+                ? const Center(child: CircularProgressIndicator(color: Color(0xFF00b4d8)))
+                : RefreshIndicator(
+                    onRefresh: _load,
+                    color: const Color(0xFF00b4d8),
+                    child: CustomScrollView(
+                      slivers: [
+                        if (_heroItems.isNotEmpty) SliverToBoxAdapter(child: _buildHero(_heroItems[0])),
+                        ..._rows.map((r) => SliverToBoxAdapter(
+                          child: _buildRow(r['title'] as String, r['items'] as List,
+                            isRd: r['is_rd'] == true,
+                            isProgress: r['is_progress'] == true))),
+                        const SliverToBoxAdapter(child: SizedBox(height: 50)),
+                      ],
                     ),
                   ),
-                  if (_heroItems.isNotEmpty) SliverToBoxAdapter(child: _buildHero(_heroItems[0])),
-                  ..._rows.map((r) => SliverToBoxAdapter(
-                    child: _buildRow(r['title'] as String, r['items'] as List, 
-                      isRd: r['is_rd'] == true, 
-                      isProgress: r['is_progress'] == true))),
-                  const SliverToBoxAdapter(child: SizedBox(height: 50)),
-                ],
-              ),
             ),
+          ],
+        ),
       ),
     );
   }
@@ -312,7 +313,7 @@ class _HomeScreenState extends State<HomeScreen> {
           color: isRd ? const Color(0xFF00b4d8) : Colors.white)),
       ),
       SizedBox(
-        height: isProgress ? 160 : 185,
+        height: isProgress ? 160 : 205,
         child: ListView.builder(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -392,22 +393,4 @@ class _HomeScreenState extends State<HomeScreen> {
       MaterialPageRoute(builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item))),
     ).then((_) => _load()); // Herlaad progress bij terugkomst
   }
-}
-
-class _NavbarDelegate extends SliverPersistentHeaderDelegate {
-  final Widget child;
-  _NavbarDelegate({required this.child});
-
-  @override
-  double get minExtent => 60;
-  @override
-  double get maxExtent => 60;
-
-  @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return child;
-  }
-
-  @override
-  bool shouldRebuild(covariant _NavbarDelegate oldDelegate) => true;
 }

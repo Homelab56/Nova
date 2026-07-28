@@ -11,11 +11,19 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
+const Map<String, String> kLangOptions = {'nl': 'Nederlands', 'en': 'Engels'};
+
 class _SettingsScreenState extends State<SettingsScreen> {
   final _backendCtrl = TextEditingController();
   Map<String, dynamic>? _status;
   bool _loadingStatus = false;
   bool _saving = false;
+
+  String _audioLang = 'en';
+  String _subLang1 = 'nl';
+  String? _subLang2 = 'nl';
+  bool _subsEnabled = true;
+  bool _savingPrefs = false;
 
   @override
   void initState() {
@@ -27,24 +35,85 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _backendCtrl.text = await SettingsService.getBackendUrl();
     if (_backendCtrl.text.isNotEmpty) {
       _fetchStatus();
+      _loadPrefs();
     }
     setState(() {});
+  }
+
+  // Normaliseert eender welke taalcode (bv. "nl-be", "nld", "eng") naar een
+  // waarde die exact overeenkomt met een sleutel in kLangOptions, zodat de
+  // dropdown nooit crasht op een waarde die niet in zijn itemslijst zit.
+  String _clampLang(String? v, String fallback) {
+    final norm = (v ?? '').toLowerCase().trim();
+    if (norm.startsWith('nl') || norm.startsWith('dut') || norm.startsWith('vla')) return 'nl';
+    if (norm.startsWith('en')) return 'en';
+    return kLangOptions.containsKey(fallback) ? fallback : 'en';
+  }
+
+  Future<void> _loadPrefs() async {
+    final url = _backendCtrl.text.trim().replaceAll(RegExp(r'/$'), '');
+    for (final path in ['/user/prefs', '/api/user/prefs']) {
+      try {
+        final r = await http.get(Uri.parse('$url$path')).timeout(const Duration(seconds: 5));
+        if (r.statusCode == 200) {
+          final data = jsonDecode(r.body) as Map<String, dynamic>;
+          if (data.isEmpty) return;
+          setState(() {
+            _audioLang = _clampLang(data['default_audio_lang'] as String?, 'en');
+            _subLang1 = _clampLang(data['default_sub_lang_1'] as String?, 'nl');
+            final s2 = data['default_sub_lang_2'] as String?;
+            _subLang2 = (s2 == null || s2.isEmpty) ? null : _clampLang(s2, 'nl');
+            _subsEnabled = data['subtitles_enabled'] as bool? ?? true;
+          });
+          return;
+        }
+      } catch (e) {
+        debugPrint('Prefs fetch error ($path): $e');
+      }
+    }
+  }
+
+  Future<void> _savePrefs() async {
+    setState(() => _savingPrefs = true);
+    final url = _backendCtrl.text.trim().replaceAll(RegExp(r'/$'), '');
+    final body = jsonEncode({
+      'default_audio_lang': _audioLang,
+      'default_sub_lang_1': _subLang1,
+      'default_sub_lang_2': _subLang2 ?? '',
+      'subtitles_enabled': _subsEnabled,
+    });
+    for (final path in ['/user/prefs', '/api/user/prefs']) {
+      try {
+        final r = await http.post(Uri.parse('$url$path'),
+          headers: {'Content-Type': 'application/json'}, body: body).timeout(const Duration(seconds: 5));
+        if (r.statusCode == 200) break;
+      } catch (e) {
+        debugPrint('Prefs save error ($path): $e');
+      }
+    }
+    setState(() => _savingPrefs = false);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Voorkeuren opgeslagen'), backgroundColor: Color(0xFF00b4d8)));
+    }
   }
 
   Future<void> _fetchStatus() async {
     if (_backendCtrl.text.isEmpty) return;
     setState(() => _loadingStatus = true);
-    try {
-      final url = _backendCtrl.text.trim().replaceAll(RegExp(r'/$'), '');
-      final r = await http.get(Uri.parse('$url/api/settings/status')).timeout(const Duration(seconds: 5));
-      if (r.statusCode == 200) {
-        setState(() => _status = jsonDecode(r.body));
+    final url = _backendCtrl.text.trim().replaceAll(RegExp(r'/$'), '');
+    for (final path in ['/settings/status', '/api/settings/status']) {
+      try {
+        final r = await http.get(Uri.parse('$url$path')).timeout(const Duration(seconds: 5));
+        if (r.statusCode == 200) {
+          setState(() => _status = jsonDecode(r.body));
+          break;
+        }
+      } catch (e) {
+        debugPrint('Status fetch error ($path): $e');
       }
-    } catch (e) {
-      debugPrint('Status fetch error: $e');
-    } finally {
-      setState(() => _loadingStatus = false);
     }
+    setState(() => _loadingStatus = false);
   }
 
   Future<void> _save() async {
@@ -127,7 +196,61 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
 
           const SizedBox(height: 32),
-          const Text('Systeem Status', 
+          const Text('Afspeel voorkeuren',
+            style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          const Text('Standaard audio- en ondertiteltaal bij het starten van een video.',
+            style: TextStyle(color: Colors.grey, fontSize: 14)),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0f1520),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.grey.withOpacity(0.1)),
+            ),
+            child: Column(
+              children: [
+                _buildLangRow('Standaard audio', _audioLang, kLangOptions,
+                  (v) => setState(() => _audioLang = v ?? _audioLang)),
+                const SizedBox(height: 12),
+                Row(children: [
+                  Expanded(child: Text('Ondertitels', style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 14))),
+                  Switch(
+                    value: _subsEnabled,
+                    activeColor: const Color(0xFF00b4d8),
+                    onChanged: (v) => setState(() => _subsEnabled = v),
+                  ),
+                ]),
+                if (_subsEnabled) ...[
+                  const SizedBox(height: 4),
+                  _buildLangRow('Ondertiteltaal', _subLang1, kLangOptions,
+                    (v) => setState(() => _subLang1 = v ?? _subLang1)),
+                  const SizedBox(height: 12),
+                  _buildLangRow('2e taal (indien 1e niet beschikbaar)', _subLang2, {
+                    ...kLangOptions,
+                  }, (v) => setState(() => _subLang2 = v), allowNone: true),
+                ],
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _savingPrefs ? null : _savePrefs,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF00b4d8),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: Text(_savingPrefs ? 'Opslaan...' : 'Voorkeuren Opslaan',
+                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 32),
+          const Text('Systeem Status',
             style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
           const Text('Geconfigureerd via .env op de server.',
@@ -154,6 +277,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
+  }
+
+  Widget _buildLangRow(String label, String? value, Map<String, String> options, ValueChanged<String?> onChanged, {bool allowNone = false}) {
+    return Row(children: [
+      Expanded(child: Text(label, style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 14))),
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFF080c14),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: DropdownButton<String?>(
+          value: value,
+          underline: const SizedBox.shrink(),
+          dropdownColor: const Color(0xFF0f1520),
+          style: const TextStyle(color: Colors.white, fontSize: 14),
+          items: [
+            if (allowNone) const DropdownMenuItem(value: null, child: Text('Geen')),
+            ...options.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))),
+          ],
+          onChanged: onChanged,
+        ),
+      ),
+    ]);
   }
 
   Widget _buildStatusCard(String title, Map<String, dynamic> data) {

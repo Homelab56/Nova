@@ -38,8 +38,7 @@ class SettingsService {
   }
 
   static Future<bool> isConfigured() async {
-    final t = await getTmdbKey();
-    final r = await getRdToken();
-    return t.isNotEmpty && r.isNotEmpty;
+    final backend = await getBackendUrl();
+    return backend.isNotEmpty && backend != 'http://localhost:8000';
   }
 }

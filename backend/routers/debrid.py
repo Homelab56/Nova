@@ -8,6 +8,7 @@ import time
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from .config_loader import get_rd_token, get_tmdb_key, get_aiostreams_config
+from .stream import _ffprobe_subtitle_streams
 
 router = APIRouter()
 
@@ -115,6 +116,12 @@ async def _fetch_aiostreams_results(
     return [x for x in results if isinstance(x, dict)]
 
 
+def _wrap_stream_value(url: str, not_ready: bool) -> str:
+    if not_ready or url.startswith("magnet:"):
+        return f"/api/stream/play?url={urllib.parse.quote(url, safe='')}"
+    return url
+
+
 def _pick_best_aiostream_url(results: list[dict]) -> tuple[str | None, dict | None]:
     with_url = [x for x in results if (x.get("url") or "").strip()]
     if not with_url:
@@ -124,11 +131,57 @@ def _pick_best_aiostream_url(results: list[dict]) -> tuple[str | None, dict | No
     url = (best.get("url") or "").strip()
     if not url:
         return None, None
-    not_ready = bool(best.get("notWebReady"))
-    if not_ready or url.startswith("magnet:"):
-        enc = urllib.parse.quote(url, safe="")
-        return f"/api/stream/play?url={enc}", best
-    return url, best
+    return _wrap_stream_value(url, bool(best.get("notWebReady"))), best
+
+
+_NL_LANG_PREFIXES = ("nl", "nld", "dut", "vla", "dutch", "vlaams", "flemish")
+
+
+def _subtitle_is_dutch(s: dict) -> bool:
+    tags = s.get("tags") or {}
+    if not isinstance(tags, dict):
+        tags = {}
+    lang = str(tags.get("language") or "").lower()
+    title = str(tags.get("title") or "").lower()
+    return any(lang.startswith(p) for p in _NL_LANG_PREFIXES) or any(p in title for p in _NL_LANG_PREFIXES)
+
+
+async def _has_dutch_subtitles(url: str, timeout: float = 12.0) -> bool:
+    if not url or url.startswith("magnet:"):
+        return False
+    try:
+        streams = await asyncio.wait_for(_ffprobe_subtitle_streams(url, is_path=False), timeout=timeout)
+    except Exception:
+        return False
+    return any(_subtitle_is_dutch(s) for s in streams)
+
+
+async def _pick_best_with_dutch_subs(results: list[dict], max_probe: int = 6) -> tuple[str | None, dict | None, bool]:
+    """
+    Zoals _pick_best_aiostream_url, maar probeert eerst onder de best-gerankte
+    kandidaten er één te vinden met bevestigde Nederlandse ondertitels (via
+    ffprobe op het echte bestand, niet enkel de bestandsnaam).
+    Geeft (stream_value, item, has_nl_subs) terug.
+    """
+    with_url = [x for x in results if (x.get("url") or "").strip()]
+    if not with_url:
+        return None, None, False
+    with_url.sort(key=_aio_rank_result, reverse=True)
+
+    candidates = with_url[:max_probe]
+    checks = await asyncio.gather(
+        *[_has_dutch_subtitles((c.get("url") or "").strip()) for c in candidates],
+        return_exceptions=True,
+    )
+    for item, has_nl in zip(candidates, checks):
+        if has_nl is True:
+            url = (item.get("url") or "").strip()
+            return _wrap_stream_value(url, bool(item.get("notWebReady"))), item, True
+
+    # Geen van de geprobeerde kandidaten heeft bevestigd Nederlandse ondertitels;
+    # val terug op de gewone beste match zodat afspelen niet vastloopt.
+    fallback_url, fallback_item = _pick_best_aiostream_url(results)
+    return fallback_url, fallback_item, False
 
 
 _VIDEO_EXTS = (".mkv", ".mp4", ".m4v", ".avi", ".mov", ".webm", ".ts")
@@ -571,10 +624,10 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                     print(f"AIOStreams: {aio_type} {aio_id}")
                     aio_res = await _fetch_aiostreams_results(aio_cfg, aio_type, aio_id, timeout=55.0)
                     print(f"AIOStreams resultaten: {len(aio_res)} items")
-                    stream_url, picked = _pick_best_aiostream_url(aio_res)
+                    stream_url, picked, has_nl_subs = await _pick_best_with_dutch_subs(aio_res)
                     if stream_url:
                         label = (picked or {}).get("name") or (picked or {}).get("filename") or q
-                        print(f"AIOStreams stream URL: {stream_url[:200]}...")
+                        print(f"AIOStreams stream URL ({'NL subs' if has_nl_subs else 'geen bevestigde NL subs'}): {stream_url[:200]}...")
                         # Vervang poort 8086 met 3003 (AIOStreams draait op 3003)
                         stream_url = stream_url.replace(":8086", ":3003")
                         # Proxy door backend (browser heeft geen toegang tot AIOStreams)
@@ -583,6 +636,7 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                             "direct_url": stream_url,
                             "source": "aiostreams",
                             "title": str(label)[:500],
+                            "has_nl_subs": has_nl_subs,
                         }
                         _search_cache[cache_key] = (result, current_time)
                         return result
@@ -721,6 +775,16 @@ async def list_sources(q: str, tmdb_id: int | None = None, media_type: str | Non
     with_url = [x for x in aio_res if (x.get("url") or "").strip()]
     with_url.sort(key=_aio_rank_result, reverse=True)
 
+    # Check de best-gerankte kandidaten écht (via ffprobe) op Nederlandse
+    # ondertitels, i.p.v. enkel op de bestandsnaam af te gaan.
+    _PROBE_LIMIT = 10
+    to_probe = with_url[:_PROBE_LIMIT]
+    nl_checks = await asyncio.gather(
+        *[_has_dutch_subtitles((c.get("url") or "").strip()) for c in to_probe],
+        return_exceptions=True,
+    )
+    nl_by_id = {id(c): (r is True) for c, r in zip(to_probe, nl_checks)}
+
     sources = []
     for item in with_url:
         raw_url = (item.get("url") or "").strip()
@@ -745,9 +809,13 @@ async def list_sources(q: str, tmdb_id: int | None = None, media_type: str | Non
             "resolution": str(resolution),
             "size_bytes": size_bytes,
             "cached": bool(item.get("cached")),
+            "has_nl_subs": nl_by_id.get(id(item)),  # True / False / None (niet gecheckt)
             "stream_url": f"/api/stream/play?url={urllib.parse.quote(picked_value, safe='')}",
             "direct_url": picked_value,
         })
+
+    # Bevestigde NL-ondertitels eerst, dan ongecheckte, dan bevestigd geen NL-subs.
+    sources.sort(key=lambda s: {True: 0, None: 1, False: 2}[s["has_nl_subs"]])
 
     return {"sources": sources}
 
