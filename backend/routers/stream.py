@@ -1349,7 +1349,7 @@ async def _search_opensubtitles(
         params["season_number"] = season
         params["episode_number"] = episode
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
             r = await client.get(f"{_OS_BASE}/subtitles", params=params, headers=_os_headers())
         if r.status_code != 200:
             print(f"OpenSubtitles zoekfout: {r.status_code} {r.text[:300]}")
@@ -1371,7 +1371,7 @@ async def _search_opensubtitles(
 
 async def _download_opensubtitles(file_id: int) -> str | None:
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
             r = await client.post(f"{_OS_BASE}/download", json={"file_id": file_id}, headers=_os_headers())
         if r.status_code != 200:
             print(f"OpenSubtitles downloadfout: {r.status_code} {r.text[:300]}")
