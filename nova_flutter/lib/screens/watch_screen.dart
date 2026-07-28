@@ -120,20 +120,29 @@ class _WatchScreenState extends State<WatchScreen> {
 
   String _normLang(String s) => s.toLowerCase().trim().replaceAll('_', '-');
 
-  dynamic _matchTrack(List tracks, List<String> preferredLangs) {
+  bool _isForcedTrack(dynamic t) => (t.title as String? ?? '').toLowerCase().contains('forced');
+
+  // [avoidForced] zorgt dat we een "Forced"-ondertitelspoor pas als allerlaatste
+  // redmiddel kiezen: die tonen doorgaans maar een handvol regels (bv. bij een
+  // vreemde taal in beeld), niet de volledige ondertiteling - zonder deze
+  // check leek het net of er geen ondertitels beschikbaar waren.
+  dynamic _matchTrack(List tracks, List<String> preferredLangs, {bool avoidForced = false}) {
     final prefer = preferredLangs.where((e) => e.isNotEmpty).map(_normLang).toList();
     for (final p in prefer) {
       for (final t in tracks) {
+        if (avoidForced && _isForcedTrack(t)) continue;
         final lang = _normLang(t.language as String? ?? '');
         if (lang.isNotEmpty && (lang.startsWith(p) || p.startsWith(lang))) return t;
       }
     }
     for (final p in prefer) {
       for (final t in tracks) {
+        if (avoidForced && _isForcedTrack(t)) continue;
         final title = (t.title as String? ?? '').toLowerCase();
         if (title.contains(p)) return t;
       }
     }
+    if (avoidForced) return _matchTrack(tracks, preferredLangs);
     return null;
   }
 
@@ -161,7 +170,7 @@ class _WatchScreenState extends State<WatchScreen> {
         final sub2 = (_prefs['default_sub_lang_2'] as String? ?? '').trim();
         // NL heeft voorrang; als er geen Nederlandse ondertitels in de bron
         // zitten, valt dit terug op Engels i.p.v. helemaal geen ondertiteling.
-        final subMatch = _matchTrack(_tracks.subtitle, [sub1, sub2, 'nl', 'nld', 'dut', 'en', 'eng']);
+        final subMatch = _matchTrack(_tracks.subtitle, [sub1, sub2, 'nl', 'nld', 'dut', 'en', 'eng'], avoidForced: true);
         debugPrint('[Nova] auto subtitle match: ${subMatch != null ? "${subMatch.id}:${subMatch.language}" : "geen match"}');
         if (subMatch != null) _player.setSubtitleTrack(subMatch);
       }
