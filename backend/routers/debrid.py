@@ -709,6 +709,7 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                     for torrent in torrents:
                         if torrent.get("status") != "downloaded": continue
                         filename_raw = torrent.get("filename", "") or ""
+                        if _looks_like_junk_release({"filename": filename_raw}): continue
                         filename = _normalize_text(filename_raw)
                         if ep_variants and not any(t in filename for t in ep_variants): continue
                         
