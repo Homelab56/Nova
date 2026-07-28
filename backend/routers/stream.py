@@ -1390,15 +1390,61 @@ async def _download_opensubtitles(file_id: int) -> str | None:
         return None
 
 
-async def _run_ffsubsync(video_url: str, srt_text: str, timeout: float = 120.0) -> str | None:
+async def _extract_reference_audio(video_url: str, out_path: str, duration_secs: int = 900, timeout: float = 90.0) -> bool:
+    """
+    ffsubsync valideert zijn referentiebestand met os.access(), wat nooit
+    lukt voor een URL - dus eerst audio naar een lokaal bestand extraheren.
+    Mono/16kHz WAV, beperkt tot de eerste [duration_secs] (genoeg spraak om
+    een betrouwbare sync te berekenen, zonder de hele - vaak 10+ GB - bron
+    te moeten downloaden).
+    """
+    cmd = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+        "-rw_timeout", "20000000",
+        "-i", video_url,
+        "-t", str(duration_secs),
+        "-vn", "-sn",
+        "-ac", "1", "-ar", "16000",
+        "-acodec", "pcm_s16le",
+        "-y", out_path,
+    ]
+    proc = None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        _out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        if proc.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
+            print(f"Audio-extractie voor ffsubsync mislukt: {(err or b'').decode('utf-8', errors='ignore')[:400]}")
+            return False
+        return True
+    except asyncio.TimeoutError:
+        if proc:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        print("Audio-extractie voor ffsubsync: timeout")
+        return False
+    except Exception as e:
+        print(f"Audio-extractie voor ffsubsync fout: {e}")
+        return False
+
+
+async def _run_ffsubsync(video_url: str, srt_text: str, timeout: float = 60.0) -> str | None:
     """Lijnt een ondertitel automatisch uit op de audio van de echte stream
     (spraakdetectie), ongeacht welke exacte release we binnenkregen."""
     with tempfile.TemporaryDirectory() as tmp:
+        ref_path = os.path.join(tmp, "reference.wav")
         in_path = os.path.join(tmp, "in.srt")
         out_path = os.path.join(tmp, "out.srt")
         with open(in_path, "w", encoding="utf-8") as f:
             f.write(srt_text)
-        cmd = ["ffsubsync", video_url, "-i", in_path, "-o", out_path]
+
+        if not await _extract_reference_audio(video_url, ref_path):
+            return None
+
+        cmd = ["ffsubsync", ref_path, "-i", in_path, "-o", out_path]
         proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
