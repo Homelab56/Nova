@@ -113,7 +113,17 @@ async def _fetch_aiostreams_results(
         return []
     data = payload.get("data") or {}
     results = data.get("results") or []
-    return [x for x in results if isinstance(x, dict)]
+    results = [x for x in results if isinstance(x, dict)]
+    # AIOStreams geeft soms zijn interne poort (8086) mee i.p.v. de poort
+    # waarop de service echt bereikbaar is (3003). Dit hier al normaliseren
+    # zodat ranking, ffprobe-checks én de uiteindelijke afspeel-URL allemaal
+    # dezelfde (werkende) URL gebruiken - anders faalt ffprobe stilletjes met
+    # "connection refused" en lijkt de bron onterecht kapot/zonder subs.
+    for item in results:
+        url = item.get("url")
+        if isinstance(url, str) and ":8086" in url:
+            item["url"] = url.replace(":8086", ":3003")
+    return results
 
 
 def _wrap_stream_value(url: str, not_ready: bool) -> str:
