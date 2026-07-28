@@ -24,6 +24,16 @@ def get_rd_token() -> str:
     return os.getenv("RD_API_TOKEN", "")
 
 
+def get_opensubtitles_key() -> str:
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE) as f:
+            data = json.load(f)
+        key = data.get("opensubtitles_api_key", "")
+        if key:
+            return key
+    return os.getenv("OPENSUBTITLES_API_KEY", "").strip().replace("`", "")
+
+
 def get_jackett_config() -> dict:
     """Haalt Jackett of Prowlarr URL en API key op uit config of env."""
     if os.path.exists(CONFIG_FILE):

@@ -8,10 +8,11 @@ import time
 import shutil
 import mimetypes
 import re
+import tempfile
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse, FileResponse, RedirectResponse
+from fastapi.responses import StreamingResponse, FileResponse, RedirectResponse, Response
 from pydantic import BaseModel
-from .config_loader import get_rd_token
+from .config_loader import get_rd_token, get_opensubtitles_key
 
 router = APIRouter()
 
@@ -1319,6 +1320,152 @@ async def subtitle_vtt(
         media_type="text/vtt",
         headers={"Cache-Control": "no-cache"},
     )
+
+
+# --- Externe ondertitels (OpenSubtitles) met automatische audio-sync ---
+
+_OS_BASE = "https://api.opensubtitles.com/api/v1"
+_OS_USER_AGENT = "Nova v1.0"
+
+_EXTERNAL_SUB_CACHE: dict[str, tuple[float, str]] = {}
+_EXTERNAL_SUB_CACHE_TTL = 24 * 3600
+
+
+def _os_headers() -> dict:
+    return {
+        "Api-Key": get_opensubtitles_key(),
+        "User-Agent": _OS_USER_AGENT,
+        "Content-Type": "application/json",
+    }
+
+
+async def _search_opensubtitles(
+    tmdb_id: int, media_type: str, language: str, season: int | None, episode: int | None
+) -> dict | None:
+    if not get_opensubtitles_key():
+        return None
+    params: dict = {"tmdb_id": tmdb_id, "languages": language}
+    if media_type == "tv" and season and episode:
+        params["season_number"] = season
+        params["episode_number"] = episode
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(f"{_OS_BASE}/subtitles", params=params, headers=_os_headers())
+        if r.status_code != 200:
+            print(f"OpenSubtitles zoekfout: {r.status_code} {r.text[:300]}")
+            return None
+        items = (r.json().get("data")) or []
+        if not items:
+            return None
+        # Beste match: meeste downloads (proxy voor betrouwbaarheid/kwaliteit).
+        items.sort(key=lambda x: ((x.get("attributes") or {}).get("download_count") or 0), reverse=True)
+        for item in items:
+            files = (item.get("attributes") or {}).get("files") or []
+            if files and files[0].get("file_id"):
+                return {"file_id": files[0]["file_id"]}
+        return None
+    except Exception as e:
+        print(f"OpenSubtitles zoekfout: {e}")
+        return None
+
+
+async def _download_opensubtitles(file_id: int) -> str | None:
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(f"{_OS_BASE}/download", json={"file_id": file_id}, headers=_os_headers())
+        if r.status_code != 200:
+            print(f"OpenSubtitles downloadfout: {r.status_code} {r.text[:300]}")
+            return None
+        link = r.json().get("link")
+        if not link:
+            return None
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            fr = await client.get(link)
+        if fr.status_code != 200:
+            return None
+        fr.encoding = fr.encoding or "utf-8"
+        return fr.text
+    except Exception as e:
+        print(f"OpenSubtitles downloadfout: {e}")
+        return None
+
+
+async def _run_ffsubsync(video_url: str, srt_text: str, timeout: float = 120.0) -> str | None:
+    """Lijnt een ondertitel automatisch uit op de audio van de echte stream
+    (spraakdetectie), ongeacht welke exacte release we binnenkregen."""
+    with tempfile.TemporaryDirectory() as tmp:
+        in_path = os.path.join(tmp, "in.srt")
+        out_path = os.path.join(tmp, "out.srt")
+        with open(in_path, "w", encoding="utf-8") as f:
+            f.write(srt_text)
+        cmd = ["ffsubsync", video_url, "-i", in_path, "-o", out_path]
+        proc = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            _out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            if proc.returncode != 0 or not os.path.exists(out_path):
+                print(f"ffsubsync fout: {(err or b'').decode('utf-8', errors='ignore')[:600]}")
+                return None
+            with open(out_path, "r", encoding="utf-8", errors="ignore") as f:
+                return f.read()
+        except asyncio.TimeoutError:
+            if proc:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            print("ffsubsync: timeout")
+            return None
+        except Exception as e:
+            print(f"ffsubsync fout: {e}")
+            return None
+
+
+def _srt_to_vtt(srt_text: str) -> str:
+    body = re.sub(r"(\d{2}:\d{2}:\d{2}),(\d{3})", r"\1.\2", srt_text)
+    return "WEBVTT\n\n" + body.strip() + "\n"
+
+
+@router.get("/subtitle-external.vtt")
+async def subtitle_external_vtt(
+    url: str,
+    tmdb_id: int,
+    media_type: str,
+    season: int | None = None,
+    episode: int | None = None,
+    lang: str = "nl",
+):
+    """
+    Zoekt een ondertitel op OpenSubtitles (los van wat er in het videobestand
+    zelf zit), en lijnt 'm automatisch uit op de audio van de echte stream via
+    ffsubsync - zodat sync niet afhangt van of we toevallig dezelfde release
+    als de ondertitel-uploader hadden.
+    """
+    if not get_opensubtitles_key():
+        raise HTTPException(status_code=503, detail="OpenSubtitles is niet geconfigureerd op de server.")
+
+    cache_key = f"{tmdb_id}:{media_type}:{season}:{episode}:{lang}"
+    now = time.time()
+    cached = _EXTERNAL_SUB_CACHE.get(cache_key)
+    if cached and (now - cached[0]) < _EXTERNAL_SUB_CACHE_TTL:
+        return Response(content=cached[1], media_type="text/vtt", headers={"Cache-Control": "no-cache"})
+
+    found = await _search_opensubtitles(tmdb_id, media_type, lang, season, episode)
+    if not found:
+        raise HTTPException(status_code=404, detail=f"Geen {lang}-ondertitels gevonden op OpenSubtitles.")
+
+    srt_text = await _download_opensubtitles(found["file_id"])
+    if not srt_text:
+        raise HTTPException(status_code=502, detail="Kon ondertitel niet downloaden van OpenSubtitles.")
+
+    input_value = urllib.parse.unquote(url)
+    synced_srt = await _run_ffsubsync(input_value, srt_text)
+    final_srt = synced_srt or srt_text  # val terug op ongesynchroniseerde versie als sync mislukt
+    vtt = _srt_to_vtt(final_srt)
+    _EXTERNAL_SUB_CACHE[cache_key] = (now, vtt)
+    return Response(content=vtt, media_type="text/vtt", headers={"Cache-Control": "no-cache"})
 
 
 async def _ensure_hls_session(session_id: str, input_value: str):

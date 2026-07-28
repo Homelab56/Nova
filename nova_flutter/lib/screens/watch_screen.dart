@@ -251,6 +251,10 @@ class _WatchScreenState extends State<WatchScreen> {
 
   void _pickSubtitleTrack() {
     final options = _tracks.subtitle.where(_isAllowedLang).toList();
+    final hasEmbeddedNl = options.any((t) {
+      final lang = _normLang(t.language ?? '');
+      return lang.startsWith('nl') || lang.startsWith('dut');
+    });
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF0f1520),
@@ -271,10 +275,70 @@ class _WatchScreenState extends State<WatchScreen> {
                   Navigator.pop(context);
                 },
               ),
+            if (!hasEmbeddedNl) ...[
+              const Divider(color: Colors.white12, height: 1),
+              ListTile(
+                leading: const Icon(Icons.cloud_download_outlined, color: Color(0xFF00b4d8)),
+                title: const Text('Extern NL zoeken (auto-sync)', style: TextStyle(color: Color(0xFF00b4d8))),
+                subtitle: const Text('Zoekt op OpenSubtitles en lijnt automatisch uit op de audio. Kan tot ~1-2 min duren.',
+                  style: TextStyle(color: Colors.grey, fontSize: 11)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _loadExternalSubtitle();
+                },
+              ),
+            ],
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _loadExternalSubtitle() async {
+    final url = _streamUrl;
+    final tmdbId = widget.media['id'];
+    if (url == null || tmdbId is! int) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Nederlandse ondertitels zoeken en synchroniseren...'), duration: Duration(seconds: 6)));
+    try {
+      final baseUrl = (await SettingsService.getBackendUrl()).trim().replaceAll(RegExp(r'/$'), '');
+      final params = {
+        'url': url,
+        'tmdb_id': '$tmdbId',
+        'media_type': isMovie ? 'movie' : 'tv',
+        'lang': 'nl',
+        if (_currentEpisode != null) 'season': '$_selectedSeason',
+        if (_currentEpisode != null) 'episode': '${_currentEpisode!['episode_number']}',
+      };
+      for (final path in ['/stream/subtitle-external.vtt', '/api/stream/subtitle-external.vtt']) {
+        final vttUrl = Uri.parse('$baseUrl$path').replace(queryParameters: params);
+        final check = await http.get(vttUrl).timeout(const Duration(seconds: 150));
+        if (check.statusCode == 200) {
+          final track = SubtitleTrack.uri(vttUrl.toString(), title: 'Nederlands (extern)', language: 'nl');
+          await _player.setSubtitleTrack(track);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Nederlandse ondertitels geladen.'), backgroundColor: Color(0xFF00b4d8)));
+          }
+          return;
+        }
+        if (check.statusCode != 404) continue;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Geen Nederlandse ondertitels gevonden op OpenSubtitles.'), backgroundColor: Colors.redAccent));
+        }
+        return;
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Kon geen verbinding maken met de server.'), backgroundColor: Colors.redAccent));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Fout bij ophalen ondertitels: $e'), backgroundColor: Colors.redAccent));
+      }
+    }
   }
 
   Future<bool> _tryStartProcess(String exe, List<String> args) async {
