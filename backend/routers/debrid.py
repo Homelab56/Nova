@@ -176,7 +176,7 @@ async def _probe_subtitle_langs(url: str, timeout: float = 12.0) -> tuple[bool, 
     return True, has_nl, has_en
 
 
-async def _pick_best_with_dutch_subs(results: list[dict], max_probe: int = 6) -> tuple[str | None, dict | None, bool]:
+async def _pick_best_with_dutch_subs(results: list[dict], max_probe: int = 10) -> tuple[str | None, dict | None, bool]:
     """
     Zoals _pick_best_aiostream_url, maar probeert eerst onder de best-gerankte
     kandidaten er één te vinden met bevestigde Nederlandse ondertitels (via
@@ -808,7 +808,7 @@ async def list_sources(q: str, tmdb_id: int | None = None, media_type: str | Non
     # ontmaskert ook kapotte/onbereikbare links: die geven net als een bron
     # zonder passende ondertitels (False, False) terug en worden hieronder
     # op dezelfde manier uit de lijst gefilterd.
-    _PROBE_LIMIT = 10
+    _PROBE_LIMIT = 20
     to_probe = with_url[:_PROBE_LIMIT]
     checks = await asyncio.gather(
         *[_probe_subtitle_langs((c.get("url") or "").strip()) for c in to_probe],
@@ -827,15 +827,14 @@ async def list_sources(q: str, tmdb_id: int | None = None, media_type: str | Non
         if not raw_url:
             continue
 
+        # Enkel bevestigd werkende bronnen met NL of EN ondertitels tonen -
+        # geen ongecheckte gok-resultaten die achteraf "unavailable" blijken.
         probed = probed_by_id.get(id(item))
-        if probed is not None:
-            has_nl, has_en = probed
-            if not has_nl and not has_en:
-                # Bevestigd geen NL/EN ondertitels, of de bron kon niet eens
-                # geopend worden - in beide gevallen niet bruikbaar.
-                continue
-        else:
-            has_nl, has_en = None, None  # niet gecheckt (buiten probe-limiet)
+        if probed is None:
+            continue
+        has_nl, has_en = probed
+        if not has_nl and not has_en:
+            continue
 
         not_ready = bool(item.get("notWebReady"))
         if not_ready or raw_url.startswith("magnet:"):
