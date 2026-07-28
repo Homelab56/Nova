@@ -67,6 +67,11 @@ def _aio_rank_result(item: dict) -> tuple[int, int]:
         size = int(item.get("size") or 0)
     except Exception:
         size = 0
+    # "AI upscale"-releases zijn zelden echt hogere kwaliteit, wel enorm groot
+    # (waardoor ze anders de tie-break op bestandsgrootte winnen) en vaak te
+    # zwaar om vlot af te spelen. Nooit automatisch als beste kiezen.
+    if any(x in name for x in ("ai upscale", "ai-upscale", "upscaled", "ai upscaled")):
+        return (-1, size)
     tier = 0
     if any(x in name for x in ("2160", "4k", "uhd", "4320")):
         tier = 4000
@@ -696,6 +701,55 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
             result = {"stream_url": None, "message": "Geen direct afspeelbare streams gevonden."}
             _search_cache[cache_key] = (result, current_time)
             return result
+
+
+@router.get("/sources")
+async def list_sources(q: str, tmdb_id: int | None = None, media_type: str | None = None):
+    """
+    Geeft alle gevonden AIOStreams-resultaten terug (beste eerst), zonder er
+    automatisch één te kiezen. Zo kan de gebruiker zelf een andere bron
+    proberen als de automatisch gekozen stream niet goed afspeelt.
+    """
+    aio_cfg = get_aiostreams_config()
+    if not (aio_cfg.get("base_url") and tmdb_id):
+        return {"sources": []}
+    aio_type, aio_id = _aiostreams_search_id(media_type, int(tmdb_id), q)
+    if not aio_type or not aio_id:
+        return {"sources": []}
+
+    aio_res = await _fetch_aiostreams_results(aio_cfg, aio_type, aio_id, timeout=55.0)
+    with_url = [x for x in aio_res if (x.get("url") or "").strip()]
+    with_url.sort(key=_aio_rank_result, reverse=True)
+
+    sources = []
+    for item in with_url:
+        raw_url = (item.get("url") or "").strip()
+        if not raw_url:
+            continue
+        not_ready = bool(item.get("notWebReady"))
+        if not_ready or raw_url.startswith("magnet:"):
+            picked_value = f"/api/stream/play?url={urllib.parse.quote(raw_url, safe='')}"
+        else:
+            picked_value = raw_url
+        picked_value = picked_value.replace(":8086", ":3003")
+
+        name = item.get("name") or item.get("filename") or q
+        resolution = ((item.get("parsedFile") or {}).get("resolution")) or ""
+        try:
+            size_bytes = int(item.get("size") or 0)
+        except Exception:
+            size_bytes = 0
+
+        sources.append({
+            "title": str(name)[:500],
+            "resolution": str(resolution),
+            "size_bytes": size_bytes,
+            "cached": bool(item.get("cached")),
+            "stream_url": f"/api/stream/play?url={urllib.parse.quote(picked_value, safe='')}",
+            "direct_url": picked_value,
+        })
+
+    return {"sources": sources}
 
 
 @router.post("/add")
