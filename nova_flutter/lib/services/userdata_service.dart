@@ -48,7 +48,7 @@ class UserDataService {
     await p.setString('progress', jsonEncode(map));
   }
 
-  static Future<Map?> getItemProgress(int id) async {
+  static Future<Map?> getItemProgress(Object id) async {
     final p = await _prefs;
     final raw = p.getString('progress') ?? '{}';
     final map = jsonDecode(raw) as Map;

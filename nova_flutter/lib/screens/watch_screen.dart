@@ -46,7 +46,8 @@ class _WatchScreenState extends State<WatchScreen> {
     'default_sub_lang_2': '',
     'subtitles_enabled': true,
   };
-  bool _autoAppliedTracks = false;
+  bool _autoAppliedAudio = false;
+  bool _autoAppliedSubs = false;
 
   @override
   void initState() {
@@ -79,8 +80,10 @@ class _WatchScreenState extends State<WatchScreen> {
       final sec = pos.inSeconds;
       if (dur.inSeconds > 0 && sec > 0 && sec % 10 == 0 && sec != lastSave) {
         lastSave = sec;
+        final item = _progressItem();
+        debugPrint('[Nova] saveProgress: id=${item['id']} sec=$sec dur=${dur.inSeconds}');
         UserDataService.saveProgress(
-          widget.media,
+          item,
           sec.toDouble(),
           dur.inSeconds.toDouble()
         );
@@ -136,22 +139,32 @@ class _WatchScreenState extends State<WatchScreen> {
 
   // Past de opgeslagen standaard audio-/ondertiteltaal toe zodra mpv de
   // beschikbare sporen van de zojuist geopende bron heeft gedetecteerd.
+  // Audio en ondertitels worden onafhankelijk toegepast: mpv rapporteert ze
+  // vaak in aparte updates (bv. audio eerder dan ondertitels), dus een enkele
+  // gedeelde "klaar"-vlag zou de latere selectie overslaan.
   void _autoApplyTrackPrefs() {
-    if (_autoAppliedTracks) return;
     final hasRealAudio = _tracks.audio.any((t) => t.id != 'auto' && t.id != 'no');
     final hasRealSubs = _tracks.subtitle.any((t) => t.id != 'auto' && t.id != 'no');
-    if (!hasRealAudio && !hasRealSubs) return; // nog niet gedetecteerd
-    _autoAppliedTracks = true;
 
-    final audioLang = (_prefs['default_audio_lang'] as String? ?? '').trim();
-    final audioMatch = _matchTrack(_tracks.audio, [audioLang, 'en', 'eng']);
-    if (audioMatch != null) _player.setAudioTrack(audioMatch);
+    if (!_autoAppliedAudio && hasRealAudio) {
+      _autoAppliedAudio = true;
+      final audioLang = (_prefs['default_audio_lang'] as String? ?? '').trim();
+      final audioMatch = _matchTrack(_tracks.audio, [audioLang, 'en', 'eng']);
+      debugPrint('[Nova] auto audio match: ${audioMatch != null ? "${audioMatch.id}:${audioMatch.language}" : "geen match"}');
+      if (audioMatch != null) _player.setAudioTrack(audioMatch);
+    }
 
-    if (_prefs['subtitles_enabled'] == true) {
-      final sub1 = (_prefs['default_sub_lang_1'] as String? ?? '').trim();
-      final sub2 = (_prefs['default_sub_lang_2'] as String? ?? '').trim();
-      final subMatch = _matchTrack(_tracks.subtitle, [sub1, sub2, 'nl', 'nld', 'dut']);
-      if (subMatch != null) _player.setSubtitleTrack(subMatch);
+    if (!_autoAppliedSubs && hasRealSubs) {
+      _autoAppliedSubs = true;
+      if (_prefs['subtitles_enabled'] == true) {
+        final sub1 = (_prefs['default_sub_lang_1'] as String? ?? '').trim();
+        final sub2 = (_prefs['default_sub_lang_2'] as String? ?? '').trim();
+        // NL heeft voorrang; als er geen Nederlandse ondertitels in de bron
+        // zitten, valt dit terug op Engels i.p.v. helemaal geen ondertiteling.
+        final subMatch = _matchTrack(_tracks.subtitle, [sub1, sub2, 'nl', 'nld', 'dut', 'en', 'eng']);
+        debugPrint('[Nova] auto subtitle match: ${subMatch != null ? "${subMatch.id}:${subMatch.language}" : "geen match"}');
+        if (subMatch != null) _player.setSubtitleTrack(subMatch);
+      }
     }
   }
 
@@ -361,6 +374,38 @@ class _WatchScreenState extends State<WatchScreen> {
     setState(() { _seasonData = data; _loadingSeason = false; });
   }
 
+  // Voortgang wordt opgeslagen onder de show/film-id; bij een serie voegen we
+  // seizoen/aflevering toe zodat hervatten niet de voortgang van een andere
+  // aflevering pakt.
+  Map<String, dynamic> _progressItem() {
+    final item = Map<String, dynamic>.from(widget.media);
+    if (_currentEpisode != null) {
+      item['season_number'] = _selectedSeason;
+      item['episode_number'] = _currentEpisode!['episode_number'];
+    }
+    return item;
+  }
+
+  Future<double> _resumeSeconds({Map? episode}) async {
+    final id = widget.media['id'];
+    final saved = await UserDataService.getItemProgress(id);
+    debugPrint('[Nova] _resumeSeconds: id=$id (${id.runtimeType}) episode=${episode?['episode_number']} saved=$saved');
+    if (saved == null) return 0;
+    if (episode != null) {
+      if (saved['season_number'] != _selectedSeason || saved['episode_number'] != episode['episode_number']) {
+        debugPrint('[Nova] _resumeSeconds: andere aflevering (saved S${saved['season_number']}E${saved['episode_number']} vs huidige S${_selectedSeason}E${episode['episode_number']})');
+        return 0; // opgeslagen voortgang hoort bij een andere aflevering
+      }
+    } else if (saved['season_number'] != null) {
+      return 0; // film, maar het opgeslagen record is van een aflevering
+    }
+    final t = (saved['current_time'] as num?)?.toDouble() ?? 0;
+    final d = (saved['duration'] as num?)?.toDouble() ?? 0;
+    if (t <= 10) return 0;
+    if (d > 0 && t > d - 20) return 0; // vrijwel afgelopen, gewoon opnieuw beginnen
+    return t;
+  }
+
   Future<void> _play({Map? episode}) async {
     _currentEpisode = episode;
     setState(() {
@@ -412,7 +457,8 @@ class _WatchScreenState extends State<WatchScreen> {
       }
 
       final statusLabel = source == 'scraper' ? 'Gevonden op internet. Laden...' : 'Gevonden in bibliotheek. Laden...';
-      await _playUrl(url, statusLabel: statusLabel);
+      final resume = await _resumeSeconds(episode: episode);
+      await _playUrl(url, statusLabel: statusLabel, resumeSeconds: resume);
     } catch (e) {
       setState(() {
         _status = 'Fout bij afspelen: $e';
@@ -421,13 +467,14 @@ class _WatchScreenState extends State<WatchScreen> {
     }
   }
 
-  Future<void> _playUrl(String url, {String statusLabel = 'Laden...'}) async {
+  Future<void> _playUrl(String url, {String statusLabel = 'Laden...', double resumeSeconds = 0}) async {
     final baseUrl = (await SettingsService.getBackendUrl()).trim().replaceAll(RegExp(r'/$'), '');
     if (url.startsWith('/')) {
       url = baseUrl + url;
     }
 
-    _autoAppliedTracks = false;
+    _autoAppliedAudio = false;
+    _autoAppliedSubs = false;
     setState(() {
       _status = statusLabel;
       _loadingStream = true;
@@ -435,17 +482,37 @@ class _WatchScreenState extends State<WatchScreen> {
       _currentTrack = const Track();
     });
 
-    // Player configureren voor betere compatibiliteit
+    debugPrint('[Nova] _playUrl: resumeSeconds=$resumeSeconds url=$url');
+
+    // Player configureren voor betere compatibiliteit. We openen gepauzeerd,
+    // wachten tot mpv de duur kent (bron is dan echt geladen), seeken pas
+    // daarna en starten dan het afspelen - direct seeken vlak na open() kan
+    // stil genegeerd worden omdat mpv de seek nog niet kan verwerken.
     await _player.open(Media(url, httpHeaders: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    }));
+    }), play: false);
+
+    if (resumeSeconds > 0) {
+      try {
+        await _player.stream.duration.firstWhere((d) => d > Duration.zero).timeout(const Duration(seconds: 15));
+      } catch (_) {}
+      await _player.seek(Duration(seconds: resumeSeconds.round()));
+      debugPrint('[Nova] seeked to ${resumeSeconds.round()}s, position now: ${_player.state.position}');
+    }
+    await _player.play();
+
     final native = _player.platform;
     if (native is NativePlayer) {
       Future.delayed(const Duration(seconds: 2), () async {
         try {
           final hwdec = await native.getProperty('hwdec-current');
           final vcodec = await native.getProperty('video-codec');
+          final subs = _tracks.subtitle.map((t) => '${t.id}:${t.language}:${t.title}').join(', ');
+          final auds = _tracks.audio.map((t) => '${t.id}:${t.language}:${t.title}').join(', ');
           debugPrint('[Nova] hwdec-current=$hwdec video-codec=$vcodec');
+          debugPrint('[Nova] subtitle tracks: $subs');
+          debugPrint('[Nova] audio tracks: $auds');
+          debugPrint('[Nova] position 2s na start: ${_player.state.position}');
         } catch (_) {}
       });
     }
@@ -460,7 +527,7 @@ class _WatchScreenState extends State<WatchScreen> {
       }
     });
 
-    UserDataService.saveProgress(widget.media, 0, 100);
+    UserDataService.saveProgress(_progressItem(), resumeSeconds, resumeSeconds > 0 ? resumeSeconds + 100 : 100);
 
     if (mounted) {
       setState(() {
@@ -481,6 +548,7 @@ class _WatchScreenState extends State<WatchScreen> {
   }
 
   Future<void> _pickSource({Map? episode}) async {
+    _currentEpisode = episode;
     final q = episode != null
       ? '$title S${_selectedSeason.toString().padLeft(2,'0')}E${(episode['episode_number'] as int).toString().padLeft(2,'0')}'
       : '$title $year';
@@ -533,12 +601,15 @@ class _WatchScreenState extends State<WatchScreen> {
                             fontSize: 11,
                           ),
                         ),
-                        onTap: () {
+                        onTap: () async {
                           Navigator.pop(sheetContext);
                           final direct = s['direct_url'] as String?;
                           final stream = s['stream_url'] as String?;
                           final chosen = (direct != null && direct.isNotEmpty) ? direct : stream;
-                          if (chosen != null) _playUrl(chosen, statusLabel: 'Bron laden...');
+                          if (chosen != null) {
+                            final resume = await _resumeSeconds(episode: episode);
+                            _playUrl(chosen, statusLabel: 'Bron laden...', resumeSeconds: resume);
+                          }
                         },
                       ),
                 ],

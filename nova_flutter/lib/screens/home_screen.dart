@@ -76,12 +76,12 @@ class _HomeScreenState extends State<HomeScreen> {
     switch (_tab) {
       case 1: baseRows.addAll([
         {'title': 'Populaire films', 'items': _popularMovies},
-        {'title': 'Trending films', 'items': _trendMovies},
+        {'title': 'Trending films', 'items': _trendMovies, 'is_ranked': true},
         {'title': 'Best beoordeeld', 'items': _topMovies},
       ]); break;
       case 2: baseRows.addAll([
         {'title': 'Populaire series', 'items': _popularTv},
-        {'title': 'Trending series', 'items': _trendTv},
+        {'title': 'Trending series', 'items': _trendTv, 'is_ranked': true},
         {'title': 'Best beoordeeld', 'items': _topTv},
       ]); break;
       case 4: baseRows.addAll([
@@ -89,7 +89,7 @@ class _HomeScreenState extends State<HomeScreen> {
         {'title': 'Kinderseries', 'items': _kidsTv},
       ]); break;
       default: baseRows.addAll([
-        {'title': 'Trending deze week', 'items': _trending},
+        {'title': 'Top 10 deze week', 'items': _trending, 'is_ranked': true},
         {'title': 'Populaire films', 'items': _popularMovies},
         {'title': 'Populaire series', 'items': _popularTv},
         {'title': 'Trending films', 'items': _trendMovies},
@@ -127,7 +127,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         ..._rows.map((r) => SliverToBoxAdapter(
                           child: _buildRow(r['title'] as String, r['items'] as List,
                             isRd: r['is_rd'] == true,
-                            isProgress: r['is_progress'] == true))),
+                            isProgress: r['is_progress'] == true,
+                            isRanked: r['is_ranked'] == true))),
                         const SliverToBoxAdapter(child: SizedBox(height: 50)),
                       ],
                     ),
@@ -303,25 +304,76 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildRow(String title, List items, {bool isRd = false, bool isProgress = false}) {
+  Widget _buildRow(String title, List items, {bool isRd = false, bool isProgress = false, bool isRanked = false}) {
     if (items.isEmpty) return const SizedBox.shrink();
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Padding(
-        padding: const EdgeInsets.fromLTRB(16, 20, 16, 10),
+        padding: const EdgeInsets.fromLTRB(16, 24, 16, 12),
         child: Text(title, style: TextStyle(
-          fontSize: 17, fontWeight: FontWeight.bold, 
+          fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: 0.2,
           color: isRd ? const Color(0xFF00b4d8) : Colors.white)),
       ),
       SizedBox(
-        height: isProgress ? 160 : 205,
+        height: isProgress ? 165 : (isRanked ? 250 : 250),
         child: ListView.builder(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           itemCount: items.length,
-          itemBuilder: (_, i) => _buildCard(items[i], isRd: isRd, isProgress: isProgress),
+          itemBuilder: (_, i) => isRanked && i < 9
+            ? _buildRankedCard(items[i], i + 1)
+            : _buildCard(items[i], isRd: isRd, isProgress: isProgress),
         ),
       ),
     ]);
+  }
+
+  // Netflix-achtige "Top 10" kaart met een grote omlijnde rangnummer achter de poster.
+  Widget _buildRankedCard(Map item, int rank) {
+    final poster = item['poster_path'] as String?;
+    final title = item['title'] ?? item['name'] ?? '';
+    return GestureDetector(
+      onTap: () => _openWatch(item),
+      child: Container(
+        width: 172,
+        margin: const EdgeInsets.symmetric(horizontal: 2),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          SizedBox(
+            height: 210,
+            child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              SizedBox(
+                width: 56,
+                child: Text(
+                  '$rank',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 108,
+                    fontWeight: FontWeight.w900,
+                    height: 0.78,
+                    fontStyle: FontStyle.italic,
+                    foreground: Paint()
+                      ..style = PaintingStyle.stroke
+                      ..strokeWidth = 2.4
+                      ..color = Colors.white.withOpacity(0.85),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: NovaImage(path: poster, width: 130, height: 195),
+                ),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsets.only(left: 56),
+            child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w500)),
+          ),
+        ]),
+      ),
+    );
   }
 
   Widget _buildCard(Map item, {bool isRd = false, bool isProgress = false}) {
@@ -368,18 +420,24 @@ class _HomeScreenState extends State<HomeScreen> {
     return GestureDetector(
       onTap: () => _openWatch(item),
       child: Container(
-        width: 115, margin: const EdgeInsets.symmetric(horizontal: 4),
+        width: 140, margin: const EdgeInsets.symmetric(horizontal: 5),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: isRd 
-              ? Container(width: 115, height: 150, color: const Color(0xFF0f1520), 
-                  child: const Icon(Icons.folder_open, color: Color(0xFF00b4d8), size: 30))
-              : NovaImage(path: poster, width: 115, height: 150),
+          Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 10, offset: const Offset(0, 4))],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: isRd
+                ? Container(width: 140, height: 195, color: const Color(0xFF0f1520),
+                    child: const Icon(Icons.folder_open, color: Color(0xFF00b4d8), size: 32))
+                : NovaImage(path: poster, width: 140, height: 195),
+            ),
           ),
-          const SizedBox(height: 5),
+          const SizedBox(height: 6),
           Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w500)),
+            style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600)),
           if (!isRd && yearStr.isNotEmpty)
             Text(yearStr, style: const TextStyle(fontSize: 10, color: Colors.grey)),
         ]),
