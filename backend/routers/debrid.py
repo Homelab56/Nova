@@ -87,6 +87,21 @@ def _aio_rank_result(item: dict) -> tuple[int, int]:
     return (tier, size)
 
 
+_JUNK_RELEASE_MARKERS = ("ai upscale", "ai-upscale", "upscaled", "ai upscaled")
+
+
+def _looks_like_junk_release(item: dict) -> bool:
+    """
+    Releases die zichzelf als "AI upscale" aanprijzen zijn zelden echt hogere
+    kwaliteit en vaak te zwaar om vlot af te spelen. Deze worden overal
+    volledig uitgesloten (niet enkel laag gerankt), zodat ze ook nooit via
+    een ondertitel-fallback alsnog gekozen kunnen worden wanneer er weinig
+    andere resultaten zijn.
+    """
+    name = (str(item.get("name") or "") + " " + str(item.get("filename") or "")).lower()
+    return any(x in name for x in _JUNK_RELEASE_MARKERS)
+
+
 async def _fetch_aiostreams_results(
     cfg: dict,
     aio_type: str,
@@ -133,7 +148,7 @@ def _wrap_stream_value(url: str, not_ready: bool) -> str:
 
 
 def _pick_best_aiostream_url(results: list[dict]) -> tuple[str | None, dict | None]:
-    with_url = [x for x in results if (x.get("url") or "").strip()]
+    with_url = [x for x in results if (x.get("url") or "").strip() and not _looks_like_junk_release(x)]
     if not with_url:
         return None, None
     with_url.sort(key=_aio_rank_result, reverse=True)
@@ -194,7 +209,7 @@ async def _pick_best_with_dutch_subs(results: list[dict], max_probe: int = 10) -
     enkele met NL, dan telt een bevestigde Engelse ondertitel als tweede keus.
     Geeft (stream_value, item, has_nl_subs) terug.
     """
-    with_url = [x for x in results if (x.get("url") or "").strip()]
+    with_url = [x for x in results if (x.get("url") or "").strip() and not _looks_like_junk_release(x)]
     if not with_url:
         return None, None, False
     with_url.sort(key=_aio_rank_result, reverse=True)
@@ -810,7 +825,7 @@ async def list_sources(q: str, tmdb_id: int | None = None, media_type: str | Non
         return {"sources": []}
 
     aio_res = await _fetch_aiostreams_results(aio_cfg, aio_type, aio_id, timeout=55.0)
-    with_url = [x for x in aio_res if (x.get("url") or "").strip()]
+    with_url = [x for x in aio_res if (x.get("url") or "").strip() and not _looks_like_junk_release(x)]
     with_url.sort(key=_aio_rank_result, reverse=True)
 
     # Check de best-gerankte kandidaten écht (via ffprobe) op Nederlandse en
