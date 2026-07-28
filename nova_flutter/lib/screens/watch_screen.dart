@@ -590,11 +590,8 @@ class _WatchScreenState extends State<WatchScreen> {
                             if ((s['resolution'] as String).isNotEmpty) s['resolution'],
                             if (s['cached'] == true) 'Direct beschikbaar',
                             _formatSize(s['size_bytes'] as int),
-                            switch (s['has_nl_subs']) {
-                              true => '✓ NL ondertitels',
-                              false => 'geen NL ondertitels',
-                              _ => '',
-                            },
+                            if (s['has_nl_subs'] == true) '✓ NL ondertitels'
+                            else if (s['has_en_subs'] == true) '✓ EN ondertitels',
                           ].where((e) => (e as String).isNotEmpty).join(' · '),
                           style: TextStyle(
                             color: s['has_nl_subs'] == true ? const Color(0xFF00b4d8) : Colors.grey,
