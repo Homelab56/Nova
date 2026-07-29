@@ -147,8 +147,23 @@ def _wrap_stream_value(url: str, not_ready: bool) -> str:
     return url
 
 
+def _is_usable_now(item: dict) -> bool:
+    """
+    Sluit bronnen uit die niet meteen afspeelbaar zijn: nog niet gecachede
+    torrents (AIOStreams serveert dan een "wordt gedownload naar je debrid,
+    probeer later opnieuw"-placeholderclip i.p.v. de echte video) en magnet-
+    links die eerst nog toegevoegd moeten worden.
+    """
+    url = (item.get("url") or "").strip()
+    if not url or url.startswith("magnet:"):
+        return False
+    if item.get("notWebReady"):
+        return False
+    return True
+
+
 def _pick_best_aiostream_url(results: list[dict]) -> tuple[str | None, dict | None]:
-    with_url = [x for x in results if (x.get("url") or "").strip() and not _looks_like_junk_release(x)]
+    with_url = [x for x in results if _is_usable_now(x) and not _looks_like_junk_release(x)]
     if not with_url:
         return None, None
     with_url.sort(key=_aio_rank_result, reverse=True)
@@ -209,7 +224,7 @@ async def _pick_best_with_dutch_subs(results: list[dict], max_probe: int = 10) -
     enkele met NL, dan telt een bevestigde Engelse ondertitel als tweede keus.
     Geeft (stream_value, item, has_nl_subs) terug.
     """
-    with_url = [x for x in results if (x.get("url") or "").strip() and not _looks_like_junk_release(x)]
+    with_url = [x for x in results if _is_usable_now(x) and not _looks_like_junk_release(x)]
     if not with_url:
         return None, None, False
     with_url.sort(key=_aio_rank_result, reverse=True)
@@ -826,7 +841,7 @@ async def list_sources(q: str, tmdb_id: int | None = None, media_type: str | Non
         return {"sources": []}
 
     aio_res = await _fetch_aiostreams_results(aio_cfg, aio_type, aio_id, timeout=55.0)
-    with_url = [x for x in aio_res if (x.get("url") or "").strip() and not _looks_like_junk_release(x)]
+    with_url = [x for x in aio_res if _is_usable_now(x) and not _looks_like_junk_release(x)]
     with_url.sort(key=_aio_rank_result, reverse=True)
 
     # Check de best-gerankte kandidaten écht (via ffprobe) op Nederlandse en
