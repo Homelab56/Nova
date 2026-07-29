@@ -1390,7 +1390,7 @@ async def _download_opensubtitles(file_id: int) -> str | None:
         return None
 
 
-async def _extract_reference_audio(video_url: str, out_path: str, duration_secs: int = 900, timeout: float = 90.0) -> bool:
+async def _extract_reference_audio(video_url: str, out_path: str, duration_secs: int = 300, timeout: float = 150.0) -> bool:
     """
     ffsubsync valideert zijn referentiebestand met os.access(), wat nooit
     lukt voor een URL - dus eerst audio naar een lokaal bestand extraheren.

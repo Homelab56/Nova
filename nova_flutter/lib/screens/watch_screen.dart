@@ -325,7 +325,7 @@ class _WatchScreenState extends State<WatchScreen> {
       };
       for (final path in ['/stream/subtitle-external.vtt', '/api/stream/subtitle-external.vtt']) {
         final vttUrl = Uri.parse('$baseUrl$path').replace(queryParameters: params);
-        final check = await http.get(vttUrl).timeout(const Duration(seconds: 150));
+        final check = await http.get(vttUrl).timeout(const Duration(seconds: 240));
         if (check.statusCode == 200) {
           final track = SubtitleTrack.uri(vttUrl.toString(), title: 'Nederlands (extern)', language: 'nl');
           await _player.setSubtitleTrack(track);
