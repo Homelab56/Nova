@@ -330,9 +330,8 @@ class _WatchScreenState extends State<WatchScreen> {
   }
 
   // Checkt (via ffprobe op de backend, zonder de video te hoeven openen) of
-  // de bron zelf al een Nederlandse ondertitel bevat, en geeft zo ja de
-  // stream_index terug (nodig om 'm nadien te laten synchroniseren).
-  Future<int?> _findEmbeddedDutchStreamIndex(String streamUrl) async {
+  // de bron zelf al een Nederlandse ondertitel bevat.
+  Future<bool> _hasEmbeddedDutchSubtitle(String streamUrl) async {
     try {
       final baseUrl = (await SettingsService.getBackendUrl()).trim().replaceAll(RegExp(r'/$'), '');
       for (final path in ['/stream/subtitles', '/api/stream/subtitles']) {
@@ -341,40 +340,17 @@ class _WatchScreenState extends State<WatchScreen> {
         if (r.statusCode == 200) {
           final data = jsonDecode(r.body);
           final tracks = (data['tracks'] as List?) ?? [];
-          for (final t in tracks) {
+          return tracks.any((t) {
             final lang = _normLang((t['language'] as String?) ?? '');
             final title = ((t['title'] as String?) ?? '').toLowerCase();
-            if (lang.startsWith('nl') || lang.startsWith('dut') || title.contains('dutch') || title.contains('nederlands')) {
-              return t['stream_index'] as int?;
-            }
-          }
-          return null;
+            return lang.startsWith('nl') || lang.startsWith('dut') || title.contains('dutch') || title.contains('nederlands');
+          });
         }
       }
     } catch (e) {
       debugPrint('[Nova] embedded-ondertitel check mislukt: $e');
     }
-    return null;
-  }
-
-  // Vraagt de backend om een ingebouwd ondertitelspoor met ffsubsync uit te
-  // lijnen op de audio, net als bij een externe OpenSubtitles-ondertitel -
-  // een ingebouwd spoor is niet gegarandeerd getimed op exact déze release.
-  Future<String?> _fetchSyncedEmbeddedSubtitleUri(String streamUrl, int streamIndex) async {
-    try {
-      final baseUrl = (await SettingsService.getBackendUrl()).trim().replaceAll(RegExp(r'/$'), '');
-      final params = {'url': streamUrl, 'stream_index': '$streamIndex'};
-      for (final path in ['/stream/subtitle-synced.vtt', '/api/stream/subtitle-synced.vtt']) {
-        final vttUrl = Uri.parse('$baseUrl$path').replace(queryParameters: params);
-        final check = await http.get(vttUrl).timeout(const Duration(seconds: 240));
-        if (check.statusCode == 200) return vttUrl.toString();
-        if (check.statusCode != 404) continue;
-        return null;
-      }
-    } catch (e) {
-      debugPrint('[Nova] gesynchroniseerde ingebouwde ondertitel ophalen mislukt: $e');
-    }
-    return null;
+    return false;
   }
 
   // Zoekt op OpenSubtitles en synchroniseert via de backend; geeft enkel de
@@ -615,18 +591,13 @@ class _WatchScreenState extends State<WatchScreen> {
       final resume = await _resumeSeconds(episode: episode);
 
       // Vóór het afspelen starten al checken op Nederlandse ondertitels, zodat
-      // de film pas begint als NL-subs (ingebouwd of extern) al klaarstaan én
-      // al gesynchroniseerd zijn - een ingebouwd spoor is niet gegarandeerd
-      // exact getimed op déze release, dus ook dat gaat altijd door ffsubsync.
+      // de film pas begint als NL-subs (ingebouwd of extern gesynchroniseerd)
+      // al klaarstaan - i.p.v. ze er halverwege pas bij te laden.
       String? externalSubUri;
       if (_prefs['subtitles_enabled'] == true) {
         setState(() => _status = 'Ondertitels controleren...');
-        final embeddedIdx = await _findEmbeddedDutchStreamIndex(url);
-        if (embeddedIdx != null) {
-          setState(() => _status = 'Nederlandse ondertitels synchroniseren (kan ~1 min duren)...');
-          externalSubUri = await _fetchSyncedEmbeddedSubtitleUri(url, embeddedIdx);
-        }
-        if (externalSubUri == null && mounted) {
+        final hasEmbeddedNl = await _hasEmbeddedDutchSubtitle(url);
+        if (!hasEmbeddedNl && mounted) {
           setState(() => _status = 'Nederlandse ondertitels downloaden en synchroniseren (kan ~1 min duren)...');
           externalSubUri = await _fetchExternalSubtitleUri(url, episode: episode);
         }

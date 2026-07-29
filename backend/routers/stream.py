@@ -1514,63 +1514,6 @@ async def subtitle_external_vtt(
     return Response(content=vtt, media_type="text/vtt", headers={"Cache-Control": "no-cache"})
 
 
-async def _extract_subtitle_srt(input_value: str, stream_index: int, timeout: float = 30.0) -> str | None:
-    """Haalt één ondertitelspoor uit het videobestand als platte SRT-tekst
-    (i.p.v. VTT streamend zoals /subtitle.vtt), zodat we 'm daarna door
-    ffsubsync kunnen halen."""
-    http = _is_http_url(input_value)
-    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin"]
-    if http:
-        cmd.extend([
-            "-rw_timeout", "60000000",
-            "-timeout", "90000000",
-            "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-            "-reconnect", "1",
-            "-reconnect_streamed", "1",
-            "-reconnect_delay_max", "5",
-        ])
-    cmd.extend(["-i", input_value, "-map", f"0:{int(stream_index)}", "-c:s", "srt", "-f", "srt", "pipe:1"])
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        if proc.returncode != 0 or not out:
-            print(f"Ondertitel-extractie fout: {(err or b'').decode('utf-8', errors='ignore')[:300]}")
-            return None
-        return out.decode("utf-8", errors="ignore")
-    except Exception as e:
-        print(f"Ondertitel-extractie fout: {e}")
-        return None
-
-
-@router.get("/subtitle-synced.vtt")
-async def subtitle_synced_vtt(url: str, stream_index: int):
-    """
-    Haalt een ondertitelspoor dat al in het videobestand zit op en lijnt 'm,
-    net als /subtitle-external.vtt, automatisch uit op de audio via
-    ffsubsync. Een ingebouwd ondertitelspoor is niet per se getimed op exact
-    deze release/encode, dus ook die verdient dezelfde sync-garantie als een
-    extern van OpenSubtitles gehaalde ondertitel.
-    """
-    input_value = urllib.parse.unquote(url)
-    cache_key = f"embedded:{input_value}:{stream_index}"
-    now = time.time()
-    cached = _EXTERNAL_SUB_CACHE.get(cache_key)
-    if cached and (now - cached[0]) < _EXTERNAL_SUB_CACHE_TTL:
-        return Response(content=cached[1], media_type="text/vtt", headers={"Cache-Control": "no-cache"})
-
-    srt_text = await _extract_subtitle_srt(input_value, stream_index)
-    if not srt_text:
-        raise HTTPException(status_code=404, detail="Kon dit ondertitelspoor niet uitlezen.")
-
-    synced_srt = await _run_ffsubsync(input_value, srt_text)
-    final_srt = synced_srt or srt_text
-    vtt = _srt_to_vtt(final_srt)
-    _EXTERNAL_SUB_CACHE[cache_key] = (now, vtt)
-    return Response(content=vtt, media_type="text/vtt", headers={"Cache-Control": "no-cache"})
-
-
 async def _ensure_hls_session(session_id: str, input_value: str):
     os.makedirs(_HLS_ROOT, exist_ok=True)
     sess_dir = os.path.join(_HLS_ROOT, session_id)
