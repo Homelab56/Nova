@@ -48,6 +48,7 @@ class _WatchScreenState extends State<WatchScreen> {
   };
   bool _autoAppliedAudio = false;
   bool _autoAppliedSubs = false;
+  bool _autoFetchedExternalSubs = false;
 
   @override
   void initState() {
@@ -168,11 +169,23 @@ class _WatchScreenState extends State<WatchScreen> {
       if (_prefs['subtitles_enabled'] == true) {
         final sub1 = (_prefs['default_sub_lang_1'] as String? ?? '').trim();
         final sub2 = (_prefs['default_sub_lang_2'] as String? ?? '').trim();
-        // NL heeft voorrang; als er geen Nederlandse ondertitels in de bron
-        // zitten, valt dit terug op Engels i.p.v. helemaal geen ondertiteling.
-        final subMatch = _matchTrack(_tracks.subtitle, [sub1, sub2, 'nl', 'nld', 'dut', 'en', 'eng'], avoidForced: true);
-        debugPrint('[Nova] auto subtitle match: ${subMatch != null ? "${subMatch.id}:${subMatch.language}" : "geen match"}');
-        if (subMatch != null) _player.setSubtitleTrack(subMatch);
+        // Eerst enkel een ingebouwd NL-spoor proberen (geen EN-fallback hier),
+        // zodat we weten of we automatisch een externe NL-ondertitel moeten
+        // ophalen wanneer de bron zelf geen Nederlandse subs heeft.
+        final nlMatch = _matchTrack(_tracks.subtitle, [sub1, sub2, 'nl', 'nld', 'dut'], avoidForced: true);
+        debugPrint('[Nova] auto subtitle match (NL): ${nlMatch != null ? "${nlMatch.id}:${nlMatch.language}" : "geen match"}');
+        if (nlMatch != null) {
+          _player.setSubtitleTrack(nlMatch);
+        } else {
+          // Engels als tijdelijke ondertiteling terwijl we op de achtergrond
+          // automatisch een gesynchroniseerde NL-versie ophalen.
+          final enMatch = _matchTrack(_tracks.subtitle, ['en', 'eng'], avoidForced: true);
+          if (enMatch != null) _player.setSubtitleTrack(enMatch);
+          if (!_autoFetchedExternalSubs) {
+            _autoFetchedExternalSubs = true;
+            _loadExternalSubtitle();
+          }
+        }
       }
     }
   }
@@ -548,6 +561,8 @@ class _WatchScreenState extends State<WatchScreen> {
 
     _autoAppliedAudio = false;
     _autoAppliedSubs = false;
+    _autoFetchedExternalSubs = false;
+    _streamUrl = url; // vroeg gezet: tracks kunnen al gedetecteerd worden voor open() hieronder klaar is
     setState(() {
       _status = statusLabel;
       _loadingStream = true;
@@ -604,7 +619,6 @@ class _WatchScreenState extends State<WatchScreen> {
 
     if (mounted) {
       setState(() {
-        _streamUrl = url;
         _loadingStream = false;
         _status = '';
         _showPlayer = true;
