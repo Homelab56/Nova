@@ -127,6 +127,21 @@ class _WatchScreenState extends State<WatchScreen> {
   // redmiddel kiezen: die tonen doorgaans maar een handvol regels (bv. bij een
   // vreemde taal in beeld), niet de volledige ondertiteling - zonder deze
   // check leek het net of er geen ondertitels beschikbaar waren.
+  // Verschillende ISO-taalcodes voor dezelfde taal (bv. "nl" vs "dut"/"nld")
+  // matchen elkaar niet via startsWith - dus expliciet alle varianten geven,
+  // zodat een taal pas als "geen match" telt als écht geen enkele variant
+  // gevonden is (i.p.v. per ongeluk een andere taal te raken omdat die eerder
+  // in de lijst staat).
+  List<String> _langSynonyms(String lang) {
+    final l = _normLang(lang);
+    if (l.isEmpty) return const [];
+    if (l.startsWith('nl') || l.startsWith('dut') || l.startsWith('vla')) {
+      return const ['nl', 'nld', 'dut', 'vla'];
+    }
+    if (l.startsWith('en')) return const ['en', 'eng'];
+    return [l];
+  }
+
   dynamic _matchTrack(List tracks, List<String> preferredLangs, {bool avoidForced = false}) {
     final prefer = preferredLangs.where((e) => e.isNotEmpty).map(_normLang).toList();
     for (final p in prefer) {
@@ -159,7 +174,11 @@ class _WatchScreenState extends State<WatchScreen> {
     if (!_autoAppliedAudio && hasRealAudio) {
       _autoAppliedAudio = true;
       final audioLang = (_prefs['default_audio_lang'] as String? ?? '').trim();
-      final audioMatch = _matchTrack(_tracks.audio, [audioLang, 'en', 'eng']);
+      // Eerst alle varianten van de voorkeurstaal volledig uitputten, dan pas
+      // Engels als redmiddel - anders kan een latere taal in een platte lijst
+      // per ongeluk eerder matchen dan een synoniem van de voorkeurstaal.
+      var audioMatch = _matchTrack(_tracks.audio, _langSynonyms(audioLang.isNotEmpty ? audioLang : 'en'));
+      audioMatch ??= _matchTrack(_tracks.audio, ['en', 'eng']);
       debugPrint('[Nova] auto audio match: ${audioMatch != null ? "${audioMatch.id}:${audioMatch.language}" : "geen match"}');
       if (audioMatch != null) _player.setAudioTrack(audioMatch);
     }
@@ -167,12 +186,15 @@ class _WatchScreenState extends State<WatchScreen> {
     if (!_autoAppliedSubs && hasRealSubs) {
       _autoAppliedSubs = true;
       if (_prefs['subtitles_enabled'] == true) {
-        final sub1 = (_prefs['default_sub_lang_1'] as String? ?? '').trim();
-        final sub2 = (_prefs['default_sub_lang_2'] as String? ?? '').trim();
+        final sub1 = (_prefs['default_sub_lang_1'] as String? ?? 'nl').trim();
         // Eerst enkel een ingebouwd NL-spoor proberen (geen EN-fallback hier),
         // zodat we weten of we automatisch een externe NL-ondertitel moeten
-        // ophalen wanneer de bron zelf geen Nederlandse subs heeft.
-        final nlMatch = _matchTrack(_tracks.subtitle, [sub1, sub2, 'nl', 'nld', 'dut'], avoidForced: true);
+        // ophalen wanneer de bron zelf geen Nederlandse subs heeft. Belangrijk:
+        // alle NL-taalcode-varianten (nl/nld/dut/vla) eerst volledig proberen
+        // vóór ook maar te kijken naar de ingestelde 2e taal (vaak Engels) -
+        // anders wint die 2e taal het van een Nederlands spoor met een andere
+        // ISO-code dan waar "nl" letterlijk op matcht.
+        final nlMatch = _matchTrack(_tracks.subtitle, _langSynonyms(sub1), avoidForced: true);
         debugPrint('[Nova] auto subtitle match (NL): ${nlMatch != null ? "${nlMatch.id}:${nlMatch.language}" : "geen match"}');
         if (nlMatch != null) {
           _player.setSubtitleTrack(nlMatch);
