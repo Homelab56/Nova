@@ -307,50 +307,73 @@ class _WatchScreenState extends State<WatchScreen> {
     );
   }
 
-  Future<void> _loadExternalSubtitle() async {
-    final url = _streamUrl;
+  // Checkt (via ffprobe op de backend, zonder de video te hoeven openen) of
+  // de bron zelf al een Nederlandse ondertitel bevat.
+  Future<bool> _hasEmbeddedDutchSubtitle(String streamUrl) async {
+    try {
+      final baseUrl = (await SettingsService.getBackendUrl()).trim().replaceAll(RegExp(r'/$'), '');
+      for (final path in ['/stream/subtitles', '/api/stream/subtitles']) {
+        final uri = Uri.parse('$baseUrl$path').replace(queryParameters: {'url': streamUrl});
+        final r = await http.get(uri).timeout(const Duration(seconds: 20));
+        if (r.statusCode == 200) {
+          final data = jsonDecode(r.body);
+          final tracks = (data['tracks'] as List?) ?? [];
+          return tracks.any((t) {
+            final lang = _normLang((t['language'] as String?) ?? '');
+            final title = ((t['title'] as String?) ?? '').toLowerCase();
+            return lang.startsWith('nl') || lang.startsWith('dut') || title.contains('dutch') || title.contains('nederlands');
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('[Nova] embedded-ondertitel check mislukt: $e');
+    }
+    return false;
+  }
+
+  // Zoekt op OpenSubtitles en synchroniseert via de backend; geeft enkel de
+  // VTT-url terug (of null bij falen), zonder zelf de player aan te raken -
+  // zo is dit zowel bruikbaar vóór het afspelen start als achteraf handmatig.
+  Future<String?> _fetchExternalSubtitleUri(String streamUrl, {Map? episode}) async {
     final tmdbId = widget.media['id'];
-    if (url == null || tmdbId is! int) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Nederlandse ondertitels zoeken en synchroniseren...'), duration: Duration(seconds: 6)));
+    if (tmdbId is! int) return null;
     try {
       final baseUrl = (await SettingsService.getBackendUrl()).trim().replaceAll(RegExp(r'/$'), '');
       final params = {
-        'url': url,
+        'url': streamUrl,
         'tmdb_id': '$tmdbId',
         'media_type': isMovie ? 'movie' : 'tv',
         'lang': 'nl',
-        if (_currentEpisode != null) 'season': '$_selectedSeason',
-        if (_currentEpisode != null) 'episode': '${_currentEpisode!['episode_number']}',
+        if (episode != null) 'season': '$_selectedSeason',
+        if (episode != null) 'episode': '${episode['episode_number']}',
       };
       for (final path in ['/stream/subtitle-external.vtt', '/api/stream/subtitle-external.vtt']) {
         final vttUrl = Uri.parse('$baseUrl$path').replace(queryParameters: params);
         final check = await http.get(vttUrl).timeout(const Duration(seconds: 240));
-        if (check.statusCode == 200) {
-          final track = SubtitleTrack.uri(vttUrl.toString(), title: 'Nederlands (extern)', language: 'nl');
-          await _player.setSubtitleTrack(track);
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Nederlandse ondertitels geladen.'), backgroundColor: Color(0xFF00b4d8)));
-          }
-          return;
-        }
+        if (check.statusCode == 200) return vttUrl.toString();
         if (check.statusCode != 404) continue;
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Geen Nederlandse ondertitels gevonden op OpenSubtitles.'), backgroundColor: Colors.redAccent));
-        }
-        return;
-      }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Kon geen verbinding maken met de server.'), backgroundColor: Colors.redAccent));
+        return null;
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Fout bij ophalen ondertitels: $e'), backgroundColor: Colors.redAccent));
-      }
+      debugPrint('[Nova] externe ondertitels ophalen mislukt: $e');
+    }
+    return null;
+  }
+
+  Future<void> _loadExternalSubtitle() async {
+    final url = _streamUrl;
+    if (url == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Nederlandse ondertitels zoeken en synchroniseren...'), duration: Duration(seconds: 6)));
+    final vttUrl = await _fetchExternalSubtitleUri(url, episode: _currentEpisode);
+    if (!mounted) return;
+    if (vttUrl != null) {
+      await _player.setSubtitleTrack(SubtitleTrack.uri(vttUrl, title: 'Nederlands (extern)', language: 'nl'));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nederlandse ondertitels geladen.'), backgroundColor: Color(0xFF00b4d8)));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Geen Nederlandse ondertitels gevonden.'), backgroundColor: Colors.redAccent));
     }
   }
 
@@ -544,7 +567,22 @@ class _WatchScreenState extends State<WatchScreen> {
 
       final statusLabel = source == 'scraper' ? 'Gevonden op internet. Laden...' : 'Gevonden in bibliotheek. Laden...';
       final resume = await _resumeSeconds(episode: episode);
-      await _playUrl(url, statusLabel: statusLabel, resumeSeconds: resume);
+
+      // Vóór het afspelen starten al checken op Nederlandse ondertitels, zodat
+      // de film pas begint als NL-subs (ingebouwd of extern gesynchroniseerd)
+      // al klaarstaan - i.p.v. ze er halverwege pas bij te laden.
+      String? externalSubUri;
+      if (_prefs['subtitles_enabled'] == true) {
+        setState(() => _status = 'Ondertitels controleren...');
+        final hasEmbeddedNl = await _hasEmbeddedDutchSubtitle(url);
+        if (!hasEmbeddedNl && mounted) {
+          setState(() => _status = 'Nederlandse ondertitels downloaden en synchroniseren (kan ~1 min duren)...');
+          externalSubUri = await _fetchExternalSubtitleUri(url, episode: episode);
+        }
+      }
+      if (!mounted) return;
+
+      await _playUrl(url, statusLabel: statusLabel, resumeSeconds: resume, externalSubtitleUri: externalSubUri);
     } catch (e) {
       setState(() {
         _status = 'Fout bij afspelen: $e';
@@ -553,15 +591,18 @@ class _WatchScreenState extends State<WatchScreen> {
     }
   }
 
-  Future<void> _playUrl(String url, {String statusLabel = 'Laden...', double resumeSeconds = 0}) async {
+  Future<void> _playUrl(String url, {String statusLabel = 'Laden...', double resumeSeconds = 0, String? externalSubtitleUri}) async {
     final baseUrl = (await SettingsService.getBackendUrl()).trim().replaceAll(RegExp(r'/$'), '');
     if (url.startsWith('/')) {
       url = baseUrl + url;
     }
 
     _autoAppliedAudio = false;
-    _autoAppliedSubs = false;
-    _autoFetchedExternalSubs = false;
+    // Als we al een extern gesynchroniseerde NL-ondertitel hebben (vóór het
+    // afspelen opgehaald), hoeft de auto-apply logica niet nog eens een
+    // (Engels) ingebouwd spoor te kiezen zodra de tracks binnenkomen.
+    _autoAppliedSubs = externalSubtitleUri != null;
+    _autoFetchedExternalSubs = externalSubtitleUri != null;
     _streamUrl = url; // vroeg gezet: tracks kunnen al gedetecteerd worden voor open() hieronder klaar is
     setState(() {
       _status = statusLabel;
@@ -570,7 +611,7 @@ class _WatchScreenState extends State<WatchScreen> {
       _currentTrack = const Track();
     });
 
-    debugPrint('[Nova] _playUrl: resumeSeconds=$resumeSeconds url=$url');
+    debugPrint('[Nova] _playUrl: resumeSeconds=$resumeSeconds url=$url externalSub=$externalSubtitleUri');
 
     // Player configureren voor betere compatibiliteit. We openen gepauzeerd,
     // wachten tot mpv de duur kent (bron is dan echt geladen), seeken pas
@@ -579,6 +620,11 @@ class _WatchScreenState extends State<WatchScreen> {
     await _player.open(Media(url, httpHeaders: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     }), play: false);
+
+    if (externalSubtitleUri != null) {
+      await _player.setSubtitleTrack(
+        SubtitleTrack.uri(externalSubtitleUri, title: 'Nederlands (extern)', language: 'nl'));
+    }
 
     if (resumeSeconds > 0) {
       try {
