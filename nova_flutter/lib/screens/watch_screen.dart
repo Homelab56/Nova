@@ -590,16 +590,21 @@ class _WatchScreenState extends State<WatchScreen> {
       final statusLabel = source == 'scraper' ? 'Gevonden op internet. Laden...' : 'Gevonden in bibliotheek. Laden...';
       final resume = await _resumeSeconds(episode: episode);
 
-      // Vóór het afspelen starten al checken op Nederlandse ondertitels, zodat
-      // de film pas begint als NL-subs (ingebouwd of extern gesynchroniseerd)
-      // al klaarstaan - i.p.v. ze er halverwege pas bij te laden.
+      // Vóór het afspelen starten al voor Nederlandse ondertitels zorgen, zodat
+      // de film pas begint als ze al klaarstaan - i.p.v. ze er halverwege pas
+      // bij te laden. OpenSubtitles+ffsubsync eerst proberen: dat garandeert
+      // sync op de audio van déze release. Een ingebouwd spoor in het
+      // bestand zelf is niet gegarandeerd getimed op exact deze encode (bleek
+      // in de praktijk soms flink uit sync), dus dat is enkel het redmiddel
+      // als er geen externe ondertitel gevonden wordt.
       String? externalSubUri;
       if (_prefs['subtitles_enabled'] == true) {
-        setState(() => _status = 'Ondertitels controleren...');
-        final hasEmbeddedNl = await _hasEmbeddedDutchSubtitle(url);
-        if (!hasEmbeddedNl && mounted) {
-          setState(() => _status = 'Nederlandse ondertitels downloaden en synchroniseren (kan ~1 min duren)...');
-          externalSubUri = await _fetchExternalSubtitleUri(url, episode: episode);
+        setState(() => _status = 'Nederlandse ondertitels zoeken en synchroniseren (kan ~1 min duren)...');
+        externalSubUri = await _fetchExternalSubtitleUri(url, episode: episode);
+        if (externalSubUri == null && mounted) {
+          setState(() => _status = 'Ondertitels controleren...');
+          final hasEmbeddedNl = await _hasEmbeddedDutchSubtitle(url);
+          debugPrint('[Nova] geen externe NL-ondertitel gevonden, ingebouwd spoor aanwezig: $hasEmbeddedNl');
         }
       }
       if (!mounted) return;

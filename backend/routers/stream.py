@@ -1327,8 +1327,38 @@ async def subtitle_vtt(
 _OS_BASE = "https://api.opensubtitles.com/api/v1"
 _OS_USER_AGENT = "Nova v1.0"
 
-_EXTERNAL_SUB_CACHE: dict[str, tuple[float, str]] = {}
-_EXTERNAL_SUB_CACHE_TTL = 24 * 3600
+# Persistente cache op schijf (i.p.v. in-memory) zodat een eenmaal gezochte en
+# gesynchroniseerde ondertitel bij een herbekijking - ook na een herstart of
+# nieuwe deploy van de backend - meteen klaarstaat i.p.v. opnieuw te moeten
+# zoeken/downloaden/synchroniseren.
+_SUB_CACHE_DIR = "/app/data/subtitles_cache"
+
+
+def _subtitle_cache_path(cache_key: str) -> str:
+    os.makedirs(_SUB_CACHE_DIR, exist_ok=True)
+    safe_name = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()
+    return os.path.join(_SUB_CACHE_DIR, f"{safe_name}.vtt")
+
+
+def _subtitle_cache_get(cache_key: str) -> str | None:
+    path = _subtitle_cache_path(cache_key)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        print(f"Ondertitel-cache lezen mislukt: {e}")
+        return None
+
+
+def _subtitle_cache_set(cache_key: str, vtt: str) -> None:
+    path = _subtitle_cache_path(cache_key)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(vtt)
+    except Exception as e:
+        print(f"Ondertitel-cache schrijven mislukt: {e}")
 
 
 def _os_headers() -> dict:
@@ -1493,10 +1523,9 @@ async def subtitle_external_vtt(
         raise HTTPException(status_code=503, detail="OpenSubtitles is niet geconfigureerd op de server.")
 
     cache_key = f"{tmdb_id}:{media_type}:{season}:{episode}:{lang}"
-    now = time.time()
-    cached = _EXTERNAL_SUB_CACHE.get(cache_key)
-    if cached and (now - cached[0]) < _EXTERNAL_SUB_CACHE_TTL:
-        return Response(content=cached[1], media_type="text/vtt", headers={"Cache-Control": "no-cache"})
+    cached = _subtitle_cache_get(cache_key)
+    if cached:
+        return Response(content=cached, media_type="text/vtt", headers={"Cache-Control": "no-cache"})
 
     found = await _search_opensubtitles(tmdb_id, media_type, lang, season, episode)
     if not found:
@@ -1510,7 +1539,7 @@ async def subtitle_external_vtt(
     synced_srt = await _run_ffsubsync(input_value, srt_text)
     final_srt = synced_srt or srt_text  # val terug op ongesynchroniseerde versie als sync mislukt
     vtt = _srt_to_vtt(final_srt)
-    _EXTERNAL_SUB_CACHE[cache_key] = (now, vtt)
+    _subtitle_cache_set(cache_key, vtt)
     return Response(content=vtt, media_type="text/vtt", headers={"Cache-Control": "no-cache"})
 
 
