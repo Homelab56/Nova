@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import '../widgets/nova_image.dart';
+import '../widgets/media_row.dart';
 import '../services/tmdb_service.dart';
 import '../services/debrid_service.dart';
 import '../services/userdata_service.dart';
@@ -1051,31 +1052,33 @@ class _WatchScreenState extends State<WatchScreen> {
 
                     // Meer zoals dit
                     if (_similar.isNotEmpty) ...[
-                      const SizedBox(height: 28),
-                      const Text('Meer zoals dit', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: Colors.white)),
-                      const SizedBox(height: 14),
-                      SizedBox(height: 245, child: ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: _similar.length,
-                        itemBuilder: (_, i) {
-                          final item = _similar[i];
-                          final p = item['poster_path'];
-                          return GestureDetector(
-                            onTap: () => Navigator.pushReplacement(context, MaterialPageRoute(
-                              builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
-                            child: Container(width: 150, margin: const EdgeInsets.only(right: 12),
-                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                ClipRRect(borderRadius: BorderRadius.circular(10),
-                                  child: p != null
-                                    ? NovaImage(path: '$tmdbPoster$p', height: 210, width: 150, fit: BoxFit.cover)
-                                    : Container(height: 210, width: 150, color: const Color(0xFF0f1520))),
-                                const SizedBox(height: 6),
-                                Text(item['title'] ?? item['name'] ?? '', maxLines: 1, overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 13, color: Colors.white70)),
-                              ])),
-                          );
-                        },
-                      )),
+                      const SizedBox(height: 12),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: -16),
+                        child: MediaRow(
+                          title: 'Meer zoals dit',
+                          height: 260,
+                          itemCount: _similar.length,
+                          itemBuilder: (_, i) {
+                            final item = _similar[i];
+                            final p = item['poster_path'];
+                            return GestureDetector(
+                              onTap: () => Navigator.pushReplacement(context, MaterialPageRoute(
+                                builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
+                              child: Container(width: 150, margin: const EdgeInsets.symmetric(horizontal: 6),
+                                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                  ClipRRect(borderRadius: BorderRadius.circular(10),
+                                    child: p != null
+                                      ? NovaImage(path: '$tmdbPoster$p', height: 210, width: 150, fit: BoxFit.cover)
+                                      : Container(height: 210, width: 150, color: const Color(0xFF0f1520))),
+                                  const SizedBox(height: 6),
+                                  Text(item['title'] ?? item['name'] ?? '', maxLines: 1, overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 13, color: Colors.white70)),
+                                ])),
+                            );
+                          },
+                        ),
+                      ),
                     ],
                     const SizedBox(height: 20),
                   ],
