@@ -804,10 +804,7 @@ class _WatchScreenState extends State<WatchScreen> {
         final stream = s['stream_url'] as String?;
         final chosen = (direct != null && direct.isNotEmpty) ? direct : stream;
         if (chosen != null) {
-          setState(() {
-            _currentSourceLabel = s['title'] as String?;
-            _currentSourceUrl = direct;
-          });
+          setState(() => _currentSourceUrl = direct);
           final resume = await _resumeSeconds(episode: episode);
           _playUrl(chosen, statusLabel: 'Bron laden...', resumeSeconds: resume);
         }
