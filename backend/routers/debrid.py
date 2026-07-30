@@ -205,7 +205,7 @@ def _subtitle_is_english(s: dict) -> bool:
 _MIN_PLAYABLE_DURATION_SECS = 600
 
 
-async def _probe_subtitle_langs(url: str, timeout: float = 18.0) -> tuple[bool, bool, bool]:
+async def _probe_subtitle_langs(url: str, timeout: float = 9.0) -> tuple[bool, bool, bool]:
     """
     Opent de bron echt (ffprobe) en geeft (probe_ok, has_nl, has_en) terug.
     probe_ok=False betekent dat de bron niet eens geopend kon worden (kapotte
