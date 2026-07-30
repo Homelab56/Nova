@@ -205,7 +205,7 @@ def _subtitle_is_english(s: dict) -> bool:
 _MIN_PLAYABLE_DURATION_SECS = 600
 
 
-async def _probe_subtitle_langs(url: str, timeout: float = 12.0) -> tuple[bool, bool, bool]:
+async def _probe_subtitle_langs(url: str, timeout: float = 18.0) -> tuple[bool, bool, bool]:
     """
     Opent de bron echt (ffprobe) en geeft (probe_ok, has_nl, has_en) terug.
     probe_ok=False betekent dat de bron niet eens geopend kon worden (kapotte
@@ -948,8 +948,19 @@ async def list_sources(q: str, tmdb_id: int | None = None, media_type: str | Non
             "direct_url": picked_value,
         })
 
-    # Volgorde blijft de kwaliteitsranking (resolutie/grootte/cached) van
-    # with_url - ondertitels bepalen de volgorde niet meer, enkel de badge.
+    # Bevestigd NL eerst, dan bevestigd EN, dan de rest - binnen elke groep
+    # blijft de kwaliteitsranking (resolutie/grootte/cached) van with_url
+    # behouden dankzij Python's stabiele sort. Dit sluit niets uit (alle
+    # bevestigd werkende bronnen blijven in de lijst), het bepaalt enkel de
+    # volgorde.
+    def _sort_key(s):
+        if s["has_nl_subs"] is True:
+            return 0
+        if s["has_en_subs"] is True:
+            return 1
+        return 2
+    sources.sort(key=_sort_key)
+
     return {"sources": sources}
 
 

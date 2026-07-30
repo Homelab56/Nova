@@ -270,12 +270,18 @@ async def _ffprobe_probe_health(input_value: str, is_path: bool) -> tuple[float,
     ]
     if http:
         args.extend([
-            "-rw_timeout", "60000000",
-            "-timeout", "90000000",
+            "-rw_timeout", "15000000",
+            "-timeout", "15000000",
             "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
             "-headers", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36\r\nAccept: */*\r\nConnection: keep-alive\r\n",
-            "-analyzeduration", "120000000",
-            "-probesize", "120000000",
+            # Ondertitelsporen worden net als de duur al gedeclareerd in de
+            # containerheader (MKV "Tracks"-element, meteen na Segment Info) -
+            # dus dit hoeft niet diep in het bestand te zoeken. De vorige,
+            # veel grotere waarde (120MB/120s) liet dit voor grote 4K-bronnen
+            # geregeld de buitenste timeout van de caller overschrijden,
+            # waardoor zulke bronnen onterecht als "kapot" werden behandeld.
+            "-analyzeduration", "15000000",
+            "-probesize", "15000000",
             "-reconnect", "1",
             "-reconnect_streamed", "1",
             "-reconnect_delay_max", "5",

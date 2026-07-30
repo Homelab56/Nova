@@ -41,7 +41,7 @@ class _WatchScreenState extends State<WatchScreen> {
   Tracks _tracks = const Tracks();
   Track _currentTrack = const Track();
   Map? _currentEpisode;
-  String? _currentSourceLabel;
+  String? _currentSourceUrl;
   Map<String, dynamic> _prefs = {
     'default_audio_lang': 'en',
     'default_sub_lang_1': 'nl',
@@ -570,7 +570,6 @@ class _WatchScreenState extends State<WatchScreen> {
       final apiPaths = ['/api/debrid/search', '/debrid/search'];
       String? url;
       String? source;
-      String? sourceTitle;
       String? errorMessage;
 
       for (final path in apiPaths) {
@@ -584,7 +583,6 @@ class _WatchScreenState extends State<WatchScreen> {
             final stream = data['stream_url'] as String?;
             url = (direct != null && direct.isNotEmpty) ? direct : stream;
             source = data['source'] ?? 'unknown';
-            sourceTitle = data['title'] as String?;
             if (url != null) break;
             errorMessage = data['message'];
           } else {
@@ -603,7 +601,7 @@ class _WatchScreenState extends State<WatchScreen> {
         });
         return;
       }
-      setState(() => _currentSourceLabel = sourceTitle);
+      setState(() => _currentSourceUrl = url);
 
       final statusLabel = source == 'scraper' ? 'Gevonden op internet. Laden...' : 'Gevonden in bibliotheek. Laden...';
       final resume = await _resumeSeconds(episode: episode);
@@ -758,42 +756,62 @@ class _WatchScreenState extends State<WatchScreen> {
                       padding: EdgeInsets.all(24),
                       child: Text('Geen bronnen gevonden.', style: TextStyle(color: Colors.grey)),
                     )
-                  else
-                    for (final s in snapshot.data!)
-                      ListTile(
-                        title: Text(s['title'] as String, maxLines: 2, overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: Colors.white, fontSize: 13)),
-                        subtitle: Text(
-                          [
-                            if ((s['resolution'] as String).isNotEmpty) s['resolution'],
-                            if (s['cached'] == true) 'Direct beschikbaar',
-                            _formatSize(s['size_bytes'] as int),
-                            if (s['has_nl_subs'] == true) '✓ NL ondertitels'
-                            else if (s['has_en_subs'] == true) '✓ EN ondertitels',
-                          ].where((e) => (e as String).isNotEmpty).join(' · '),
-                          style: TextStyle(
-                            color: s['has_nl_subs'] == true ? const Color(0xFF00b4d8) : Colors.grey,
-                            fontSize: 11,
-                          ),
-                        ),
-                        onTap: () async {
-                          Navigator.pop(sheetContext);
-                          final direct = s['direct_url'] as String?;
-                          final stream = s['stream_url'] as String?;
-                          final chosen = (direct != null && direct.isNotEmpty) ? direct : stream;
-                          if (chosen != null) {
-                            setState(() => _currentSourceLabel = s['title'] as String?);
-                            final resume = await _resumeSeconds(episode: episode);
-                            _playUrl(chosen, statusLabel: 'Bron laden...', resumeSeconds: resume);
-                          }
-                        },
-                      ),
+                  else ...(() {
+                    final list = List<Map>.from(snapshot.data!);
+                    final currentIdx = _currentSourceUrl == null
+                        ? -1
+                        : list.indexWhere((s) => s['direct_url'] == _currentSourceUrl);
+                    final current = currentIdx == -1 ? null : list.removeAt(currentIdx);
+                    return [
+                      if (current != null) ...[
+                        _sourceTile(current, episode: episode, sheetContext: sheetContext, isCurrent: true),
+                        const Divider(color: Colors.white12, height: 1),
+                      ],
+                      for (final s in list) _sourceTile(s, episode: episode, sheetContext: sheetContext),
+                    ];
+                  })(),
                 ],
               ),
             ),
           );
         },
       ),
+    );
+  }
+
+  Widget _sourceTile(Map s, {Map? episode, required BuildContext sheetContext, bool isCurrent = false}) {
+    return ListTile(
+      leading: isCurrent ? const Icon(Icons.play_circle_fill, color: Color(0xFF00b4d8)) : null,
+      title: Text(s['title'] as String, maxLines: 2, overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal)),
+      subtitle: Text(
+        [
+          if (isCurrent) 'Huidige bron',
+          if ((s['resolution'] as String).isNotEmpty) s['resolution'],
+          if (s['cached'] == true) 'Direct beschikbaar',
+          _formatSize(s['size_bytes'] as int),
+          if (s['has_nl_subs'] == true) '✓ NL ondertitels'
+          else if (s['has_en_subs'] == true) '✓ EN ondertitels',
+        ].where((e) => (e as String).isNotEmpty).join(' · '),
+        style: TextStyle(
+          color: isCurrent ? const Color(0xFF00b4d8) : (s['has_nl_subs'] == true ? const Color(0xFF00b4d8) : Colors.grey),
+          fontSize: 11,
+        ),
+      ),
+      onTap: () async {
+        Navigator.pop(sheetContext);
+        final direct = s['direct_url'] as String?;
+        final stream = s['stream_url'] as String?;
+        final chosen = (direct != null && direct.isNotEmpty) ? direct : stream;
+        if (chosen != null) {
+          setState(() {
+            _currentSourceLabel = s['title'] as String?;
+            _currentSourceUrl = direct;
+          });
+          final resume = await _resumeSeconds(episode: episode);
+          _playUrl(chosen, statusLabel: 'Bron laden...', resumeSeconds: resume);
+        }
+      },
     );
   }
 
@@ -861,19 +879,6 @@ class _WatchScreenState extends State<WatchScreen> {
                   aspectRatio: 16/9,
                   child: Stack(children: [
                     Video(controller: _controller),
-                    if (_currentSourceLabel != null)
-                      Positioned(
-                        left: 8, bottom: 8, right: 120,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.black54,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(_currentSourceLabel!, maxLines: 1, overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: Colors.white70, fontSize: 11)),
-                        ),
-                      ),
                     Positioned(
                       top: 8, right: 8,
                       child: Row(children: [
