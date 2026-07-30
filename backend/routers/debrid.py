@@ -232,10 +232,12 @@ async def _probe_subtitle_langs(url: str, timeout: float = 12.0) -> tuple[bool, 
 
 async def _pick_best_with_dutch_subs(results: list[dict], max_probe: int = 10) -> tuple[str | None, dict | None, bool]:
     """
-    Zoals _pick_best_aiostream_url, maar probeert eerst onder de best-gerankte
-    kandidaten er één te vinden met bevestigde Nederlandse ondertitels (via
-    ffprobe op het echte bestand, niet enkel de bestandsnaam). Is er geen
-    enkele met NL, dan telt een bevestigde Engelse ondertitel als tweede keus.
+    Kiest de best gerangschikte kandidaat die ook echt afspeelbaar blijkt
+    (ffprobe + duur-check, om AIOStreams-placeholderclips uit te sluiten).
+    Ondertitels spelen geen rol meer bij deze keuze: een Nederlandse
+    ondertitel wordt sowieso altijd apart via OpenSubtitles+ffsubsync
+    opgehaald (zie stream.py), ongeacht wat er in het gekozen bestand zelf
+    ingebakken zit. has_nl_subs in de return is puur informatief.
     Geeft (stream_value, item, has_nl_subs) terug.
     """
     with_url = [x for x in results if _is_usable_now(x) and not _looks_like_junk_release(x)]
@@ -250,27 +252,13 @@ async def _pick_best_with_dutch_subs(results: list[dict], max_probe: int = 10) -
     )
     probed = [(item, r) for item, r in zip(candidates, checks) if not isinstance(r, Exception)]
 
-    for item, (_ok, has_nl, _has_en) in probed:
-        if has_nl:
-            url = (item.get("url") or "").strip()
-            return _wrap_stream_value(url, bool(item.get("notWebReady"))), item, True
-
-    for item, (_ok, _has_nl, has_en) in probed:
-        if has_en:
-            url = (item.get("url") or "").strip()
-            return _wrap_stream_value(url, bool(item.get("notWebReady"))), item, False
-
-    # Geen van de geprobeerde kandidaten heeft bevestigd NL- of EN-ondertitels;
-    # kies dan tenminste een kandidaat die effectief bevestigd afspeelbaar is
-    # (ffprobe + duur-check geslaagd), zodat er nooit een ongecheckte
-    # placeholder-clip als "beste" bron teruggegeven wordt.
-    for item, (ok, _has_nl, _has_en) in probed:
+    for item, (ok, has_nl, _has_en) in probed:
         if ok:
             url = (item.get("url") or "").strip()
-            return _wrap_stream_value(url, bool(item.get("notWebReady"))), item, False
+            return _wrap_stream_value(url, bool(item.get("notWebReady"))), item, has_nl
 
-    # Zelfs onder de geprobeerde top-kandidaten niets bevestigd bruikbaars;
-    # allerlaatste redmiddel zonder health-check.
+    # Niets van de geprobeerde top-kandidaten bevestigd afspeelbaar; allerlaatste
+    # redmiddel zonder health-check.
     fallback_url, fallback_item = _pick_best_aiostream_url(results)
     return fallback_url, fallback_item, False
 
@@ -867,23 +855,25 @@ async def list_sources(q: str, tmdb_id: int | None = None, media_type: str | Non
     with_url = [x for x in aio_res if _is_usable_now(x) and not _looks_like_junk_release(x)]
     with_url.sort(key=_aio_rank_result, reverse=True)
 
-    # Check de best-gerankte kandidaten écht (via ffprobe) op Nederlandse en
-    # Engelse ondertitels, i.p.v. enkel op de bestandsnaam af te gaan. Dit
-    # ontmaskert ook kapotte/onbereikbare links: die geven net als een bron
-    # zonder passende ondertitels (False, False) terug en worden hieronder
-    # op dezelfde manier uit de lijst gefilterd.
+    # Check de best-gerankte kandidaten écht (via ffprobe) - dit ontmaskert
+    # kapotte/onbereikbare links en AIOStreams-placeholderclips (duur-check),
+    # en levert meteen ook of er een Nederlandse/Engelse ondertitel ingebakken
+    # zit. Dat laatste is puur informatief: welke NL/EN-ondertitel er getoond
+    # wordt, wordt sowieso altijd apart via OpenSubtitles+ffsubsync opgehaald
+    # (zie stream.py), dus embedded ondertitels bepalen niet meer of een bron
+    # in de lijst staat - enkel of hij echt afspeelbaar is.
     _PROBE_LIMIT = 20
     to_probe = with_url[:_PROBE_LIMIT]
     checks = await asyncio.gather(
         *[_probe_subtitle_langs((c.get("url") or "").strip()) for c in to_probe],
         return_exceptions=True,
     )
-    probed_by_id: dict[int, tuple[bool, bool]] = {}
+    probed_by_id: dict[int, tuple[bool, bool, bool]] = {}
     for item, r in zip(to_probe, checks):
         if isinstance(r, Exception):
             continue
-        _ok, has_nl, has_en = r
-        probed_by_id[id(item)] = (has_nl, has_en)
+        ok, has_nl, has_en = r
+        probed_by_id[id(item)] = (ok, has_nl, has_en)
 
     sources = []
     for item in with_url:
@@ -891,14 +881,15 @@ async def list_sources(q: str, tmdb_id: int | None = None, media_type: str | Non
         if not raw_url:
             continue
 
-        # Enkel bevestigd werkende bronnen met NL of EN ondertitels tonen -
-        # geen ongecheckte gok-resultaten die achteraf "unavailable" blijken.
+        # Enkel bronnen uitsluiten die we effectief geprobeerd hebben en die
+        # daarbij kapot/een placeholder-clip bleken. Niet-geprobeerde bronnen
+        # (voorbij de probe-limiet) blijven gewoon staan - we willen alle
+        # beschikbare streams tonen, niet enkel een klein gecheckt subsetje.
         probed = probed_by_id.get(id(item))
-        if probed is None:
+        if probed is not None and not probed[0]:
             continue
-        has_nl, has_en = probed
-        if not has_nl and not has_en:
-            continue
+        has_nl = probed[1] if probed else False
+        has_en = probed[2] if probed else False
 
         not_ready = bool(item.get("notWebReady"))
         if not_ready or raw_url.startswith("magnet:"):
@@ -925,15 +916,8 @@ async def list_sources(q: str, tmdb_id: int | None = None, media_type: str | Non
             "direct_url": picked_value,
         })
 
-    # Bevestigde NL-ondertitels eerst, dan bevestigd EN, dan ongecheckte.
-    def _sort_key(s):
-        if s["has_nl_subs"] is True:
-            return 0
-        if s["has_en_subs"] is True:
-            return 1
-        return 2
-    sources.sort(key=_sort_key)
-
+    # Volgorde blijft de kwaliteitsranking (resolutie/grootte/cached) van
+    # with_url - ondertitels bepalen de volgorde niet meer, enkel de badge.
     return {"sources": sources}
 
 
