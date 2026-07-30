@@ -14,7 +14,7 @@ import '../services/settings_service.dart';
 const tmdbPoster = 'https://image.tmdb.org/t/p/w342';
 const tmdbProfile = 'https://image.tmdb.org/t/p/w185';
 const tmdbStill = 'https://image.tmdb.org/t/p/w300';
-const tmdbBackdrop = 'https://image.tmdb.org/t/p/w780';
+const tmdbBackdrop = 'https://image.tmdb.org/t/p/original';
 
 class WatchScreen extends StatefulWidget {
   final Map<String, dynamic> media;
@@ -892,107 +892,124 @@ class _WatchScreenState extends State<WatchScreen> {
                     ),
                   ]),
                 )
-              else if (backdrop != null)
-                Stack(children: [
-                  NovaImage(path: '$tmdbBackdrop$backdrop',
-                    height: 220, width: double.infinity, fit: BoxFit.cover),
-                  Container(height: 220, decoration: const BoxDecoration(
-                    gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                      colors: [Colors.transparent, Color(0xFF080c14)]))),
-                ]),
-
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Terug
-                    TextButton.icon(
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.arrow_back, size: 16),
-                      label: const Text('Terug'),
-                      style: TextButton.styleFrom(foregroundColor: Colors.grey, padding: EdgeInsets.zero),
+              else
+                SizedBox(
+                  height: 500,
+                  child: Stack(fit: StackFit.expand, children: [
+                    if (backdrop != null)
+                      NovaImage(path: '$tmdbBackdrop$backdrop', width: double.infinity, height: 500,
+                        fit: BoxFit.cover, alignment: const Alignment(0, -0.4))
+                    else if (poster != null)
+                      NovaImage(path: '$tmdbPoster$poster', width: double.infinity, height: 500, fit: BoxFit.cover)
+                    else
+                      Container(color: const Color(0xFF0f1520)),
+                    Container(decoration: const BoxDecoration(
+                      gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                        colors: [Colors.transparent, Colors.transparent, Color(0xFF080c14)],
+                        stops: [0.0, 0.45, 1.0]))),
+                    Container(decoration: const BoxDecoration(
+                      gradient: LinearGradient(begin: Alignment.centerLeft, end: Alignment.centerRight,
+                        colors: [Color(0xF2080c14), Colors.transparent],
+                        stops: [0.0, 0.6]))),
+                    Positioned(
+                      top: 16, left: 16,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(24),
+                        onTap: () => Navigator.pop(context),
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                          child: const Icon(Icons.arrow_back, color: Colors.white, size: 22),
+                        ),
+                      ),
                     ),
-                    const SizedBox(height: 8),
-
-                    // Info
-                    Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      if (poster != null)
-                        ClipRRect(borderRadius: BorderRadius.circular(10),
-                          child: NovaImage(path: '$tmdbPoster$poster', width: 90, height: 135, fit: BoxFit.cover)),
-                      const SizedBox(width: 14),
-                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Colors.white)),
-                        const SizedBox(height: 6),
-                        Wrap(spacing: 8, children: [
-                          if (year.isNotEmpty) Text(year, style: const TextStyle(color: Colors.grey, fontSize: 13)),
-                          if (rating != null) Text('★ $rating', style: const TextStyle(color: Colors.amber, fontSize: 13)),
+                    Positioned(bottom: 32, left: 32, right: 32,
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 640),
+                          child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w900, color: Colors.white,
+                              height: 1.1, shadows: [Shadow(blurRadius: 12, color: Colors.black)])),
+                        ),
+                        const SizedBox(height: 10),
+                        Wrap(spacing: 10, children: [
+                          if (year.isNotEmpty) Text(year, style: const TextStyle(color: Colors.grey, fontSize: 14)),
+                          if (rating != null) Text('★ $rating', style: const TextStyle(color: Colors.amber, fontSize: 14)),
                           if (seasons.isNotEmpty) Text('${seasons.length} seizoen${seasons.length > 1 ? "en" : ""}',
-                            style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                            style: const TextStyle(color: Colors.grey, fontSize: 14)),
                         ]),
-                        const SizedBox(height: 8),
-                        Text(widget.media['overview'] ?? '', maxLines: 3, overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: Colors.grey, fontSize: 13, height: 1.5)),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 14),
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 560),
+                          child: Text(widget.media['overview'] ?? '', maxLines: 3, overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.5)),
+                        ),
+                        const SizedBox(height: 18),
                         Row(children: [
                           if (isMovie)
                             ElevatedButton.icon(
                               onPressed: _loadingStream ? null : () => _play(),
                               icon: _loadingStream
-                                ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                                : const Icon(Icons.play_arrow, size: 18),
+                                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                                : const Icon(Icons.play_arrow, size: 20),
                               label: Text(_loadingStream ? 'Laden...' : 'Afspelen'),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: _isAvailable == true ? const Color(0xFF00b4d8) : Colors.white, 
+                                backgroundColor: _isAvailable == true ? const Color(0xFF00b4d8) : Colors.white,
                                 foregroundColor: _isAvailable == true ? Colors.white : Colors.black,
+                                textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
                               ),
                             ),
                           if (isMovie) ...[
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 12),
                             OutlinedButton.icon(
                               onPressed: _loadingStream ? null : () => _pickSource(),
-                              icon: const Icon(Icons.dns_outlined, size: 16, color: Colors.white),
-                              label: const Text('Bronnen', style: TextStyle(color: Colors.white, fontSize: 13)),
+                              icon: const Icon(Icons.dns_outlined, size: 18, color: Colors.white),
+                              label: const Text('Bronnen', style: TextStyle(color: Colors.white, fontSize: 15)),
                               style: OutlinedButton.styleFrom(
-                                side: const BorderSide(color: Colors.white38),
+                                side: const BorderSide(color: Colors.white54),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
                               ),
                             ),
                           ],
-                          const SizedBox(width: 8),
+                          const SizedBox(width: 12),
                           OutlinedButton.icon(
                             onPressed: _toggleWatchlist,
-                            icon: Icon(_inWatchlist ? Icons.bookmark : Icons.bookmark_outline, size: 16,
+                            icon: Icon(_inWatchlist ? Icons.bookmark : Icons.bookmark_outline, size: 18,
                               color: _inWatchlist ? const Color(0xFF00b4d8) : Colors.white),
                             label: Text(_inWatchlist ? 'In watchlist' : '+ Watchlist',
-                              style: TextStyle(color: _inWatchlist ? const Color(0xFF00b4d8) : Colors.white, fontSize: 13)),
+                              style: TextStyle(color: _inWatchlist ? const Color(0xFF00b4d8) : Colors.white, fontSize: 15)),
                             style: OutlinedButton.styleFrom(
-                              side: BorderSide(color: _inWatchlist ? const Color(0xFF00b4d8) : Colors.white38),
+                              side: BorderSide(color: _inWatchlist ? const Color(0xFF00b4d8) : Colors.white54),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
                             ),
                           ),
                         ]),
                         if (_status.isNotEmpty) Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(_status, style: const TextStyle(color: Color(0xFF00b4d8), fontSize: 12)),
+                          padding: const EdgeInsets.only(top: 10),
+                          child: Text(_status, style: const TextStyle(color: Color(0xFF00b4d8), fontSize: 13)),
                         ),
                       ])),
-                    ]),
+                  ]),
+                ),
 
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     // Seizoenen
                     if (!isMovie && seasons.isNotEmpty) ...[
-                      const SizedBox(height: 24),
                       Row(children: [
-                        const Text('Afleveringen', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                        const Text('Afleveringen', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: Colors.white)),
                         const SizedBox(width: 12),
                         DropdownButton<int>(
                           value: _selectedSeason,
                           dropdownColor: const Color(0xFF0f1520),
-                          style: const TextStyle(color: Colors.white, fontSize: 13),
+                          style: const TextStyle(color: Colors.white, fontSize: 14),
                           underline: const SizedBox.shrink(),
                           items: seasons.map<DropdownMenuItem<int>>((s) => DropdownMenuItem(
                             value: s['season_number'] as int,
@@ -1010,23 +1027,23 @@ class _WatchScreenState extends State<WatchScreen> {
 
                     // Cast
                     if (_cast.isNotEmpty) ...[
-                      const SizedBox(height: 24),
-                      const Text('Cast', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-                      const SizedBox(height: 12),
-                      SizedBox(height: 110, child: ListView.builder(
+                      const SizedBox(height: 28),
+                      const Text('Cast', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: Colors.white)),
+                      const SizedBox(height: 14),
+                      SizedBox(height: 140, child: ListView.builder(
                         scrollDirection: Axis.horizontal,
                         itemCount: _cast.length,
                         itemBuilder: (_, i) {
                           final p = _cast[i];
                           final profile = p['profile_path'];
-                          return Container(width: 70, margin: const EdgeInsets.only(right: 10),
+                          return Container(width: 88, margin: const EdgeInsets.only(right: 14),
                             child: Column(children: [
-                              CircleAvatar(radius: 30, backgroundColor: const Color(0xFF0f1520),
+                              CircleAvatar(radius: 40, backgroundColor: const Color(0xFF0f1520),
                                 backgroundImage: profile != null ? NetworkImage('$tmdbProfile$profile') : null,
-                                child: profile == null ? const Icon(Icons.person, color: Colors.grey) : null),
-                              const SizedBox(height: 4),
+                                child: profile == null ? const Icon(Icons.person, color: Colors.grey, size: 28) : null),
+                              const SizedBox(height: 6),
                               Text(p['name'] ?? '', maxLines: 2, textAlign: TextAlign.center,
-                                style: const TextStyle(fontSize: 10, color: Colors.white70)),
+                                style: const TextStyle(fontSize: 12, color: Colors.white70)),
                             ]));
                         },
                       )),
@@ -1034,10 +1051,10 @@ class _WatchScreenState extends State<WatchScreen> {
 
                     // Meer zoals dit
                     if (_similar.isNotEmpty) ...[
-                      const SizedBox(height: 24),
-                      const Text('Meer zoals dit', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-                      const SizedBox(height: 12),
-                      SizedBox(height: 185, child: ListView.builder(
+                      const SizedBox(height: 28),
+                      const Text('Meer zoals dit', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: Colors.white)),
+                      const SizedBox(height: 14),
+                      SizedBox(height: 245, child: ListView.builder(
                         scrollDirection: Axis.horizontal,
                         itemCount: _similar.length,
                         itemBuilder: (_, i) {
@@ -1046,15 +1063,15 @@ class _WatchScreenState extends State<WatchScreen> {
                           return GestureDetector(
                             onTap: () => Navigator.pushReplacement(context, MaterialPageRoute(
                               builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
-                            child: Container(width: 115, margin: const EdgeInsets.only(right: 8),
+                            child: Container(width: 150, margin: const EdgeInsets.only(right: 12),
                               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                                 ClipRRect(borderRadius: BorderRadius.circular(10),
                                   child: p != null
-                                    ? NovaImage(path: '$tmdbPoster$p', height: 150, width: 115, fit: BoxFit.cover)
-                                    : Container(height: 150, width: 115, color: const Color(0xFF0f1520))),
-                                const SizedBox(height: 4),
+                                    ? NovaImage(path: '$tmdbPoster$p', height: 210, width: 150, fit: BoxFit.cover)
+                                    : Container(height: 210, width: 150, color: const Color(0xFF0f1520))),
+                                const SizedBox(height: 6),
                                 Text(item['title'] ?? item['name'] ?? '', maxLines: 1, overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 11, color: Colors.white70)),
+                                  style: const TextStyle(fontSize: 13, color: Colors.white70)),
                               ])),
                           );
                         },
@@ -1078,43 +1095,43 @@ class _WatchScreenState extends State<WatchScreen> {
     return GestureDetector(
       onTap: () => _play(episode: ep),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(10),
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: const Color(0xFF0f1520),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Colors.grey.withOpacity(0.12)),
         ),
         child: Row(children: [
-          SizedBox(width: 28, child: Text('$epNum',
-            style: const TextStyle(color: Colors.grey, fontSize: 15, fontWeight: FontWeight.bold), textAlign: TextAlign.center)),
-          const SizedBox(width: 8),
+          SizedBox(width: 34, child: Text('$epNum',
+            style: const TextStyle(color: Colors.grey, fontSize: 18, fontWeight: FontWeight.bold), textAlign: TextAlign.center)),
+          const SizedBox(width: 12),
           ClipRRect(borderRadius: BorderRadius.circular(8),
             child: still != null
-              ? NovaImage(path: '$tmdbStill$still', width: 96, height: 58, fit: BoxFit.cover)
-              : Container(width: 96, height: 58, color: const Color(0xFF080c14),
+              ? NovaImage(path: '$tmdbStill$still', width: 140, height: 82, fit: BoxFit.cover)
+              : Container(width: 140, height: 82, color: const Color(0xFF080c14),
                   child: const Icon(Icons.play_circle_outline, color: Colors.grey))),
-          const SizedBox(width: 10),
+          const SizedBox(width: 14),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Expanded(child: Text(ep['name'] ?? '', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+              Expanded(child: Text(ep['name'] ?? '', style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
                 maxLines: 1, overflow: TextOverflow.ellipsis)),
-              if (runtime != null) Text('${runtime}m', style: const TextStyle(color: Colors.grey, fontSize: 11)),
+              if (runtime != null) Text('${runtime}m', style: const TextStyle(color: Colors.grey, fontSize: 12)),
             ]),
-            const SizedBox(height: 3),
+            const SizedBox(height: 4),
             Text(ep['overview'] ?? '', maxLines: 2, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.grey, fontSize: 11, height: 1.4)),
+              style: const TextStyle(color: Colors.grey, fontSize: 12, height: 1.4)),
           ])),
-          const SizedBox(width: 6),
+          const SizedBox(width: 8),
           GestureDetector(
             onTap: () => _pickSource(episode: ep),
             child: const Padding(
               padding: EdgeInsets.all(4),
-              child: Icon(Icons.dns_outlined, color: Colors.grey, size: 18),
+              child: Icon(Icons.dns_outlined, color: Colors.grey, size: 20),
             ),
           ),
-          const SizedBox(width: 4),
-          const Icon(Icons.play_arrow, color: Color(0xFF00b4d8), size: 20),
+          const SizedBox(width: 6),
+          const Icon(Icons.play_arrow, color: Color(0xFF00b4d8), size: 24),
         ]),
       ),
     );
