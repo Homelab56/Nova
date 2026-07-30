@@ -8,6 +8,7 @@ class NovaImage extends StatelessWidget {
   final double? height;
   final BoxFit fit;
   final String baseUrl;
+  final Alignment alignment;
 
   const NovaImage({
     super.key,
@@ -16,6 +17,7 @@ class NovaImage extends StatelessWidget {
     this.height,
     this.fit = BoxFit.cover,
     this.baseUrl = 'https://image.tmdb.org/t/p/w342',
+    this.alignment = Alignment.center,
   });
 
   @override
@@ -31,6 +33,7 @@ class NovaImage extends StatelessWidget {
       width: width,
       height: height,
       fit: fit,
+      alignment: alignment,
       loadingBuilder: (_, child, progress) {
         if (progress == null) return child;
         return Container(

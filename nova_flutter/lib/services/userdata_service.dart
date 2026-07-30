@@ -54,4 +54,12 @@ class UserDataService {
     final map = jsonDecode(raw) as Map;
     return map[id.toString()] as Map?;
   }
+
+  static Future<void> removeProgress(Object id) async {
+    final p = await _prefs;
+    final raw = p.getString('progress') ?? '{}';
+    final map = jsonDecode(raw) as Map;
+    map.remove(id.toString());
+    await p.setString('progress', jsonEncode(map));
+  }
 }

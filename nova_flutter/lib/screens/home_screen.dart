@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/tmdb_service.dart';
 import '../services/debrid_service.dart';
@@ -22,9 +23,26 @@ class _HomeScreenState extends State<HomeScreen> {
   List _kidsMovies = [], _kidsTv = [];
   List _rdLibrary = [], _progress = [];
   bool _loading = true;
+  int _heroIndex = 0;
+  Timer? _heroTimer;
 
   @override
-  void initState() { super.initState(); _load(); }
+  void initState() {
+    super.initState();
+    _load();
+    _heroTimer = Timer.periodic(const Duration(seconds: 7), (_) {
+      if (!mounted) return;
+      final count = _heroItems.length < 5 ? _heroItems.length : 5;
+      if (count <= 1) return;
+      setState(() => _heroIndex = (_heroIndex + 1) % count);
+    });
+  }
+
+  @override
+  void dispose() {
+    _heroTimer?.cancel();
+    super.dispose();
+  }
 
   Future<List> _safeList(Future<List> f) async {
     try {
@@ -108,37 +126,42 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List get _heroItems => _tab == 1 ? _popularMovies : _tab == 2 ? _popularTv : _tab == 4 ? _kidsMovies : _trending;
 
+  Widget _buildHeroCarousel() {
+    final items = _heroItems;
+    if (items.isEmpty) return const SizedBox.shrink();
+    final idx = _heroIndex < items.length ? _heroIndex : 0;
+    final item = items[idx];
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 600),
+      child: KeyedSubtree(key: ValueKey(item['id']), child: _buildHero(item)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF080c14),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildAppBar(),
-            Expanded(
-              child: _loading
-                ? const Center(child: CircularProgressIndicator(color: Color(0xFF00b4d8)))
-                : RefreshIndicator(
-                    onRefresh: _load,
-                    color: const Color(0xFF00b4d8),
-                    child: CustomScrollView(
-                      slivers: [
-                        if (_heroItems.isNotEmpty) SliverToBoxAdapter(child: _buildHero(_heroItems[0])),
-                        ..._rows.map((r) => SliverToBoxAdapter(
-                          child: _buildRow(r['title'] as String, r['items'] as List,
-                            isRd: r['is_rd'] == true,
-                            isProgress: r['is_progress'] == true,
-                            isRanked: r['is_ranked'] == true,
-                            path: r['path'] as String?))),
-                        const SliverToBoxAdapter(child: SizedBox(height: 50)),
-                      ],
-                    ),
-                  ),
+      body: Stack(children: [
+        _loading
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFF00b4d8)))
+          : RefreshIndicator(
+              onRefresh: _load,
+              color: const Color(0xFF00b4d8),
+              child: CustomScrollView(
+                slivers: [
+                  if (_heroItems.isNotEmpty) SliverToBoxAdapter(child: _buildHeroCarousel()),
+                  ..._rows.map((r) => SliverToBoxAdapter(
+                    child: _buildRow(r['title'] as String, r['items'] as List,
+                      isRd: r['is_rd'] == true,
+                      isProgress: r['is_progress'] == true,
+                      isRanked: r['is_ranked'] == true,
+                      path: r['path'] as String?))),
+                  const SliverToBoxAdapter(child: SizedBox(height: 50)),
+                ],
+              ),
             ),
-          ],
-        ),
-      ),
+        Positioned(top: 0, left: 0, right: 0, child: SafeArea(bottom: false, child: _buildAppBar())),
+      ]),
     );
   }
 
@@ -229,6 +252,7 @@ class _HomeScreenState extends State<HomeScreen> {
         } else {
           setState(() {
             _tab = index;
+            _heroIndex = 0;
           });
         }
       },
@@ -267,10 +291,16 @@ class _HomeScreenState extends State<HomeScreen> {
     return GestureDetector(
       onTap: () => _openWatch(item),
       child: SizedBox(
-        height: 520,
+        height: 640,
         child: Stack(fit: StackFit.expand, children: [
-          NovaImage(path: backdrop, width: double.infinity, height: 520,
-            baseUrl: 'https://image.tmdb.org/t/p/w1280', fit: BoxFit.cover),
+          // Brede/lage banner vs. een ~16:9 bronbeeld betekent dat cover
+          // sowieso stevig moet bijsnijden - een hogere banner (was 520) en
+          // een naar boven verschoven uitsnede (i.p.v. gecentreerd, wat zowel
+          // boven als onder wegsnijdt) houden meer van de originele artwork
+          // zichtbaar i.p.v. een sterk ingezoomde middenstrook.
+          NovaImage(path: backdrop, width: double.infinity, height: 640,
+            baseUrl: 'https://image.tmdb.org/t/p/original', fit: BoxFit.cover,
+            alignment: const Alignment(0, -0.55)),
           // Verticale gradient (leesbaarheid onderaan) + horizontale gradient
           // (leesbaarheid links, waar de tekst staat) - zoals Netflix' hero.
           Container(decoration: const BoxDecoration(
@@ -335,7 +365,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return _MediaRow(
       title: title,
       titleColor: isRd ? const Color(0xFF00b4d8) : Colors.white,
-      height: isProgress ? 185 : (isRanked ? 290 : 290),
+      height: isProgress ? 185 : (isRanked ? 306 : 290),
       itemCount: items.length,
       path: path,
       onSeeAll: path == null ? null : () => Navigator.push(context, MaterialPageRoute(
@@ -379,7 +409,10 @@ class _HomeScreenState extends State<HomeScreen> {
               Expanded(
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(10),
-                  child: NovaImage(path: poster, width: 155, height: 230),
+                  child: Stack(children: [
+                    NovaImage(path: poster, width: 155, height: 230),
+                    _cornerIcon(Icons.add, () => _addToWatchlistWithFeedback(item)),
+                  ]),
                 ),
               ),
             ]),
@@ -393,6 +426,33 @@ class _HomeScreenState extends State<HomeScreen> {
         ]),
       ),
     );
+  }
+
+  Widget _cornerIcon(IconData icon, VoidCallback onTap) {
+    return Positioned(
+      top: 6, right: 6,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(5),
+          decoration: BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+          child: Icon(icon, color: Colors.white, size: 15),
+        ),
+      ),
+    );
+  }
+
+  void _addToWatchlistWithFeedback(Map item) async {
+    await UserDataService.addToWatchlist(Map<String, dynamic>.from(item));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Toegevoegd aan watchlist'), backgroundColor: Color(0xFF00b4d8), duration: Duration(seconds: 2)));
+  }
+
+  void _removeFromProgress(Map item) async {
+    await UserDataService.removeProgress(item['id']);
+    if (!mounted) return;
+    setState(() => _progress.removeWhere((p) => p['id'] == item['id']));
   }
 
   Widget _buildCard(Map item, {bool isRd = false, bool isProgress = false}) {
@@ -427,6 +487,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               const Positioned.fill(child: Center(child: Icon(Icons.play_circle_outline, color: Colors.white70, size: 34))),
+              _cornerIcon(Icons.close, () => _removeFromProgress(item)),
             ]),
             const SizedBox(height: 8),
             Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
@@ -448,10 +509,13 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(12),
-              child: isRd
-                ? Container(width: 168, height: 235, color: const Color(0xFF0f1520),
-                    child: const Icon(Icons.folder_open, color: Color(0xFF00b4d8), size: 36))
-                : NovaImage(path: poster, width: 168, height: 235),
+              child: Stack(children: [
+                isRd
+                  ? Container(width: 168, height: 235, color: const Color(0xFF0f1520),
+                      child: const Icon(Icons.folder_open, color: Color(0xFF00b4d8), size: 36))
+                  : NovaImage(path: poster, width: 168, height: 235),
+                if (!isRd) _cornerIcon(Icons.add, () => _addToWatchlistWithFeedback(item)),
+              ]),
             ),
           ),
           const SizedBox(height: 8),
