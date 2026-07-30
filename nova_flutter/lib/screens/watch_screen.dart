@@ -18,7 +18,8 @@ const tmdbBackdrop = 'https://image.tmdb.org/t/p/w780';
 
 class WatchScreen extends StatefulWidget {
   final Map<String, dynamic> media;
-  const WatchScreen({super.key, required this.media});
+  final bool autoResume;
+  const WatchScreen({super.key, required this.media, this.autoResume = false});
   @override
   State<WatchScreen> createState() => _WatchScreenState();
 }
@@ -73,6 +74,16 @@ class _WatchScreenState extends State<WatchScreen> {
     _checkWatchlist();
     _loadPrefs();
     if (isMovie) _checkAvailability();
+
+    // Vanuit "Verder kijken" meteen doorspelen i.p.v. eerst het detailscherm
+    // te tonen waar nog eens op Afspelen geklikt moet worden.
+    if (widget.autoResume) {
+      final savedSeason = widget.media['season_number'];
+      final savedEpisode = widget.media['episode_number'];
+      if (savedSeason is int) _selectedSeason = savedSeason;
+      final episode = savedEpisode is int ? {'episode_number': savedEpisode} : null;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _play(episode: episode));
+    }
 
     // Luister naar player updates voor progress
     int lastSave = -1;
@@ -496,7 +507,10 @@ class _WatchScreenState extends State<WatchScreen> {
       _cast = results[1] as List;
       _similar = results[2] as List;
     });
-    if (!isMovie) _loadSeason(1);
+    // _selectedSeason kan al gezet zijn (bv. door "Verder kijken" dat direct
+    // naar de juiste aflevering doorspeelt) - dat mag hier niet overschreven
+    // worden terug naar seizoen 1.
+    if (!isMovie) _loadSeason(_selectedSeason);
   }
 
   Future<void> _loadSeason(int s) async {

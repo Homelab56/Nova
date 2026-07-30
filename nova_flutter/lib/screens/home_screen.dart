@@ -388,7 +388,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final double progress = (item['current_time'] ?? 0) / (item['duration'] ?? 1);
       
       return GestureDetector(
-        onTap: () => _openWatch(item),
+        onTap: () => _openWatch(item, autoResume: true),
         child: Container(
           width: 200, margin: const EdgeInsets.symmetric(horizontal: 4),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -445,10 +445,10 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _openWatch(Map item) {
+  void _openWatch(Map item, {bool autoResume = false}) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item))),
+      MaterialPageRoute(builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item), autoResume: autoResume)),
     ).then((_) => _load()); // Herlaad progress bij terugkomst
   }
 }

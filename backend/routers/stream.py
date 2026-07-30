@@ -9,6 +9,7 @@ import shutil
 import mimetypes
 import re
 import tempfile
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse, FileResponse, RedirectResponse, Response
 from pydantic import BaseModel
@@ -21,6 +22,15 @@ RD_BASE = "https://api.real-debrid.com/rest/1.0"
 _HLS_ROOT = "/tmp/nova_hls"
 _HLS_SESSIONS: dict[str, dict] = {}
 _LAST_START: dict[str, tuple[float, float]] = {}
+
+# OpenSubtitles' free tier caps downloads (5/24h). Once we hit that cap we
+# remember the reset time it reports, so we skip the doomed search+download
+# round-trip (and the extra hit against their rate limiter) until then.
+_OS_QUOTA_RESET_AT: float = 0.0
+
+
+def _os_quota_active() -> bool:
+    return time.time() < _OS_QUOTA_RESET_AT
 
 _ALLOWED_LANG_PREFIXES = (
     "en", "eng", "english", "engels",
@@ -1405,6 +1415,16 @@ async def _download_opensubtitles(file_id: int) -> str | None:
             r = await client.post(f"{_OS_BASE}/download", json={"file_id": file_id}, headers=_os_headers())
         if r.status_code != 200:
             print(f"OpenSubtitles downloadfout: {r.status_code} {r.text[:300]}")
+            if r.status_code == 406:
+                try:
+                    reset_iso = r.json().get("reset_time_utc")
+                    if reset_iso:
+                        global _OS_QUOTA_RESET_AT
+                        _OS_QUOTA_RESET_AT = datetime.fromisoformat(
+                            reset_iso.replace("Z", "+00:00")
+                        ).timestamp()
+                except Exception:
+                    pass
             return None
         link = r.json().get("link")
         if not link:
@@ -1526,6 +1546,13 @@ async def subtitle_external_vtt(
     cached = _subtitle_cache_get(cache_key)
     if cached:
         return Response(content=cached, media_type="text/vtt", headers={"Cache-Control": "no-cache"})
+
+    if _os_quota_active():
+        reset_str = datetime.fromtimestamp(_OS_QUOTA_RESET_AT, tz=timezone.utc).strftime("%H:%M UTC")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Dagelijkse OpenSubtitles-limiet bereikt, probeer opnieuw na {reset_str}.",
+        )
 
     found = await _search_opensubtitles(tmdb_id, media_type, lang, season, episode)
     if not found:
