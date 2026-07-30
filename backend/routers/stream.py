@@ -201,6 +201,51 @@ def _parse_range_header(value: str, size: int) -> tuple[int, int] | None:
         return None
     return start, end
 
+async def _ffprobe_duration_only(input_value: str, timeout_secs: float = 10.0) -> float:
+    """
+    Snelle ffprobe-check die enkel de duur opvraagt, met een klein
+    probesize/analyzeduration. De containerduur staat doorgaans al in de
+    eerste paar KB-MB van een geldig MKV/MP4-bestand, dus dit hoeft niet
+    - in tegenstelling tot _ffprobe_probe_health, dat ook ondertitelsporen
+    diep in het bestand moet vinden - het hele bestand te scannen. Daardoor
+    blijft dit ook voor grote 4K-bronnen ruim binnen een korte timeout,
+    i.p.v. onterecht als "kapot" behandeld te worden omdat de zware probe
+    niet op tijd klaar is. Geeft 0.0 terug als de duur niet bepaald kon
+    worden.
+    """
+    http = _is_http_url(input_value)
+    args = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json"]
+    if http:
+        args.extend([
+            "-rw_timeout", "8000000",
+            "-timeout", "8000000",
+            "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+            "-headers", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36\r\nAccept: */*\r\nConnection: keep-alive\r\n",
+            "-analyzeduration", "5000000",
+            "-probesize", "5000000",
+        ])
+    args.append(input_value)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout_secs)
+        if proc.returncode != 0:
+            msg = (err or b"").decode("utf-8", errors="ignore").strip() or "geen stderr"
+            print(f"ffprobe duration failed for {input_value[:120]}: returncode {proc.returncode}: {msg[:400]}")
+            return 0.0
+        data = json.loads(out.decode("utf-8", errors="ignore") or "{}")
+        try:
+            return float((data.get("format") or {}).get("duration") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+    except Exception as e:
+        print(f"FFProbe duration fout voor {input_value[:120]}: {e}")
+        return 0.0
+
+
 async def _ffprobe_probe_health(input_value: str, is_path: bool) -> tuple[float, list[dict]]:
     """
     Zoals _ffprobe_subtitle_streams, maar haalt ook de duur van de bron op.

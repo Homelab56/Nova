@@ -8,7 +8,7 @@ import time
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from .config_loader import get_rd_token, get_tmdb_key, get_aiostreams_config
-from .stream import _ffprobe_subtitle_streams, _ffprobe_probe_health
+from .stream import _ffprobe_subtitle_streams, _ffprobe_probe_health, _ffprobe_duration_only
 
 router = APIRouter()
 
@@ -230,14 +230,34 @@ async def _probe_subtitle_langs(url: str, timeout: float = 12.0) -> tuple[bool, 
     return True, has_nl, has_en
 
 
+async def _probe_playable(url: str, timeout: float = 10.0) -> bool:
+    """
+    Snelle (duur-only) haalbaarheidscheck - zie _ffprobe_duration_only. In
+    tegenstelling tot _probe_subtitle_langs vraagt dit geen ondertitelsporen
+    op, dus blijft dit ruim binnen een korte timeout ook voor grote 4K-
+    bronnen (waar de zware ondertitel-probe soms niet op tijd klaar was en
+    de kandidaat daardoor onterecht als "kapot" werd behandeld, met een
+    ongecheckte placeholder-clip als resultaat via de fallback).
+    """
+    if not url or url.startswith("magnet:"):
+        return False
+    try:
+        duration = await asyncio.wait_for(_ffprobe_duration_only(url, timeout_secs=timeout), timeout=timeout + 1)
+    except Exception:
+        return False
+    return duration >= _MIN_PLAYABLE_DURATION_SECS
+
+
 async def _pick_best_with_dutch_subs(results: list[dict], max_probe: int = 10) -> tuple[str | None, dict | None, bool]:
     """
     Kiest de best gerangschikte kandidaat die ook echt afspeelbaar blijkt
-    (ffprobe + duur-check, om AIOStreams-placeholderclips uit te sluiten).
+    (snelle ffprobe duur-check, om AIOStreams-placeholderclips uit te
+    sluiten zonder de trage volledige ondertitel-probe nodig te hebben).
     Ondertitels spelen geen rol meer bij deze keuze: een Nederlandse
     ondertitel wordt sowieso altijd apart via OpenSubtitles+ffsubsync
     opgehaald (zie stream.py), ongeacht wat er in het gekozen bestand zelf
-    ingebakken zit. has_nl_subs in de return is puur informatief.
+    ingebakken zit. has_nl_subs in de return is dus altijd False (niet meer
+    gecheckt op dit punt).
     Geeft (stream_value, item, has_nl_subs) terug.
     """
     with_url = [x for x in results if _is_usable_now(x) and not _looks_like_junk_release(x)]
@@ -247,15 +267,13 @@ async def _pick_best_with_dutch_subs(results: list[dict], max_probe: int = 10) -
 
     candidates = with_url[:max_probe]
     checks = await asyncio.gather(
-        *[_probe_subtitle_langs((c.get("url") or "").strip()) for c in candidates],
+        *[_probe_playable((c.get("url") or "").strip()) for c in candidates],
         return_exceptions=True,
     )
-    probed = [(item, r) for item, r in zip(candidates, checks) if not isinstance(r, Exception)]
-
-    for item, (ok, has_nl, _has_en) in probed:
-        if ok:
+    for item, ok in zip(candidates, checks):
+        if ok is True:
             url = (item.get("url") or "").strip()
-            return _wrap_stream_value(url, bool(item.get("notWebReady"))), item, has_nl
+            return _wrap_stream_value(url, bool(item.get("notWebReady"))), item, False
 
     # Niets van de geprobeerde top-kandidaten bevestigd afspeelbaar; allerlaatste
     # redmiddel zonder health-check.
