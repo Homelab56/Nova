@@ -198,7 +198,11 @@ def _subtitle_is_english(s: dict) -> bool:
     return any(lang.startswith(p) for p in _EN_LANG_PREFIXES) or any(p in title for p in _EN_LANG_PREFIXES)
 
 
-_MIN_PLAYABLE_DURATION_SECS = 120
+# AIOStreams-placeholderclips bleken zelfs exact 120s te duren (dus precies
+# op de vorige, te lage grens) - een echte film/aflevering duurt zelfs in het
+# kortste geval minstens een kwartier, dus deze grens ruim daaronder houden
+# zodat toeval met een placeholder-duur uitgesloten is.
+_MIN_PLAYABLE_DURATION_SECS = 600
 
 
 async def _probe_subtitle_langs(url: str, timeout: float = 12.0) -> tuple[bool, bool, bool]:
