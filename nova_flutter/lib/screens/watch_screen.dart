@@ -41,6 +41,7 @@ class _WatchScreenState extends State<WatchScreen> {
   Tracks _tracks = const Tracks();
   Track _currentTrack = const Track();
   Map? _currentEpisode;
+  String? _currentSourceLabel;
   Map<String, dynamic> _prefs = {
     'default_audio_lang': 'en',
     'default_sub_lang_1': 'nl',
@@ -569,19 +570,21 @@ class _WatchScreenState extends State<WatchScreen> {
       final apiPaths = ['/api/debrid/search', '/debrid/search'];
       String? url;
       String? source;
+      String? sourceTitle;
       String? errorMessage;
-      
+
       for (final path in apiPaths) {
         try {
           final apiUrl = '$baseUrl$path?q=${Uri.encodeComponent(q)}&tmdb_id=${widget.media['id']}&media_type=${isMovie ? "movie" : "tv"}&client=windows';
           final response = await http.get(Uri.parse(apiUrl)).timeout(const Duration(seconds: 25));
-          
+
           if (response.statusCode == 200) {
             final data = jsonDecode(response.body);
             final direct = data['direct_url'] as String?;
             final stream = data['stream_url'] as String?;
             url = (direct != null && direct.isNotEmpty) ? direct : stream;
             source = data['source'] ?? 'unknown';
+            sourceTitle = data['title'] as String?;
             if (url != null) break;
             errorMessage = data['message'];
           } else {
@@ -600,6 +603,7 @@ class _WatchScreenState extends State<WatchScreen> {
         });
         return;
       }
+      setState(() => _currentSourceLabel = sourceTitle);
 
       final statusLabel = source == 'scraper' ? 'Gevonden op internet. Laden...' : 'Gevonden in bibliotheek. Laden...';
       final resume = await _resumeSeconds(episode: episode);
@@ -778,6 +782,7 @@ class _WatchScreenState extends State<WatchScreen> {
                           final stream = s['stream_url'] as String?;
                           final chosen = (direct != null && direct.isNotEmpty) ? direct : stream;
                           if (chosen != null) {
+                            setState(() => _currentSourceLabel = s['title'] as String?);
                             final resume = await _resumeSeconds(episode: episode);
                             _playUrl(chosen, statusLabel: 'Bron laden...', resumeSeconds: resume);
                           }
@@ -856,6 +861,19 @@ class _WatchScreenState extends State<WatchScreen> {
                   aspectRatio: 16/9,
                   child: Stack(children: [
                     Video(controller: _controller),
+                    if (_currentSourceLabel != null)
+                      Positioned(
+                        left: 8, bottom: 8, right: 120,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(_currentSourceLabel!, maxLines: 1, overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                        ),
+                      ),
                     Positioned(
                       top: 8, right: 8,
                       child: Row(children: [

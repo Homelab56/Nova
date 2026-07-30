@@ -201,6 +201,67 @@ def _parse_range_header(value: str, size: int) -> tuple[int, int] | None:
         return None
     return start, end
 
+async def _ffprobe_probe_health(input_value: str, is_path: bool) -> tuple[float, list[dict]]:
+    """
+    Zoals _ffprobe_subtitle_streams, maar haalt ook de duur van de bron op.
+    AIOStreams serveert voor niet (meer) beschikbare bronnen soms een kort
+    placeholder-clipje i.p.v. de echte video (bv. "wordt nog gedownload" of
+    "unavailable for legal reasons") - dat lijkt qua ffprobe verder op een
+    geldig bestand, maar duurt hooguit een paar seconden. Duur teruggeven
+    zodat zulke bronnen herkend en uitgesloten kunnen worden, ongeacht de
+    exacte foutmelding die AIOStreams toont (die varieert).
+    Geeft (duration_secs, subtitle_streams) terug; duration_secs is 0.0 als
+    de duur niet bepaald kon worden.
+    """
+    http = _is_http_url(input_value)
+    args = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration:stream=index,codec_name,codec_type:stream_tags=language,title",
+        "-of",
+        "json",
+    ]
+    if http:
+        args.extend([
+            "-rw_timeout", "60000000",
+            "-timeout", "90000000",
+            "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+            "-headers", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36\r\nAccept: */*\r\nConnection: keep-alive\r\n",
+            "-analyzeduration", "120000000",
+            "-probesize", "120000000",
+            "-reconnect", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "5",
+        ])
+    args.append(input_value)
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        timeout = 60 if http else 20
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        if proc.returncode != 0:
+            msg = (err or b"").decode("utf-8", errors="ignore").strip() or "geen stderr"
+            print(f"ffprobe health failed for {input_value[:120]}: returncode {proc.returncode}: {msg[:400]}")
+            return 0.0, []
+        data = json.loads(out.decode("utf-8", errors="ignore") or "{}")
+        try:
+            duration = float((data.get("format") or {}).get("duration") or 0.0)
+        except (TypeError, ValueError):
+            duration = 0.0
+        streams = data.get("streams") or []
+        subtitle_streams = [s for s in streams if isinstance(s, dict) and s.get("codec_type") == "subtitle"]
+        return duration, subtitle_streams
+    except Exception as e:
+        print(f"FFProbe health fout voor {input_value[:120]}: {e}")
+        return 0.0, []
+
+
 async def _ffprobe_subtitle_streams(input_value: str, is_path: bool) -> list[dict]:
     http = _is_http_url(input_value)
     args = [

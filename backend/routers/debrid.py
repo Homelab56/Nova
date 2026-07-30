@@ -8,7 +8,7 @@ import time
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from .config_loader import get_rd_token, get_tmdb_key, get_aiostreams_config
-from .stream import _ffprobe_subtitle_streams
+from .stream import _ffprobe_subtitle_streams, _ffprobe_probe_health
 
 router = APIRouter()
 
@@ -198,18 +198,32 @@ def _subtitle_is_english(s: dict) -> bool:
     return any(lang.startswith(p) for p in _EN_LANG_PREFIXES) or any(p in title for p in _EN_LANG_PREFIXES)
 
 
+_MIN_PLAYABLE_DURATION_SECS = 120
+
+
 async def _probe_subtitle_langs(url: str, timeout: float = 12.0) -> tuple[bool, bool, bool]:
     """
     Opent de bron echt (ffprobe) en geeft (probe_ok, has_nl, has_en) terug.
     probe_ok=False betekent dat de bron niet eens geopend kon worden (kapotte
-    of onbereikbare link) - dat is een sterk signaal dat afspelen sowieso
-    zal mislukken.
+    of onbereikbare link), of dat het duidelijk geen echte film/aflevering is
+    - dat is een sterk signaal dat afspelen sowieso zal mislukken.
+
+    AIOStreams serveert voor bronnen die (nog) niet echt speelbaar zijn soms
+    een kort placeholder-clipje i.p.v. de echte video (bv. "wordt nog
+    gedownload naar je debrid" of "unavailable for legal reasons" - de exacte
+    tekst varieert en is dus niet betrouwbaar te herkennen op naam). Zo'n
+    clipje probeert nog wel normaal via ffprobe, maar duurt hooguit een paar
+    seconden; een echte film of aflevering duurt altijd minstens enkele
+    minuten. Die duur-check vangt dus elke variant van dit placeholder-
+    probleem, ongeacht de foutmelding erin.
     """
     if not url or url.startswith("magnet:"):
         return False, False, False
     try:
-        streams = await asyncio.wait_for(_ffprobe_subtitle_streams(url, is_path=False), timeout=timeout)
+        duration, streams = await asyncio.wait_for(_ffprobe_probe_health(url, is_path=False), timeout=timeout)
     except Exception:
+        return False, False, False
+    if duration < _MIN_PLAYABLE_DURATION_SECS:
         return False, False, False
     has_nl = any(_subtitle_is_dutch(s) for s in streams)
     has_en = any(_subtitle_is_english(s) for s in streams)
@@ -247,7 +261,16 @@ async def _pick_best_with_dutch_subs(results: list[dict], max_probe: int = 10) -
             return _wrap_stream_value(url, bool(item.get("notWebReady"))), item, False
 
     # Geen van de geprobeerde kandidaten heeft bevestigd NL- of EN-ondertitels;
-    # val terug op de gewone beste match zodat afspelen niet vastloopt.
+    # kies dan tenminste een kandidaat die effectief bevestigd afspeelbaar is
+    # (ffprobe + duur-check geslaagd), zodat er nooit een ongecheckte
+    # placeholder-clip als "beste" bron teruggegeven wordt.
+    for item, (ok, _has_nl, _has_en) in probed:
+        if ok:
+            url = (item.get("url") or "").strip()
+            return _wrap_stream_value(url, bool(item.get("notWebReady"))), item, False
+
+    # Zelfs onder de geprobeerde top-kandidaten niets bevestigd bruikbaars;
+    # allerlaatste redmiddel zonder health-check.
     fallback_url, fallback_item = _pick_best_aiostream_url(results)
     return fallback_url, fallback_item, False
 
