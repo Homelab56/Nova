@@ -1,4 +1,5 @@
 import httpx
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Query
 from .config_loader import get_tmdb_key
 import re
@@ -118,6 +119,25 @@ def _is_weird_tv(item: dict) -> bool:
     genres = _as_int_set(item.get("genre_ids"))
     return len(genres & EXCLUDE_TV_GENRES) > 0
 
+# Net-uitgekomen bioscoopfilms staan zelden al ergens (legaal noch illegaal)
+# als downloadbare release binnen deze periode na de releasedatum - ze horen
+# dan ook niet tussen "populair"/"trending" te staan waar geen stream voor te
+# vinden zal zijn. Series worden hier niet op gefilterd: een lopende serie is
+# ook "beschikbaar" zolang oudere afleveringen wel al releases hebben.
+_NEW_RELEASE_GRACE_DAYS = 21
+
+def _is_too_new_release(item: dict, media_type: str | None) -> bool:
+    if media_type != "movie":
+        return False
+    date_str = item.get("release_date")
+    if not isinstance(date_str, str) or len(date_str) < 10:
+        return False
+    try:
+        release = datetime.strptime(date_str[:10], "%Y-%m-%d")
+    except ValueError:
+        return False
+    return release > datetime.utcnow() - timedelta(days=_NEW_RELEASE_GRACE_DAYS)
+
 def _tag_media_type(items: list[dict], media_type: str | None) -> list[dict]:
     if not media_type:
         return items
@@ -153,6 +173,8 @@ def _filter_items(
         if suggestion_mode and inferred == "tv" and _is_weird_tv(it):
             continue
         if suggestion_mode and not allow_kids and _is_kids(it, inferred):
+            continue
+        if suggestion_mode and _is_too_new_release(it, inferred):
             continue
         out.append(it)
     return out
