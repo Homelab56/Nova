@@ -7,6 +7,7 @@ import 'watch_screen.dart';
 import 'settings_screen.dart';
 import 'watchlist_screen.dart';
 import 'search_screen.dart';
+import 'category_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -75,27 +76,27 @@ class _HomeScreenState extends State<HomeScreen> {
 
     switch (_tab) {
       case 1: baseRows.addAll([
-        {'title': 'Populaire films', 'items': _popularMovies},
-        {'title': 'Trending films', 'items': _trendMovies, 'is_ranked': true},
-        {'title': 'Best beoordeeld', 'items': _topMovies},
+        {'title': 'Populaire films', 'items': _popularMovies, 'path': '/api/search/popular/movies'},
+        {'title': 'Trending films', 'items': _trendMovies, 'is_ranked': true, 'path': '/api/search/trending/movies'},
+        {'title': 'Best beoordeeld', 'items': _topMovies, 'path': '/api/search/toprated/movies'},
       ]); break;
       case 2: baseRows.addAll([
-        {'title': 'Populaire series', 'items': _popularTv},
-        {'title': 'Trending series', 'items': _trendTv, 'is_ranked': true},
-        {'title': 'Best beoordeeld', 'items': _topTv},
+        {'title': 'Populaire series', 'items': _popularTv, 'path': '/api/search/popular/tv'},
+        {'title': 'Trending series', 'items': _trendTv, 'is_ranked': true, 'path': '/api/search/trending/tv'},
+        {'title': 'Best beoordeeld', 'items': _topTv, 'path': '/api/search/toprated/tv'},
       ]); break;
       case 4: baseRows.addAll([
-        {'title': 'Kinderfilms', 'items': _kidsMovies},
-        {'title': 'Kinderseries', 'items': _kidsTv},
+        {'title': 'Kinderfilms', 'items': _kidsMovies, 'path': '/api/search/kids/movies'},
+        {'title': 'Kinderseries', 'items': _kidsTv, 'path': '/api/search/kids/tv'},
       ]); break;
       default: baseRows.addAll([
-        {'title': 'Top 10 deze week', 'items': _trending, 'is_ranked': true},
-        {'title': 'Populaire films', 'items': _popularMovies},
-        {'title': 'Populaire series', 'items': _popularTv},
-        {'title': 'Trending films', 'items': _trendMovies},
-        {'title': 'Trending series', 'items': _trendTv},
-        {'title': 'Best beoordeelde films', 'items': _topMovies},
-        {'title': 'Best beoordeelde series', 'items': _topTv},
+        {'title': 'Top 10 deze week', 'items': _trending, 'is_ranked': true, 'path': '/api/search/trending'},
+        {'title': 'Populaire films', 'items': _popularMovies, 'path': '/api/search/popular/movies'},
+        {'title': 'Populaire series', 'items': _popularTv, 'path': '/api/search/popular/tv'},
+        {'title': 'Trending films', 'items': _trendMovies, 'path': '/api/search/trending/movies'},
+        {'title': 'Trending series', 'items': _trendTv, 'path': '/api/search/trending/tv'},
+        {'title': 'Best beoordeelde films', 'items': _topMovies, 'path': '/api/search/toprated/movies'},
+        {'title': 'Best beoordeelde series', 'items': _topTv, 'path': '/api/search/toprated/tv'},
       ]);
     }
 
@@ -128,7 +129,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: _buildRow(r['title'] as String, r['items'] as List,
                             isRd: r['is_rd'] == true,
                             isProgress: r['is_progress'] == true,
-                            isRanked: r['is_ranked'] == true))),
+                            isRanked: r['is_ranked'] == true,
+                            path: r['path'] as String?))),
                         const SliverToBoxAdapter(child: SizedBox(height: 50)),
                       ],
                     ),
@@ -260,71 +262,88 @@ class _HomeScreenState extends State<HomeScreen> {
     final title = item['title'] ?? item['name'] ?? '';
     final backdrop = item['backdrop_path'] as String?;
     final rating = (item['vote_average'] as num?)?.toStringAsFixed(1);
+    final overview = (item['overview'] as String?) ?? '';
 
     return GestureDetector(
       onTap: () => _openWatch(item),
-      child: Stack(children: [
-        NovaImage(path: backdrop, width: double.infinity, height: 260,
-          baseUrl: 'https://image.tmdb.org/t/p/w780'),
-        Container(height: 260, decoration: const BoxDecoration(
-          gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
-            colors: [Colors.transparent, Color(0xFF080c14)]))),
-        Positioned(bottom: 16, left: 16, right: 16,
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.white,
-              shadows: [Shadow(blurRadius: 8, color: Colors.black)])),
-            if (rating != null) ...[
-              const SizedBox(height: 4),
-              Text('★ $rating', style: const TextStyle(color: Colors.amber, fontSize: 13)),
-            ],
-            const SizedBox(height: 10),
-            Row(children: [
-              ElevatedButton.icon(
-                onPressed: () => _openWatch(item),
-                icon: const Icon(Icons.play_arrow, size: 18),
-                label: const Text('Afspelen'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white, foregroundColor: Colors.black,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10)),
+      child: SizedBox(
+        height: 520,
+        child: Stack(fit: StackFit.expand, children: [
+          NovaImage(path: backdrop, width: double.infinity, height: 520,
+            baseUrl: 'https://image.tmdb.org/t/p/w1280', fit: BoxFit.cover),
+          // Verticale gradient (leesbaarheid onderaan) + horizontale gradient
+          // (leesbaarheid links, waar de tekst staat) - zoals Netflix' hero.
+          Container(decoration: const BoxDecoration(
+            gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
+              colors: [Colors.transparent, Colors.transparent, Color(0xFF080c14)],
+              stops: [0.0, 0.55, 1.0]))),
+          Container(decoration: const BoxDecoration(
+            gradient: LinearGradient(begin: Alignment.centerLeft, end: Alignment.centerRight,
+              colors: [Color(0xF2080c14), Colors.transparent],
+              stops: [0.0, 0.65]))),
+          Positioned(bottom: 40, left: 40, right: 40,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 640),
+                child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 40, fontWeight: FontWeight.w900, color: Colors.white,
+                    height: 1.1, shadows: [Shadow(blurRadius: 12, color: Colors.black)])),
               ),
-              const SizedBox(width: 10),
-              OutlinedButton.icon(
-                onPressed: () => UserDataService.addToWatchlist(Map<String, dynamic>.from(item)),
-                icon: const Icon(Icons.add, size: 16, color: Colors.white),
-                label: const Text('Watchlist', style: TextStyle(color: Colors.white)),
-                style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: Colors.white54),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10)),
-              ),
-            ]),
-          ])),
-      ]),
+              if (rating != null) ...[
+                const SizedBox(height: 10),
+                Text('★ $rating', style: const TextStyle(color: Colors.amber, fontSize: 15)),
+              ],
+              if (overview.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 520),
+                  child: Text(overview, maxLines: 3, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 14, color: Colors.white70, height: 1.4)),
+                ),
+              ],
+              const SizedBox(height: 20),
+              Row(children: [
+                ElevatedButton.icon(
+                  onPressed: () => _openWatch(item),
+                  icon: const Icon(Icons.play_arrow, size: 20),
+                  label: const Text('Afspelen'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white, foregroundColor: Colors.black,
+                    textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14)),
+                ),
+                const SizedBox(width: 12),
+                OutlinedButton.icon(
+                  onPressed: () => UserDataService.addToWatchlist(Map<String, dynamic>.from(item)),
+                  icon: const Icon(Icons.add, size: 18, color: Colors.white),
+                  label: const Text('Watchlist', style: TextStyle(color: Colors.white, fontSize: 15)),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Colors.white54),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14)),
+                ),
+              ]),
+            ])),
+        ]),
+      ),
     );
   }
 
-  Widget _buildRow(String title, List items, {bool isRd = false, bool isProgress = false, bool isRanked = false}) {
+  Widget _buildRow(String title, List items, {bool isRd = false, bool isProgress = false, bool isRanked = false, String? path}) {
     if (items.isEmpty) return const SizedBox.shrink();
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(16, 24, 16, 12),
-        child: Text(title, style: TextStyle(
-          fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: 0.2,
-          color: isRd ? const Color(0xFF00b4d8) : Colors.white)),
-      ),
-      SizedBox(
-        height: isProgress ? 165 : (isRanked ? 250 : 250),
-        child: ListView.builder(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          itemCount: items.length,
-          itemBuilder: (_, i) => isRanked && i < 9
-            ? _buildRankedCard(items[i], i + 1)
-            : _buildCard(items[i], isRd: isRd, isProgress: isProgress),
-        ),
-      ),
-    ]);
+    return _MediaRow(
+      title: title,
+      titleColor: isRd ? const Color(0xFF00b4d8) : Colors.white,
+      height: isProgress ? 185 : (isRanked ? 290 : 290),
+      itemCount: items.length,
+      path: path,
+      onSeeAll: path == null ? null : () => Navigator.push(context, MaterialPageRoute(
+        builder: (_) => CategoryScreen(title: title, path: path))),
+      itemBuilder: (_, i) => isRanked && i < 9
+        ? _buildRankedCard(items[i], i + 1)
+        : _buildCard(items[i], isRd: isRd, isProgress: isProgress),
+    );
   }
 
   // Netflix-achtige "Top 10" kaart met een grote omlijnde rangnummer achter de poster.
@@ -334,25 +353,25 @@ class _HomeScreenState extends State<HomeScreen> {
     return GestureDetector(
       onTap: () => _openWatch(item),
       child: Container(
-        width: 172,
-        margin: const EdgeInsets.symmetric(horizontal: 2),
+        width: 208,
+        margin: const EdgeInsets.symmetric(horizontal: 3),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           SizedBox(
-            height: 210,
+            height: 248,
             child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
               SizedBox(
-                width: 56,
+                width: 66,
                 child: Text(
                   '$rank',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    fontSize: 108,
+                    fontSize: 128,
                     fontWeight: FontWeight.w900,
                     height: 0.78,
                     fontStyle: FontStyle.italic,
                     foreground: Paint()
                       ..style = PaintingStyle.stroke
-                      ..strokeWidth = 2.4
+                      ..strokeWidth = 2.6
                       ..color = Colors.white.withOpacity(0.85),
                   ),
                 ),
@@ -360,16 +379,16 @@ class _HomeScreenState extends State<HomeScreen> {
               Expanded(
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(10),
-                  child: NovaImage(path: poster, width: 130, height: 195),
+                  child: NovaImage(path: poster, width: 155, height: 230),
                 ),
               ),
             ]),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Padding(
-            padding: const EdgeInsets.only(left: 56),
+            padding: const EdgeInsets.only(left: 66),
             child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w500)),
+              style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
           ),
         ]),
       ),
@@ -390,12 +409,12 @@ class _HomeScreenState extends State<HomeScreen> {
       return GestureDetector(
         onTap: () => _openWatch(item, autoResume: true),
         child: Container(
-          width: 200, margin: const EdgeInsets.symmetric(horizontal: 4),
+          width: 230, margin: const EdgeInsets.symmetric(horizontal: 5),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Stack(children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: NovaImage(path: backdrop, width: 200, height: 112, baseUrl: 'https://image.tmdb.org/t/p/w300'),
+                child: NovaImage(path: backdrop, width: 230, height: 130, baseUrl: 'https://image.tmdb.org/t/p/w300'),
               ),
               Positioned(bottom: 0, left: 0, right: 0,
                 child: Container(
@@ -407,11 +426,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
-              const Positioned.fill(child: Center(child: Icon(Icons.play_circle_outline, color: Colors.white70, size: 30))),
+              const Positioned.fill(child: Center(child: Icon(Icons.play_circle_outline, color: Colors.white70, size: 34))),
             ]),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w500)),
+              style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
           ]),
         ),
       );
@@ -420,7 +439,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return GestureDetector(
       onTap: () => _openWatch(item),
       child: Container(
-        width: 140, margin: const EdgeInsets.symmetric(horizontal: 5),
+        width: 168, margin: const EdgeInsets.symmetric(horizontal: 6),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Container(
             decoration: BoxDecoration(
@@ -430,16 +449,16 @@ class _HomeScreenState extends State<HomeScreen> {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: isRd
-                ? Container(width: 140, height: 195, color: const Color(0xFF0f1520),
-                    child: const Icon(Icons.folder_open, color: Color(0xFF00b4d8), size: 32))
-                : NovaImage(path: poster, width: 140, height: 195),
+                ? Container(width: 168, height: 235, color: const Color(0xFF0f1520),
+                    child: const Icon(Icons.folder_open, color: Color(0xFF00b4d8), size: 36))
+                : NovaImage(path: poster, width: 168, height: 235),
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600)),
+            style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
           if (!isRd && yearStr.isNotEmpty)
-            Text(yearStr, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+            Text(yearStr, style: const TextStyle(fontSize: 11, color: Colors.grey)),
         ]),
       ),
     );
@@ -450,5 +469,118 @@ class _HomeScreenState extends State<HomeScreen> {
       context,
       MaterialPageRoute(builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item), autoResume: autoResume)),
     ).then((_) => _load()); // Herlaad progress bij terugkomst
+  }
+}
+
+// Horizontale rij met titel, optionele "Meer bekijken"-link en (bij hover,
+// desktop-only) pijltjes om verder te scrollen - de standaard muiswiel-scroll
+// op een horizontale ListView is op Windows niet betrouwbaar/intuïtief.
+class _MediaRow extends StatefulWidget {
+  final String title;
+  final Color titleColor;
+  final double height;
+  final int itemCount;
+  final Widget Function(BuildContext, int) itemBuilder;
+  final String? path;
+  final VoidCallback? onSeeAll;
+  const _MediaRow({
+    required this.title,
+    required this.itemCount,
+    required this.itemBuilder,
+    this.titleColor = Colors.white,
+    this.height = 290,
+    this.path,
+    this.onSeeAll,
+  });
+  @override
+  State<_MediaRow> createState() => _MediaRowState();
+}
+
+class _MediaRowState extends State<_MediaRow> {
+  final _scrollCtrl = ScrollController();
+  bool _hovering = false;
+
+  @override
+  void dispose() {
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  void _scrollBy(double delta) {
+    if (!_scrollCtrl.hasClients) return;
+    final target = (_scrollCtrl.offset + delta).clamp(0.0, _scrollCtrl.position.maxScrollExtent);
+    _scrollCtrl.animateTo(target, duration: const Duration(milliseconds: 350), curve: Curves.easeOut);
+  }
+
+  Widget _arrow(IconData icon, VoidCallback onTap, {required Alignment alignment}) {
+    return Positioned(
+      left: alignment == Alignment.centerLeft ? 0 : null,
+      right: alignment == Alignment.centerRight ? 0 : null,
+      top: 0, bottom: 30,
+      child: AnimatedOpacity(
+        opacity: _hovering ? 1 : 0,
+        duration: const Duration(milliseconds: 150),
+        child: IgnorePointer(
+          ignoring: !_hovering,
+          child: Container(
+            width: 44,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: alignment == Alignment.centerLeft ? Alignment.centerLeft : Alignment.centerRight,
+                end: alignment == Alignment.centerLeft ? Alignment.centerRight : Alignment.centerLeft,
+                colors: [const Color(0xFF080c14).withOpacity(0.9), Colors.transparent],
+              ),
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onTap,
+                child: Icon(icon, color: Colors.white, size: 28),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 24, 16, 12),
+        child: Row(children: [
+          Text(widget.title, style: TextStyle(
+            fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: 0.2,
+            color: widget.titleColor)),
+          if (widget.onSeeAll != null) ...[
+            const SizedBox(width: 14),
+            InkWell(
+              onTap: widget.onSeeAll,
+              child: const Text('Meer bekijken >',
+                style: TextStyle(fontSize: 13, color: Color(0xFF00b4d8), fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ]),
+      ),
+      SizedBox(
+        height: widget.height,
+        child: MouseRegion(
+          onEnter: (_) => setState(() => _hovering = true),
+          onExit: (_) => setState(() => _hovering = false),
+          child: Stack(children: [
+            ListView.builder(
+              controller: _scrollCtrl,
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              itemCount: widget.itemCount,
+              itemBuilder: widget.itemBuilder,
+            ),
+            _arrow(Icons.chevron_left, () => _scrollBy(-800), alignment: Alignment.centerLeft),
+            _arrow(Icons.chevron_right, () => _scrollBy(800), alignment: Alignment.centerRight),
+          ]),
+        ),
+      ),
+    ]);
   }
 }

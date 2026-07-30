@@ -43,6 +43,18 @@ class TmdbService {
     return _extractItems(d);
   }
 
+  // Generieke, gepagineerde variant voor "Meer bekijken"-schermen - alle
+  // /api/search categorie-endpoints (trending/popular/toprated/kids) geven
+  // dezelfde {items, page, total_pages, total_results}-vorm terug.
+  static Future<Map<String, dynamic>> getPaged(String path, {int page = 1}) async {
+    final d = await _backendGet(path, {'page': page});
+    return {
+      'items': _extractItems(d),
+      'total_pages': (d is Map ? (d['total_pages'] as num?)?.toInt() : null) ?? 1,
+      'total_results': (d is Map ? (d['total_results'] as num?)?.toInt() : null) ?? 0,
+    };
+  }
+
   static Future<List> getPopularMovies({int page = 1}) async {
     final d = await _backendGet('/api/search/popular/movies', {'page': page});
     return _extractItems(d);
