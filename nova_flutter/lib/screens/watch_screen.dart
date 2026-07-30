@@ -956,16 +956,6 @@ class _WatchScreenState extends State<WatchScreen> {
                             ),
                           ),
                         ]),
-                        if (isMovie && _isAvailable != null) Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Row(children: [
-                            Icon(_isAvailable! ? Icons.check_circle : Icons.info_outline, 
-                              size: 14, color: _isAvailable! ? const Color(0xFF00b4d8) : Colors.orange),
-                            const SizedBox(width: 4),
-                            Text(_isAvailable! ? 'Beschikbaar in je RD bibliotheek' : 'Niet in je bibliotheek', 
-                              style: TextStyle(color: _isAvailable! ? const Color(0xFF00b4d8) : Colors.orange, fontSize: 12)),
-                          ]),
-                        ),
                         if (_status.isNotEmpty) Padding(
                           padding: const EdgeInsets.only(top: 8),
                           child: Text(_status, style: const TextStyle(color: Color(0xFF00b4d8), fontSize: 12)),
