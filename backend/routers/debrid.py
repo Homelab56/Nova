@@ -252,7 +252,7 @@ async def _probe_playable(url: str, timeout: float = 10.0) -> bool:
     return duration >= _MIN_PLAYABLE_DURATION_SECS
 
 
-async def _pick_best_with_dutch_subs(results: list[dict], max_probe: int = 10) -> tuple[str | None, dict | None, bool]:
+async def _pick_best_with_dutch_subs(results: list[dict], max_probe: int = 30, batch_size: int = 10) -> tuple[str | None, dict | None, bool]:
     """
     Kiest de best gerangschikte kandidaat die ook echt afspeelbaar blijkt
     (snelle ffprobe duur-check, om AIOStreams-placeholderclips uit te
@@ -262,6 +262,17 @@ async def _pick_best_with_dutch_subs(results: list[dict], max_probe: int = 10) -
     opgehaald (zie stream.py), ongeacht wat er in het gekozen bestand zelf
     ingebakken zit. has_nl_subs in de return is dus altijd False (niet meer
     gecheckt op dit punt).
+
+    Probeert in batches van [batch_size] verder de ranglijst af, i.p.v. enkel
+    de top [batch_size] - als bv. alle best-gerankte "4K"-resultaten (zoals
+    gebleken: soms letterlijk allemaal) placeholder-clips blijken, moet er
+    verder gezocht kunnen worden i.p.v. blind terug te vallen op diezelfde,
+    al bewezen kapotte top-kandidaat.
+
+    Geeft geen enkele van de geprobeerde kandidaten een geldige duur, dan
+    wordt (None, None, False) teruggegeven i.p.v. een ongecheckte gok - een
+    bewust "geen stream gevonden" is beter dan zelfverzekerd een placeholder-
+    clip serveren.
     Geeft (stream_value, item, has_nl_subs) terug.
     """
     with_url = [x for x in results if _is_usable_now(x) and not _looks_like_junk_release(x)]
@@ -269,20 +280,19 @@ async def _pick_best_with_dutch_subs(results: list[dict], max_probe: int = 10) -
         return None, None, False
     with_url.sort(key=_aio_rank_result, reverse=True)
 
-    candidates = with_url[:max_probe]
-    checks = await asyncio.gather(
-        *[_probe_playable((c.get("url") or "").strip()) for c in candidates],
-        return_exceptions=True,
-    )
-    for item, ok in zip(candidates, checks):
-        if ok is True:
-            url = (item.get("url") or "").strip()
-            return _wrap_stream_value(url, bool(item.get("notWebReady"))), item, False
+    pool = with_url[:max_probe]
+    for start in range(0, len(pool), batch_size):
+        batch = pool[start:start + batch_size]
+        checks = await asyncio.gather(
+            *[_probe_playable((c.get("url") or "").strip()) for c in batch],
+            return_exceptions=True,
+        )
+        for item, ok in zip(batch, checks):
+            if ok is True:
+                url = (item.get("url") or "").strip()
+                return _wrap_stream_value(url, bool(item.get("notWebReady"))), item, False
 
-    # Niets van de geprobeerde top-kandidaten bevestigd afspeelbaar; allerlaatste
-    # redmiddel zonder health-check.
-    fallback_url, fallback_item = _pick_best_aiostream_url(results)
-    return fallback_url, fallback_item, False
+    return None, None, False
 
 
 _VIDEO_EXTS = (".mkv", ".mp4", ".m4v", ".avi", ".mov", ".webm", ".ts")
