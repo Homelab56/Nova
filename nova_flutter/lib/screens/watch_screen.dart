@@ -1050,40 +1050,37 @@ class _WatchScreenState extends State<WatchScreen> {
                       )),
                     ],
 
-                    // Meer zoals dit
-                    if (_similar.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: -16),
-                        child: MediaRow(
-                          title: 'Meer zoals dit',
-                          height: 260,
-                          itemCount: _similar.length,
-                          itemBuilder: (_, i) {
-                            final item = _similar[i];
-                            final p = item['poster_path'];
-                            return GestureDetector(
-                              onTap: () => Navigator.pushReplacement(context, MaterialPageRoute(
-                                builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
-                              child: Container(width: 150, margin: const EdgeInsets.symmetric(horizontal: 6),
-                                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                  ClipRRect(borderRadius: BorderRadius.circular(10),
-                                    child: p != null
-                                      ? NovaImage(path: '$tmdbPoster$p', height: 210, width: 150, fit: BoxFit.cover)
-                                      : Container(height: 210, width: 150, color: const Color(0xFF0f1520))),
-                                  const SizedBox(height: 6),
-                                  Text(item['title'] ?? item['name'] ?? '', maxLines: 1, overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 13, color: Colors.white70)),
-                                ])),
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 20),
                   ],
                 ),
               ),
+
+              // Meer zoals dit - buiten de padding hierboven, want MediaRow
+              // regelt zijn eigen horizontale marge (net als op het home-scherm).
+              if (_similar.isNotEmpty)
+                MediaRow(
+                  title: 'Meer zoals dit',
+                  height: 260,
+                  itemCount: _similar.length,
+                  itemBuilder: (_, i) {
+                    final item = _similar[i];
+                    final p = item['poster_path'];
+                    return GestureDetector(
+                      onTap: () => Navigator.pushReplacement(context, MaterialPageRoute(
+                        builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
+                      child: Container(width: 150, margin: const EdgeInsets.symmetric(horizontal: 6),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          ClipRRect(borderRadius: BorderRadius.circular(10),
+                            child: p != null
+                              ? NovaImage(path: '$tmdbPoster$p', height: 210, width: 150, fit: BoxFit.cover)
+                              : Container(height: 210, width: 150, color: const Color(0xFF0f1520))),
+                          const SizedBox(height: 6),
+                          Text(item['title'] ?? item['name'] ?? '', maxLines: 1, overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 13, color: Colors.white70)),
+                        ])),
+                    );
+                  },
+                ),
+              const SizedBox(height: 20),
             ],
           ),
         ),
