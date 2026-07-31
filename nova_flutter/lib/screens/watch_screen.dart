@@ -851,6 +851,15 @@ class _WatchScreenState extends State<WatchScreen> {
     );
   }
 
+  // Zelfde Player-controller, dus afspelen loopt gewoon door bij het
+  // wisselen tussen ingebedde en volledig-scherm weergave.
+  void _openFullscreen() {
+    Navigator.push(context, MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (_) => _FullscreenPlayer(controller: _controller),
+    ));
+  }
+
   @override
   void dispose() {
     _player.dispose();
@@ -873,25 +882,35 @@ class _WatchScreenState extends State<WatchScreen> {
             children: [
               // Player of backdrop
               if (_showPlayer)
-                AspectRatio(
-                  aspectRatio: 16/9,
-                  child: Stack(children: [
-                    Video(controller: _controller),
-                    Positioned(
-                      top: 8, right: 8,
-                      child: Row(children: [
-                        _trackButton(Icons.dns_outlined, () => _pickSource(episode: _currentEpisode), 'Andere bron'),
-                        if (_hasSelectableTracks(_tracks.audio)) ...[
-                          const SizedBox(width: 8),
-                          _trackButton(Icons.multitrack_audio, _pickAudioTrack, 'Audio'),
-                        ],
-                        if (_hasSelectableTracks(_tracks.subtitle)) ...[
-                          const SizedBox(width: 8),
-                          _trackButton(Icons.subtitles, _pickSubtitleTrack, 'Ondertitels'),
-                        ],
+                Center(
+                  // Zonder max-breedte rekt de speler zich uit tot de volledige
+                  // vensterbreedte (en dus bijna het hele scherm) ook als je
+                  // helemaal niet naar fullscreen geschakeld hebt.
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 900),
+                    child: AspectRatio(
+                      aspectRatio: 16/9,
+                      child: Stack(children: [
+                        Video(controller: _controller),
+                        Positioned(
+                          top: 8, right: 8,
+                          child: Row(children: [
+                            _trackButton(Icons.dns_outlined, () => _pickSource(episode: _currentEpisode), 'Andere bron'),
+                            if (_hasSelectableTracks(_tracks.audio)) ...[
+                              const SizedBox(width: 8),
+                              _trackButton(Icons.multitrack_audio, _pickAudioTrack, 'Audio'),
+                            ],
+                            if (_hasSelectableTracks(_tracks.subtitle)) ...[
+                              const SizedBox(width: 8),
+                              _trackButton(Icons.subtitles, _pickSubtitleTrack, 'Ondertitels'),
+                            ],
+                            const SizedBox(width: 8),
+                            _trackButton(Icons.fullscreen, _openFullscreen, 'Volledig scherm'),
+                          ]),
+                        ),
                       ]),
                     ),
-                  ]),
+                  ),
                 )
               else
                 SizedBox(
@@ -1170,6 +1189,37 @@ class _WatchScreenState extends State<WatchScreen> {
           const Icon(Icons.play_arrow, color: Color(0xFF00b4d8), size: 24),
         ]),
       ),
+    );
+  }
+}
+
+// Volledig-scherm weergave van dezelfde Player - de video blijft gewoon
+// doorlopen (zelfde controller), enkel het scherm eromheen verandert.
+class _FullscreenPlayer extends StatelessWidget {
+  final VideoController controller;
+  const _FullscreenPlayer({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(children: [
+        Positioned.fill(child: Video(controller: controller)),
+        Positioned(
+          top: 12, left: 12,
+          child: SafeArea(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(24),
+              onTap: () => Navigator.pop(context),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                child: const Icon(Icons.fullscreen_exit, color: Colors.white, size: 24),
+              ),
+            ),
+          ),
+        ),
+      ]),
     );
   }
 }
