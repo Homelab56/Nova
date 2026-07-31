@@ -1004,22 +1004,58 @@ class _WatchScreenState extends State<WatchScreen> {
                   children: [
                     // Seizoenen
                     if (!isMovie && seasons.isNotEmpty) ...[
-                      Row(children: [
-                        const Text('Afleveringen', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: Colors.white)),
-                        const SizedBox(width: 12),
-                        DropdownButton<int>(
-                          value: _selectedSeason,
-                          dropdownColor: const Color(0xFF0f1520),
-                          style: const TextStyle(color: Colors.white, fontSize: 14),
-                          underline: const SizedBox.shrink(),
-                          items: seasons.map<DropdownMenuItem<int>>((s) => DropdownMenuItem(
-                            value: s['season_number'] as int,
-                            child: Text('Seizoen ${s['season_number']} (${s['episode_count']} afl.)'),
-                          )).toList(),
-                          onChanged: (v) { if (v != null) _loadSeason(v); },
+                      const Text('Afleveringen', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: Colors.white)),
+                      const SizedBox(height: 14),
+                      // Duidelijk klikbare seizoen-pillen i.p.v. een kleine,
+                      // makkelijk over het hoofd geziene dropdown - je ziet in
+                      // één oogopslag hoeveel seizoenen er zijn en welke actief is.
+                      SizedBox(
+                        height: 44,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: seasons.length,
+                          separatorBuilder: (_, __) => const SizedBox(width: 10),
+                          itemBuilder: (_, i) {
+                            final s = seasons[i];
+                            final sn = s['season_number'] as int;
+                            final active = sn == _selectedSeason;
+                            return GestureDetector(
+                              onTap: () => _loadSeason(sn),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 150),
+                                padding: const EdgeInsets.symmetric(horizontal: 18),
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: active ? const Color(0xFF00b4d8) : const Color(0xFF0f1520),
+                                  borderRadius: BorderRadius.circular(22),
+                                  border: Border.all(color: active ? Colors.transparent : Colors.white24),
+                                ),
+                                child: Text(
+                                  'Seizoen $sn',
+                                  style: TextStyle(
+                                    color: active ? Colors.white : Colors.grey.shade300,
+                                    fontSize: 14,
+                                    fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
                         ),
-                      ]),
-                      const SizedBox(height: 12),
+                      ),
+                      const SizedBox(height: 6),
+                      Builder(builder: (context) {
+                        final current = seasons.firstWhere(
+                          (s) => s['season_number'] == _selectedSeason,
+                          orElse: () => seasons.first,
+                        );
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 8, bottom: 4),
+                          child: Text('${current['episode_count']} afleveringen',
+                            style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                        );
+                      }),
+                      const SizedBox(height: 6),
                       if (_loadingSeason)
                         const Center(child: CircularProgressIndicator(color: Color(0xFF00b4d8)))
                       else
