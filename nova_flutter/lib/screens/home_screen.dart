@@ -389,7 +389,10 @@ class _HomeScreenState extends State<HomeScreen> {
     // een klein stukje bewust achter de poster verdwijnt voor het bleed-
     // effect, zonder de leesbaarheid van het cijfer zelf te verliezen).
     final double numVisible = rank >= 10 ? 170 : 100;
-    final double numBoxWidth = rank >= 10 ? 210 : 140;
+    // Ruim genoeg dat de hoogte (niet de breedte) altijd de beperkende
+    // factor is voor FittedBox, zodat elk cijfer - "1" of "10" - even hoog
+    // wordt als de poster zelf.
+    final double numBoxWidth = rank >= 10 ? 250 : 170;
     final double cardWidth = numVisible + posterWidth;
     return GestureDetector(
       onTap: () => _openWatch(item),
@@ -410,7 +413,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     style: TextStyle(
                       fontWeight: FontWeight.w900,
                       fontStyle: FontStyle.italic,
-                      color: Colors.grey.shade400,
+                      foreground: Paint()
+                        ..style = PaintingStyle.stroke
+                        ..strokeWidth = 3
+                        ..color = Colors.grey.shade300,
                     ),
                   ),
                 ),
