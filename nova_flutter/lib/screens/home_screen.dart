@@ -376,27 +376,32 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Netflix-achtige "Top 10" kaart: een grote, gedempte cijfer op de
-  // achtergrond met de poster er half overheen, i.p.v. cijfer en poster
-  // netjes naast elkaar in aparte kolommen.
+  // Netflix-achtige "Top 10" kaart. Rang "10" krijgt een bredere cijfer-zone
+  // dan 1-9 (2 tekens i.p.v. 1) zodat beide cijfers altijd volledig leesbaar
+  // blijven i.p.v. dat de poster het merendeel van "10" wegneemt.
   Widget _buildRankedCard(Map item, int rank) {
     final poster = item['poster_path'] as String?;
     final title = item['title'] ?? item['name'] ?? '';
+    const posterWidth = 165.0;
+    const posterHeight = 250.0;
+    // Zichtbaar deel van het cijfer vóór de poster begint overlappen, en de
+    // volledige breedte die aan FittedBox gegeven wordt (iets ruimer, zodat
+    // een klein stukje bewust achter de poster verdwijnt voor het bleed-
+    // effect, zonder de leesbaarheid van het cijfer zelf te verliezen).
+    final double numVisible = rank >= 10 ? 170 : 100;
+    final double numBoxWidth = rank >= 10 ? 210 : 140;
+    final double cardWidth = numVisible + posterWidth;
     return GestureDetector(
       onTap: () => _openWatch(item),
       child: Container(
-        width: 240,
+        width: cardWidth,
         margin: const EdgeInsets.symmetric(horizontal: 3),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           SizedBox(
-            height: 260,
+            height: posterHeight,
             child: Stack(clipBehavior: Clip.none, children: [
-              // FittedBox schaalt het cijfer zodat het altijd exact de
-              // volledige hoogte van de poster inneemt (i.p.v. een vaste
-              // fontSize te gokken), met een solide grijze vulling i.p.v.
-              // een dunne, amper zichtbare omlijning - net als Netflix.
               Positioned(
-                left: 0, top: 0, bottom: 0, width: 200,
+                left: 0, top: 0, bottom: 0, width: numBoxWidth,
                 child: FittedBox(
                   fit: BoxFit.contain,
                   alignment: Alignment.centerLeft,
@@ -405,7 +410,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     style: TextStyle(
                       fontWeight: FontWeight.w900,
                       fontStyle: FontStyle.italic,
-                      color: Colors.grey.shade600,
+                      color: Colors.grey.shade400,
                     ),
                   ),
                 ),
@@ -415,7 +420,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(10),
                   child: Stack(children: [
-                    NovaImage(path: poster, width: 175, height: 250),
+                    NovaImage(path: poster, width: posterWidth, height: posterHeight),
                     _cornerIcon(Icons.add, () => _addToWatchlistWithFeedback(item)),
                   ]),
                 ),
@@ -424,7 +429,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 8),
           Padding(
-            padding: const EdgeInsets.only(left: 65),
+            padding: EdgeInsets.only(left: numVisible),
             child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
           ),
