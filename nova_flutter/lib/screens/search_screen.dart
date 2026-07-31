@@ -15,6 +15,7 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final _ctrl = TextEditingController();
+  final _scrollCtrl = ScrollController();
   List _results = [];
   bool _loading = false;
   int _page = 1, _totalPages = 1, _total = 0;
@@ -25,6 +26,28 @@ class _SearchScreenState extends State<SearchScreen> {
     super.initState();
     if (widget.genreId != null) {
       _loadGenre(widget.genreId!);
+    }
+    _scrollCtrl.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollCtrl.removeListener(_onScroll);
+    _scrollCtrl.dispose();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  // Automatisch de volgende pagina laden zodra je bijna onderaan bent,
+  // i.p.v. steeds zelf op "Meer laden" te moeten klikken.
+  void _onScroll() {
+    if (_loading || _page >= _totalPages) return;
+    if (!_scrollCtrl.hasClients) return;
+    if (_scrollCtrl.position.pixels < _scrollCtrl.position.maxScrollExtent - 600) return;
+    if (widget.genreId != null && _ctrl.text.isEmpty) {
+      _loadGenre(widget.genreId!, append: true);
+    } else if (_lastQuery.isNotEmpty) {
+      _search(_lastQuery, append: true);
     }
   }
 
@@ -121,6 +144,7 @@ class _SearchScreenState extends State<SearchScreen> {
                     if (crossAxisCount < 2) crossAxisCount = 2;
 
                     return GridView.builder(
+                      controller: _scrollCtrl,
                       padding: const EdgeInsets.all(12),
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: crossAxisCount,
@@ -128,24 +152,13 @@ class _SearchScreenState extends State<SearchScreen> {
                         crossAxisSpacing: 14,
                         mainAxisSpacing: 18
                       ),
+                      // Volgende pagina laadt automatisch via _onScroll; deze
+                      // laatste tegel is enkel nog een laad-indicator, geen
+                      // knop die je zelf moet aantikken.
                       itemCount: _results.length + (_page < _totalPages ? 1 : 0),
                       itemBuilder: (_, i) {
                         if (i == _results.length) {
-                          return GestureDetector(
-                            onTap: () {
-                              if (widget.genreId != null && _ctrl.text.isEmpty) {
-                                _loadGenre(widget.genreId!, append: true);
-                              } else {
-                                _search(_lastQuery, append: true);
-                              }
-                            },
-                            child: Container(
-                              decoration: BoxDecoration(color: const Color(0xFF0f1520), borderRadius: BorderRadius.circular(10)),
-                              child: _loading
-                                ? const Center(child: CircularProgressIndicator(color: Color(0xFF00b4d8), strokeWidth: 2))
-                                : const Center(child: Text('Meer laden', style: TextStyle(color: Color(0xFF00b4d8), fontSize: 12))),
-                            ),
-                          );
+                          return const Center(child: CircularProgressIndicator(color: Color(0xFF00b4d8), strokeWidth: 2));
                         }
                         final item = _results[i];
                         final poster = item['poster_path'];

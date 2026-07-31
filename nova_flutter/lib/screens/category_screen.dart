@@ -16,6 +16,7 @@ class CategoryScreen extends StatefulWidget {
 }
 
 class _CategoryScreenState extends State<CategoryScreen> {
+  final _scrollCtrl = ScrollController();
   List _results = [];
   bool _loading = true;
   int _page = 1, _totalPages = 1, _total = 0;
@@ -24,6 +25,21 @@ class _CategoryScreenState extends State<CategoryScreen> {
   void initState() {
     super.initState();
     _load();
+    _scrollCtrl.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollCtrl.removeListener(_onScroll);
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_loading || _page >= _totalPages) return;
+    if (!_scrollCtrl.hasClients) return;
+    if (_scrollCtrl.position.pixels < _scrollCtrl.position.maxScrollExtent - 600) return;
+    _load(append: true);
   }
 
   Future<void> _load({bool append = false}) async {
@@ -74,6 +90,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
                     int crossAxisCount = (constraints.maxWidth / 210).floor();
                     if (crossAxisCount < 2) crossAxisCount = 2;
                     return GridView.builder(
+                      controller: _scrollCtrl,
                       padding: const EdgeInsets.all(12),
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: crossAxisCount,
@@ -84,14 +101,9 @@ class _CategoryScreenState extends State<CategoryScreen> {
                       itemCount: _results.length + (_page < _totalPages ? 1 : 0),
                       itemBuilder: (_, i) {
                         if (i == _results.length) {
-                          return GestureDetector(
-                            onTap: () => _load(append: true),
-                            child: Container(
-                              decoration: BoxDecoration(color: const Color(0xFF0f1520), borderRadius: BorderRadius.circular(10)),
-                              child: _loading
-                                ? const Center(child: CircularProgressIndicator(color: Color(0xFF00b4d8), strokeWidth: 2))
-                                : const Center(child: Text('Meer laden', style: TextStyle(color: Color(0xFF00b4d8), fontSize: 12))),
-                            ),
+                          return Container(
+                            decoration: BoxDecoration(color: const Color(0xFF0f1520), borderRadius: BorderRadius.circular(10)),
+                            child: const Center(child: CircularProgressIndicator(color: Color(0xFF00b4d8), strokeWidth: 2)),
                           );
                         }
                         final item = _results[i];
