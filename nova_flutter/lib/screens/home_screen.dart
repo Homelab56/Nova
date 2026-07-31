@@ -109,8 +109,8 @@ class _HomeScreenState extends State<HomeScreen> {
         {'title': 'Kinderseries', 'items': _kidsTv, 'path': '/api/search/kids/tv'},
       ]); break;
       default: baseRows.addAll([
-        {'title': 'Top 10 films deze week', 'items': _trendMovies, 'is_ranked': true, 'path': '/api/search/trending/movies'},
-        {'title': 'Top 10 series deze week', 'items': _trendTv, 'is_ranked': true, 'path': '/api/search/trending/tv'},
+        {'title': 'Top 10 films deze week', 'items': _trendMovies, 'is_ranked': true},
+        {'title': 'Top 10 series deze week', 'items': _trendTv, 'is_ranked': true},
         {'title': 'Populaire films', 'items': _popularMovies, 'path': '/api/search/popular/movies'},
         {'title': 'Populaire series', 'items': _popularTv, 'path': '/api/search/popular/tv'},
         {'title': 'Best beoordeelde films', 'items': _topMovies, 'path': '/api/search/toprated/movies'},
@@ -391,18 +391,24 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
               SizedBox(
                 width: 66,
-                child: Text(
-                  '$rank',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 128,
-                    fontWeight: FontWeight.w900,
-                    height: 0.78,
-                    fontStyle: FontStyle.italic,
-                    foreground: Paint()
-                      ..style = PaintingStyle.stroke
-                      ..strokeWidth = 2.6
-                      ..color = Colors.white.withOpacity(0.85),
+                // FittedBox schaalt "10" (2 tekens) automatisch mee omlaag
+                // i.p.v. buiten dit vak te tekenen en over de volgende kaart
+                // heen te lopen, zoals met een vaste fontSize gebeurde.
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    '$rank',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 128,
+                      fontWeight: FontWeight.w900,
+                      height: 0.78,
+                      fontStyle: FontStyle.italic,
+                      foreground: Paint()
+                        ..style = PaintingStyle.stroke
+                        ..strokeWidth = 2.6
+                        ..color = Colors.white.withOpacity(0.85),
+                    ),
                   ),
                 ),
               ),
