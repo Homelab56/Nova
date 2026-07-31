@@ -365,7 +365,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return MediaRow(
       title: title,
       titleColor: isRd ? const Color(0xFF00b4d8) : Colors.white,
-      height: isProgress ? 185 : (isRanked ? 320 : 290),
+      height: isProgress ? 185 : (isRanked ? 320 : 300),
       itemCount: isRanked ? (items.length < 10 ? items.length : 10) : items.length,
       path: path,
       onSeeAll: path == null ? null : () => Navigator.push(context, MaterialPageRoute(
@@ -385,25 +385,28 @@ class _HomeScreenState extends State<HomeScreen> {
     return GestureDetector(
       onTap: () => _openWatch(item),
       child: Container(
-        width: 220,
+        width: 240,
         margin: const EdgeInsets.symmetric(horizontal: 3),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           SizedBox(
             height: 260,
-            child: Stack(clipBehavior: Clip.none, alignment: Alignment.bottomLeft, children: [
+            child: Stack(clipBehavior: Clip.none, children: [
+              // FittedBox schaalt het cijfer zodat het altijd exact de
+              // volledige hoogte van de poster inneemt (i.p.v. een vaste
+              // fontSize te gokken), met een solide grijze vulling i.p.v.
+              // een dunne, amper zichtbare omlijning - net als Netflix.
               Positioned(
-                left: -4, bottom: -6,
-                child: Text(
-                  '$rank',
-                  style: TextStyle(
-                    fontSize: 180,
-                    fontWeight: FontWeight.w900,
-                    height: 0.72,
-                    fontStyle: FontStyle.italic,
-                    foreground: Paint()
-                      ..style = PaintingStyle.stroke
-                      ..strokeWidth = 2
-                      ..color = Colors.white.withOpacity(0.18),
+                left: 0, top: 0, bottom: 0, width: 200,
+                child: FittedBox(
+                  fit: BoxFit.contain,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '$rank',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontStyle: FontStyle.italic,
+                      color: Colors.grey.shade600,
+                    ),
                   ),
                 ),
               ),
@@ -412,7 +415,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(10),
                   child: Stack(children: [
-                    NovaImage(path: poster, width: 170, height: 245),
+                    NovaImage(path: poster, width: 175, height: 250),
                     _cornerIcon(Icons.add, () => _addToWatchlistWithFeedback(item)),
                   ]),
                 ),
@@ -421,7 +424,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 8),
           Padding(
-            padding: const EdgeInsets.only(left: 50),
+            padding: const EdgeInsets.only(left: 65),
             child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
           ),
