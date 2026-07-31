@@ -366,11 +366,11 @@ class _HomeScreenState extends State<HomeScreen> {
       title: title,
       titleColor: isRd ? const Color(0xFF00b4d8) : Colors.white,
       height: isProgress ? 185 : (isRanked ? 306 : 290),
-      itemCount: items.length,
+      itemCount: isRanked ? (items.length < 10 ? items.length : 10) : items.length,
       path: path,
       onSeeAll: path == null ? null : () => Navigator.push(context, MaterialPageRoute(
         builder: (_) => CategoryScreen(title: title, path: path))),
-      itemBuilder: (_, i) => isRanked && i < 10
+      itemBuilder: (_, i) => isRanked
         ? _buildRankedCard(items[i], i + 1)
         : _buildCard(items[i], isRd: isRd, isProgress: isProgress),
     );
@@ -390,25 +390,23 @@ class _HomeScreenState extends State<HomeScreen> {
             height: 248,
             child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
               SizedBox(
-                width: 66,
-                // FittedBox schaalt "10" (2 tekens) automatisch mee omlaag
-                // i.p.v. buiten dit vak te tekenen en over de volgende kaart
-                // heen te lopen, zoals met een vaste fontSize gebeurde.
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    '$rank',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 128,
-                      fontWeight: FontWeight.w900,
-                      height: 0.78,
-                      fontStyle: FontStyle.italic,
-                      foreground: Paint()
-                        ..style = PaintingStyle.stroke
-                        ..strokeWidth = 2.6
-                        ..color = Colors.white.withOpacity(0.85),
-                    ),
+                width: 84,
+                // Breed genoeg om "10" op dezelfde fontSize als de andere
+                // cijfers te tonen zonder te moeten verkleinen. Overloop
+                // naar de volgende kaart kan niet meer gebeuren nu de rij
+                // sowieso stopt na precies 10 items.
+                child: Text(
+                  '$rank',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 128,
+                    fontWeight: FontWeight.w900,
+                    height: 0.78,
+                    fontStyle: FontStyle.italic,
+                    foreground: Paint()
+                      ..style = PaintingStyle.stroke
+                      ..strokeWidth = 2.6
+                      ..color = Colors.white.withOpacity(0.85),
                   ),
                 ),
               ),
@@ -425,7 +423,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 8),
           Padding(
-            padding: const EdgeInsets.only(left: 66),
+            padding: const EdgeInsets.only(left: 84),
             child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
           ),
