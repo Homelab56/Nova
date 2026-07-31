@@ -109,11 +109,10 @@ class _HomeScreenState extends State<HomeScreen> {
         {'title': 'Kinderseries', 'items': _kidsTv, 'path': '/api/search/kids/tv'},
       ]); break;
       default: baseRows.addAll([
-        {'title': 'Top 10 deze week', 'items': _trending, 'is_ranked': true, 'path': '/api/search/trending'},
+        {'title': 'Top 10 films deze week', 'items': _trendMovies, 'is_ranked': true, 'path': '/api/search/trending/movies'},
+        {'title': 'Top 10 series deze week', 'items': _trendTv, 'is_ranked': true, 'path': '/api/search/trending/tv'},
         {'title': 'Populaire films', 'items': _popularMovies, 'path': '/api/search/popular/movies'},
         {'title': 'Populaire series', 'items': _popularTv, 'path': '/api/search/popular/tv'},
-        {'title': 'Trending films', 'items': _trendMovies, 'path': '/api/search/trending/movies'},
-        {'title': 'Trending series', 'items': _trendTv, 'path': '/api/search/trending/tv'},
         {'title': 'Best beoordeelde films', 'items': _topMovies, 'path': '/api/search/toprated/movies'},
         {'title': 'Best beoordeelde series', 'items': _topTv, 'path': '/api/search/toprated/tv'},
       ]);
@@ -371,7 +370,7 @@ class _HomeScreenState extends State<HomeScreen> {
       path: path,
       onSeeAll: path == null ? null : () => Navigator.push(context, MaterialPageRoute(
         builder: (_) => CategoryScreen(title: title, path: path))),
-      itemBuilder: (_, i) => isRanked && i < 9
+      itemBuilder: (_, i) => isRanked && i < 10
         ? _buildRankedCard(items[i], i + 1)
         : _buildCard(items[i], isRd: isRd, isProgress: isProgress),
     );
