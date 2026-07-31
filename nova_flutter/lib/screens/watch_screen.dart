@@ -53,6 +53,8 @@ class _WatchScreenState extends State<WatchScreen> {
   bool _autoAppliedAudio = false;
   bool _autoAppliedSubs = false;
   bool _autoFetchedExternalSubs = false;
+  Map? _savedProgress;
+  final _scrollCtrl = ScrollController();
 
   @override
   void initState() {
@@ -76,6 +78,7 @@ class _WatchScreenState extends State<WatchScreen> {
     _loadDetails();
     _checkWatchlist();
     _loadPrefs();
+    _loadSavedProgress();
     if (isMovie) _checkAvailability();
 
     // Vanuit "Verder kijken" meteen doorspelen i.p.v. eerst het detailscherm
@@ -102,6 +105,15 @@ class _WatchScreenState extends State<WatchScreen> {
           sec.toDouble(),
           dur.inSeconds.toDouble()
         );
+        // Houd de "bekeken"-markeringen in de afleveringenlijst live bij,
+        // zonder het hele scherm opnieuw te moeten laden.
+        if (mounted) {
+          setState(() => _savedProgress = {
+            ...item,
+            'current_time': sec.toDouble(),
+            'duration': dur.inSeconds.toDouble(),
+          });
+        }
       }
     });
 
@@ -113,6 +125,11 @@ class _WatchScreenState extends State<WatchScreen> {
     _player.stream.track.listen((t) {
       if (mounted) setState(() => _currentTrack = t);
     });
+  }
+
+  Future<void> _loadSavedProgress() async {
+    final saved = await UserDataService.getItemProgress(widget.media['id']);
+    if (mounted) setState(() => _savedProgress = saved);
   }
 
   Future<void> _loadPrefs() async {
@@ -561,7 +578,13 @@ class _WatchScreenState extends State<WatchScreen> {
       _status = 'Zoeken naar streams...';
       _showPlayer = false;
     });
-    
+    // Als dit vanuit een afleveringenrij verderop de pagina komt, spring
+    // naar boven zodat je het laadscherm/de player ook echt ziet i.p.v.
+    // zelf te moeten scrollen.
+    if (_scrollCtrl.hasClients) {
+      _scrollCtrl.animateTo(0, duration: const Duration(milliseconds: 400), curve: Curves.easeOut);
+    }
+
     final q = episode != null
       ? '$title S${_selectedSeason.toString().padLeft(2,'0')}E${(episode['episode_number'] as int).toString().padLeft(2,'0')}'
       : '$title $year';
@@ -855,6 +878,7 @@ class _WatchScreenState extends State<WatchScreen> {
   @override
   void dispose() {
     _player.dispose();
+    _scrollCtrl.dispose();
     super.dispose();
   }
 
@@ -869,6 +893,7 @@ class _WatchScreenState extends State<WatchScreen> {
       backgroundColor: const Color(0xFF080c14),
       body: SafeArea(
         child: SingleChildScrollView(
+          controller: _scrollCtrl,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -914,6 +939,51 @@ class _WatchScreenState extends State<WatchScreen> {
                               ]),
                             ),
                           ]),
+                        ),
+                      ),
+                    ),
+                  ]),
+                )
+              else if (_loadingStream)
+                // Duidelijk laadscherm i.p.v. enkel een klein statuszinnetje
+                // onderaan de hero - vooral voor wie de app voor het eerst
+                // gebruikt moet meteen zichtbaar zijn dat er iets gebeurt
+                // (stream zoeken, ondertitels ophalen, ...).
+                Container(
+                  width: double.infinity,
+                  height: 500,
+                  color: Colors.black,
+                  child: Stack(alignment: Alignment.center, children: [
+                    if (backdrop != null)
+                      Positioned.fill(
+                        child: ImageFiltered(
+                          imageFilter: ImageFilter.blur(sigmaX: 45, sigmaY: 45),
+                          child: Opacity(
+                            opacity: 0.3,
+                            child: NovaImage(path: '$tmdbBackdrop$backdrop',
+                              width: double.infinity, height: double.infinity, fit: BoxFit.cover),
+                          ),
+                        ),
+                      ),
+                    Positioned.fill(child: Container(color: Colors.black.withOpacity(0.35))),
+                    Column(mainAxisSize: MainAxisSize.min, children: [
+                      const CircularProgressIndicator(color: Color(0xFF00b4d8)),
+                      const SizedBox(height: 20),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 420),
+                        child: Text(_status, textAlign: TextAlign.center,
+                          style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+                      ),
+                    ]),
+                    Positioned(
+                      top: 16, left: 16,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(24),
+                        onTap: () => Navigator.pop(context),
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                          child: const Icon(Icons.arrow_back, color: Colors.white, size: 22),
                         ),
                       ),
                     ),
@@ -1150,10 +1220,35 @@ class _WatchScreenState extends State<WatchScreen> {
     );
   }
 
+  // Vergelijkt deze aflevering met de éne opgeslagen kijk-positie van deze
+  // serie (er is geen per-aflevering geschiedenis) om af te leiden of ze
+  // "voor deze" liggen (bekeken), "erop" (met voortgangsbalk) of erna
+  // (nog niet bekeken) - een redelijke aanname bij lineair kijken.
+  ({bool watched, double? progress}) _episodeWatchState(int epNum) {
+    final sp = _savedProgress;
+    if (sp == null || sp['season_number'] == null) return (watched: false, progress: null);
+    final savedSeason = sp['season_number'] as int;
+    final savedEp = sp['episode_number'] as int;
+    if (_selectedSeason < savedSeason || (_selectedSeason == savedSeason && epNum < savedEp)) {
+      return (watched: true, progress: null);
+    }
+    if (_selectedSeason == savedSeason && epNum == savedEp) {
+      final t = (sp['current_time'] as num?)?.toDouble() ?? 0;
+      final d = (sp['duration'] as num?)?.toDouble() ?? 0;
+      if (d > 0) {
+        final f = (t / d).clamp(0.0, 1.0);
+        if (f > 0.92) return (watched: true, progress: null);
+        if (t > 10) return (watched: false, progress: f);
+      }
+    }
+    return (watched: false, progress: null);
+  }
+
   Widget _buildEpisode(Map ep) {
     final still = ep['still_path'];
     final epNum = ep['episode_number'] as int;
     final runtime = ep['runtime'];
+    final state = _episodeWatchState(epNum);
     return GestureDetector(
       onTap: () => _play(episode: ep),
       child: Container(
@@ -1165,14 +1260,39 @@ class _WatchScreenState extends State<WatchScreen> {
           border: Border.all(color: Colors.grey.withOpacity(0.12)),
         ),
         child: Row(children: [
-          SizedBox(width: 34, child: Text('$epNum',
-            style: const TextStyle(color: Colors.grey, fontSize: 18, fontWeight: FontWeight.bold), textAlign: TextAlign.center)),
+          SizedBox(
+            width: 34,
+            child: state.watched
+              ? const Icon(Icons.check_circle, color: Color(0xFF00b4d8), size: 20)
+              : Text('$epNum',
+                  style: const TextStyle(color: Colors.grey, fontSize: 18, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+          ),
           const SizedBox(width: 12),
-          ClipRRect(borderRadius: BorderRadius.circular(8),
-            child: still != null
-              ? NovaImage(path: '$tmdbStill$still', width: 140, height: 82, fit: BoxFit.cover)
-              : Container(width: 140, height: 82, color: const Color(0xFF080c14),
-                  child: const Icon(Icons.play_circle_outline, color: Colors.grey))),
+          Stack(children: [
+            ClipRRect(borderRadius: BorderRadius.circular(8),
+              child: still != null
+                ? NovaImage(path: '$tmdbStill$still', width: 140, height: 82, fit: BoxFit.cover)
+                : Container(width: 140, height: 82, color: const Color(0xFF080c14),
+                    child: const Icon(Icons.play_circle_outline, color: Colors.grey))),
+            if (state.watched)
+              Positioned.fill(
+                child: DecoratedBox(decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.4), borderRadius: BorderRadius.circular(8))),
+              ),
+            if (state.watched)
+              const Positioned.fill(child: Center(child: Icon(Icons.check_circle, color: Colors.white, size: 22))),
+            if (state.progress != null)
+              Positioned(bottom: 0, left: 0, right: 0,
+                child: Container(
+                  height: 3, color: Colors.white24,
+                  child: FractionallySizedBox(
+                    alignment: Alignment.centerLeft,
+                    widthFactor: state.progress,
+                    child: Container(color: const Color(0xFF00b4d8)),
+                  ),
+                ),
+              ),
+          ]),
           const SizedBox(width: 14),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
