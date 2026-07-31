@@ -410,12 +410,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   alignment: Alignment.centerLeft,
                   child: Text(
                     '$rank',
+                    // fontSize is enkel de basis-maat vóór FittedBox schaalt -
+                    // zonder expliciete fontSize viel dit terug op de kleine
+                    // standaard tekstgrootte, waardoor strokeWidth verhoudingsgewijs
+                    // enorm werd na het opschalen (vulde de cijfers helemaal dicht).
                     style: TextStyle(
+                      fontSize: 100,
                       fontWeight: FontWeight.w900,
                       fontStyle: FontStyle.italic,
                       foreground: Paint()
                         ..style = PaintingStyle.stroke
-                        ..strokeWidth = 3
+                        ..strokeWidth = 2.5
                         ..color = Colors.grey.shade300,
                     ),
                   ),
