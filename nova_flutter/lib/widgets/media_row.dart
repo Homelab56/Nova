@@ -37,7 +37,20 @@ class _MediaRowState extends State<MediaRow> {
 
   void _scrollBy(double delta) {
     if (!_scrollCtrl.hasClients) return;
-    final target = (_scrollCtrl.offset + delta).clamp(0.0, _scrollCtrl.position.maxScrollExtent);
+    final max = _scrollCtrl.position.maxScrollExtent;
+    final current = _scrollCtrl.offset;
+    // Eindeloos scrollen: bij de rand nog eens op hetzelfde pijltje klikken
+    // springt door naar het andere uiteinde i.p.v. daar simpelweg te
+    // blijven staan - zoals Netflix' rijen werken.
+    if (delta > 0 && current >= max - 5) {
+      _scrollCtrl.animateTo(0, duration: const Duration(milliseconds: 350), curve: Curves.easeOut);
+      return;
+    }
+    if (delta < 0 && current <= 5) {
+      _scrollCtrl.animateTo(max, duration: const Duration(milliseconds: 350), curve: Curves.easeOut);
+      return;
+    }
+    final target = (current + delta).clamp(0.0, max);
     _scrollCtrl.animateTo(target, duration: const Duration(milliseconds: 350), curve: Curves.easeOut);
   }
 

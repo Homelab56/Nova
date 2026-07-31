@@ -365,7 +365,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return MediaRow(
       title: title,
       titleColor: isRd ? const Color(0xFF00b4d8) : Colors.white,
-      height: isProgress ? 185 : (isRanked ? 306 : 290),
+      height: isProgress ? 185 : (isRanked ? 320 : 290),
       itemCount: isRanked ? (items.length < 10 ? items.length : 10) : items.length,
       path: path,
       onSeeAll: path == null ? null : () => Navigator.push(context, MaterialPageRoute(
@@ -376,45 +376,43 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Netflix-achtige "Top 10" kaart met een grote omlijnde rangnummer achter de poster.
+  // Netflix-achtige "Top 10" kaart: een grote, gedempte cijfer op de
+  // achtergrond met de poster er half overheen, i.p.v. cijfer en poster
+  // netjes naast elkaar in aparte kolommen.
   Widget _buildRankedCard(Map item, int rank) {
     final poster = item['poster_path'] as String?;
     final title = item['title'] ?? item['name'] ?? '';
     return GestureDetector(
       onTap: () => _openWatch(item),
       child: Container(
-        width: 208,
+        width: 220,
         margin: const EdgeInsets.symmetric(horizontal: 3),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           SizedBox(
-            height: 248,
-            child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              SizedBox(
-                width: 84,
-                // Breed genoeg om "10" op dezelfde fontSize als de andere
-                // cijfers te tonen zonder te moeten verkleinen. Overloop
-                // naar de volgende kaart kan niet meer gebeuren nu de rij
-                // sowieso stopt na precies 10 items.
+            height: 260,
+            child: Stack(clipBehavior: Clip.none, alignment: Alignment.bottomLeft, children: [
+              Positioned(
+                left: -4, bottom: -6,
                 child: Text(
                   '$rank',
-                  textAlign: TextAlign.center,
                   style: TextStyle(
-                    fontSize: 128,
+                    fontSize: 180,
                     fontWeight: FontWeight.w900,
-                    height: 0.78,
+                    height: 0.72,
                     fontStyle: FontStyle.italic,
                     foreground: Paint()
                       ..style = PaintingStyle.stroke
-                      ..strokeWidth = 2.6
-                      ..color = Colors.white.withOpacity(0.85),
+                      ..strokeWidth = 2
+                      ..color = Colors.white.withOpacity(0.18),
                   ),
                 ),
               ),
-              Expanded(
+              Positioned(
+                right: 0, bottom: 0,
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(10),
                   child: Stack(children: [
-                    NovaImage(path: poster, width: 155, height: 230),
+                    NovaImage(path: poster, width: 170, height: 245),
                     _cornerIcon(Icons.add, () => _addToWatchlistWithFeedback(item)),
                   ]),
                 ),
@@ -423,7 +421,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 8),
           Padding(
-            padding: const EdgeInsets.only(left: 84),
+            padding: const EdgeInsets.only(left: 50),
             child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
           ),
