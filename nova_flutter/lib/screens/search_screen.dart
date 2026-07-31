@@ -115,17 +115,18 @@ class _SearchScreenState extends State<SearchScreen> {
               ? const Center(child: CircularProgressIndicator(color: Color(0xFF00b4d8)))
               : LayoutBuilder(
                   builder: (context, constraints) {
-                    // Bereken aantal kolommen op basis van breedte (zoals in browser)
-                    int crossAxisCount = (constraints.maxWidth / 160).floor();
+                    // Bereken aantal kolommen op basis van breedte - grotere
+                    // tegels (net als op het startscherm) i.p.v. veel kleine.
+                    int crossAxisCount = (constraints.maxWidth / 210).floor();
                     if (crossAxisCount < 2) crossAxisCount = 2;
-                    
+
                     return GridView.builder(
                       padding: const EdgeInsets.all(12),
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: crossAxisCount, 
-                        childAspectRatio: 0.67, 
-                        crossAxisSpacing: 12, 
-                        mainAxisSpacing: 12
+                        crossAxisCount: crossAxisCount,
+                        childAspectRatio: 0.62,
+                        crossAxisSpacing: 14,
+                        mainAxisSpacing: 18
                       ),
                       itemCount: _results.length + (_page < _totalPages ? 1 : 0),
                       itemBuilder: (_, i) {
@@ -163,9 +164,9 @@ class _SearchScreenState extends State<SearchScreen> {
                                     : Container(color: const Color(0xFF0f1520), child: const Icon(Icons.movie, color: Colors.grey)),
                                 ),
                               ),
-                              const SizedBox(height: 4),
+                              const SizedBox(height: 6),
                               Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 11, color: Colors.white70)),
+                                style: const TextStyle(fontSize: 13, color: Colors.white70)),
                             ],
                           ),
                         );
