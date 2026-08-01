@@ -26,20 +26,21 @@ class _StarfieldPainter extends CustomPainter {
   bool shouldRepaint(covariant _StarfieldPainter oldDelegate) => false;
 }
 
-// Gradient-paren i.p.v. platte kleuren - gekozen om aan te sluiten bij het
-// logo (metallic zilver/blauw/goud) en de sterrenveld-achtergrond, i.p.v.
-// een willekeurig regenbooggrid dat los staat van de rest van de app.
+// Gradient-paren blijven bewust binnen dezelfde familie als het logo en de
+// rest van de app (blauw/teal/cyaan, met goud en zilver als accent) i.p.v.
+// een regenboog van losse hues (paars/roze/rood/groen) die niet aansluiten
+// bij het metallic blauw-goud kleurenschema.
 const _avatarGradients = <List<Color>>[
-  [Color(0xFF4cc9f0), Color(0xFF3a86ff)],
-  [Color(0xFFffd166), Color(0xFFf4a261)],
-  [Color(0xFF06d6a0), Color(0xFF118ab2)],
-  [Color(0xFF9b5de5), Color(0xFFef476f)],
-  [Color(0xFFf72585), Color(0xFF7209b7)],
-  [Color(0xFF43aa8b), Color(0xFF2a9d8f)],
-  [Color(0xFFd4af37), Color(0xFF8d6a00)],
-  [Color(0xFFb0bec5), Color(0xFF546e7a)],
-  [Color(0xFFe63946), Color(0xFFf4a261)],
   [Color(0xFF00b4d8), Color(0xFF0077b6)],
+  [Color(0xFF48cae4), Color(0xFF0096c7)],
+  [Color(0xFF3a86ff), Color(0xFF023e8a)],
+  [Color(0xFF90e0ef), Color(0xFF00b4d8)],
+  [Color(0xFF457b9d), Color(0xFF1d3557)],
+  [Color(0xFF2a9d8f), Color(0xFF264653)],
+  [Color(0xFFffd166), Color(0xFFe09f3e)],
+  [Color(0xFFf4a261), Color(0xFFe76f51)],
+  [Color(0xFFadb5bd), Color(0xFF495057)],
+  [Color(0xFF8ecae6), Color(0xFF219ebc)],
 ];
 
 class ProfileScreen extends StatefulWidget {
@@ -131,7 +132,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _createOrEditProfile({Profile? existing}) async {
     final nameCtrl = TextEditingController(text: existing?.name ?? '');
     final pinCtrl = TextEditingController(text: existing?.pin ?? '');
-    int colorIndex = existing?.colorIndex ?? (_profiles.length % _avatarGradients.length);
+    // Kleuren mogen niet dubbel voorkomen - elke andere profiel se kleur is
+    // hier uitgesloten (het eigen huidige kleurtje bij bewerken telt niet mee
+    // als "bezet", anders zou je het niet kunnen behouden).
+    final usedIndices = _profiles
+      .where((p) => p.id != existing?.id)
+      .map((p) => p.colorIndex % _avatarGradients.length)
+      .toSet();
+    int colorIndex = existing?.colorIndex ??
+      List.generate(_avatarGradients.length, (i) => i).firstWhere(
+        (i) => !usedIndices.contains(i),
+        orElse: () => _profiles.length % _avatarGradients.length,
+      );
 
     final result = await showDialog<bool>(
       context: context,
@@ -152,26 +164,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 8),
               Wrap(spacing: 10, runSpacing: 10, children: [
                 for (var i = 0; i < _avatarGradients.length; i++)
-                  GestureDetector(
-                    onTap: () => setDialogState(() => colorIndex = i),
-                    child: Container(
-                      width: 34, height: 34,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft, end: Alignment.bottomRight,
-                          colors: _avatarGradients[i],
-                        ),
-                        border: Border.all(
-                          color: colorIndex == i ? Colors.white : Colors.white24,
-                          width: colorIndex == i ? 2.5 : 1,
+                  Builder(builder: (context) {
+                    final taken = usedIndices.contains(i);
+                    return GestureDetector(
+                      onTap: taken ? null : () => setDialogState(() => colorIndex = i),
+                      child: Opacity(
+                        opacity: taken ? 0.25 : 1,
+                        child: Container(
+                          width: 34, height: 34,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft, end: Alignment.bottomRight,
+                              colors: _avatarGradients[i],
+                            ),
+                            border: Border.all(
+                              color: colorIndex == i ? Colors.white : Colors.white24,
+                              width: colorIndex == i ? 2.5 : 1,
+                            ),
+                          ),
+                          child: colorIndex == i
+                            ? const Icon(Icons.check, color: Colors.white, size: 16)
+                            : (taken ? const Icon(Icons.block, color: Colors.white70, size: 14) : null),
                         ),
                       ),
-                      child: colorIndex == i
-                        ? const Icon(Icons.check, color: Colors.white, size: 16)
-                        : null,
-                    ),
-                  ),
+                    );
+                  }),
               ]),
               const SizedBox(height: 16),
               TextField(
