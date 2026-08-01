@@ -215,8 +215,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF00b4d8)))
           : Center(
               child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Image.asset('assets/logo.png', height: 120),
-                const SizedBox(height: 20),
+                Image.asset('assets/logo.png', height: 220),
+                const SizedBox(height: 12),
                 const Text('Wie kijkt er?', style: TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w800)),
                 const SizedBox(height: 48),
                 Wrap(
