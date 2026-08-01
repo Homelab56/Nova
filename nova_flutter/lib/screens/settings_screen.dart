@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../services/settings_service.dart';
-import 'home_screen.dart';
+import 'profile_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   final bool isFirstRun;
@@ -123,7 +123,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _saving = false);
 
     if (widget.isFirstRun && mounted) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen()));
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const ProfileScreen()));
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Opgeslagen'), backgroundColor: Color(0xFF00b4d8)));

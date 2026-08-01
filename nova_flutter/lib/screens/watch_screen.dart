@@ -54,6 +54,7 @@ class _WatchScreenState extends State<WatchScreen> {
   bool _autoAppliedSubs = false;
   bool _autoFetchedExternalSubs = false;
   Map? _savedProgress;
+  int? _rating;
   final _scrollCtrl = ScrollController();
 
   @override
@@ -79,6 +80,7 @@ class _WatchScreenState extends State<WatchScreen> {
     _checkWatchlist();
     _loadPrefs();
     _loadSavedProgress();
+    _loadRating();
     if (isMovie) _checkAvailability();
 
     // Vanuit "Verder kijken" meteen doorspelen i.p.v. eerst het detailscherm
@@ -496,6 +498,24 @@ class _WatchScreenState extends State<WatchScreen> {
       await UserDataService.addToWatchlist(widget.media);
     }
     setState(() => _inWatchlist = !_inWatchlist);
+  }
+
+  Future<void> _loadRating() async {
+    final stars = await UserDataService.getRating(widget.media['id']);
+    if (mounted) setState(() => _rating = stars);
+  }
+
+  // Tikken op dezelfde ster die al gekozen was, wist de rangschikking weer -
+  // zo kan je een fout tikje herstellen zonder een apart "wis"-knopje nodig
+  // te hebben.
+  Future<void> _setRating(int stars) async {
+    if (_rating == stars) {
+      await UserDataService.clearRating(widget.media['id']);
+      setState(() => _rating = null);
+    } else {
+      await UserDataService.setRating(widget.media, stars, mediaType: isMovie ? 'movie' : 'tv');
+      setState(() => _rating = stars);
+    }
   }
 
   Future<void> _loadDetails() async {
@@ -1099,6 +1119,28 @@ class _WatchScreenState extends State<WatchScreen> {
                               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
                             ),
                           ),
+                        ]),
+                        const SizedBox(height: 12),
+                        Row(children: [
+                          for (int i = 1; i <= 3; i++)
+                            IconButton(
+                              onPressed: () => _setRating(i),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                              icon: Icon(
+                                (_rating != null && _rating! >= i) ? Icons.star : Icons.star_border,
+                                color: (_rating != null && _rating! >= i) ? Colors.amber : Colors.white54,
+                                size: 24,
+                              ),
+                              tooltip: i == 1 ? 'Niet voor mij' : i == 2 ? 'Oké' : 'Top!',
+                            ),
+                          if (_rating != null) ...[
+                            const SizedBox(width: 4),
+                            Text(
+                              _rating == 1 ? 'Niet voor mij' : _rating == 2 ? 'Oké' : 'Top!',
+                              style: const TextStyle(color: Colors.grey, fontSize: 13),
+                            ),
+                          ],
                         ]),
                         if (_status.isNotEmpty) Padding(
                           padding: const EdgeInsets.only(top: 10),

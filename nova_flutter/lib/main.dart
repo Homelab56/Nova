@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
-import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/profile_screen.dart';
 import 'services/settings_service.dart';
 
 void main() async {
@@ -28,7 +28,9 @@ class NovaApp extends StatelessWidget {
         colorScheme: const ColorScheme.dark(primary: Color(0xFF00b4d8), surface: Color(0xFF0f1520)),
         fontFamily: 'Roboto',
       ),
-      home: startOnSettings ? const SettingsScreen(isFirstRun: true) : const HomeScreen(),
+      // Bij elke opstart eerst een profiel laten kiezen (zoals Netflix) -
+      // er wordt bewust geen laatst-gekozen profiel onthouden.
+      home: startOnSettings ? const SettingsScreen(isFirstRun: true) : const ProfileScreen(),
     );
   }
 }

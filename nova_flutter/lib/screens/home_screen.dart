@@ -10,6 +10,8 @@ import 'settings_screen.dart';
 import 'watchlist_screen.dart';
 import 'search_screen.dart';
 import 'category_screen.dart';
+import 'profile_screen.dart';
+import '../services/profile_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -48,6 +50,10 @@ class _HomeScreenState extends State<HomeScreen> {
   List _rdLibrary = [], _progress = [];
   final Map<int, List> _movieGenreItems = {};
   final Map<int, List> _tvGenreItems = {};
+  // 1-ster-rangschikkingen ("niet voor mij") sluiten we overal uit; 3-sterren
+  // ("top!") voedt de "Omdat je hield van ..."-rijen hieronder.
+  final Set<int> _excludedIds = {};
+  List<Map<String, dynamic>> _recommendationRows = [];
   bool _loading = true;
   int _heroIndex = 0;
   Timer? _heroTimer;
@@ -106,12 +112,47 @@ class _HomeScreenState extends State<HomeScreen> {
     final tvGenreFuture = Future.wait(
       _tvGenreRows.map((g) => _safeList(TmdbService.getGenreItems(g['id'] as int, 'tv'))));
 
+    // 1-ster-uitsluitingen en de "Omdat je hield van ..."-zaadjes (de 3
+    // meest recente 3-sterren-rangschikkingen) uit de lokale rangschikkingen
+    // van dit profiel - dit is puur lokaal, geen netwerkverzoek nodig.
+    final ratings = await UserDataService.getRatings();
+    final excluded = <int>{};
+    final topRated = <Map<String, dynamic>>[];
+    for (final v in ratings.values) {
+      final r = v as Map;
+      final stars = (r['stars'] as num?)?.toInt() ?? 0;
+      final id = (r['id'] as num?)?.toInt();
+      if (id == null) continue;
+      if (stars == 1) excluded.add(id);
+      if (stars == 3) {
+        topRated.add({
+          'id': id,
+          'media_type': r['media_type'] ?? 'movie',
+          'title': r['title'] ?? '',
+          'rated_at': (r['rated_at'] as num?) ?? 0,
+        });
+      }
+    }
+    topRated.sort((a, b) => (b['rated_at'] as num).compareTo(a['rated_at'] as num));
+    final seeds = topRated.take(3).toList();
+    final recsFuture = Future.wait(
+      seeds.map((s) => _safeList(TmdbService.getSimilar(s['id'] as int, s['media_type'] as String))));
+
     final results = await mainFuture;
     final kidsExtra = await kidsExtraFuture;
     final movieGenreResults = await movieGenreFuture;
     final tvGenreResults = await tvGenreFuture;
+    final recLists = await recsFuture;
     if (!mounted) return;
     setState(() {
+      _excludedIds
+        ..clear()
+        ..addAll(excluded);
+      _recommendationRows = [
+        for (var i = 0; i < seeds.length; i++)
+          if (recLists[i].isNotEmpty)
+            {'title': 'Omdat je hield van ${seeds[i]['title']}', 'items': recLists[i]},
+      ];
       _trending = results[0];
       _popularMovies = results[1];
       _popularTv = results[2];
@@ -173,6 +214,7 @@ class _HomeScreenState extends State<HomeScreen> {
       default: baseRows.addAll([
         {'title': 'Top 10 films deze week', 'items': _trendMovies, 'is_ranked': true},
         {'title': 'Top 10 series deze week', 'items': _trendTv, 'is_ranked': true},
+        ..._recommendationRows,
         {'title': 'Populaire films', 'items': _popularMovies, 'path': '/api/search/popular/movies'},
         {'title': 'Populaire series', 'items': _popularTv, 'path': '/api/search/popular/tv'},
         {'title': 'Best beoordeelde films', 'items': _topMovies, 'path': '/api/search/toprated/movies'},
@@ -197,6 +239,8 @@ class _HomeScreenState extends State<HomeScreen> {
   // "Populair" én "Actie") - elke volgende rij toont enkel wat nog niet
   // in een eerdere rij op deze pagina stond. "Verder kijken" en de eigen
   // RD-bibliotheek blijven ongemoeid, dat zijn geen ontdek-rijen.
+  // Alles met een 1-ster-rangschikking ("niet voor mij") wordt hier ook
+  // meteen overal uitgesloten.
   List<Map<String, dynamic>> _dedupeRows(List<Map<String, dynamic>> rows) {
     final seen = <dynamic>{};
     final out = <Map<String, dynamic>>[];
@@ -210,6 +254,7 @@ class _HomeScreenState extends State<HomeScreen> {
       for (final it in items) {
         final id = (it is Map) ? it['id'] : null;
         if (id != null) {
+          if (_excludedIds.contains(id)) continue;
           if (seen.contains(id)) continue;
           seen.add(id);
         }
@@ -332,6 +377,24 @@ class _HomeScreenState extends State<HomeScreen> {
         const Spacer(),
         IconButton(icon: const Icon(Icons.search, color: Colors.white, size: 22),
           onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SearchScreen()))),
+        Tooltip(
+          message: 'Profiel wisselen (${ProfileService.activeProfileName ?? ""})',
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileScreen())),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: CircleAvatar(
+                radius: 14,
+                backgroundColor: const Color(0xFF00b4d8),
+                child: Text(
+                  (ProfileService.activeProfileName?.isNotEmpty == true) ? ProfileService.activeProfileName![0].toUpperCase() : '?',
+                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+          ),
+        ),
         IconButton(icon: const Icon(Icons.settings_outlined, color: Colors.grey, size: 22),
           onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()))),
       ]),
