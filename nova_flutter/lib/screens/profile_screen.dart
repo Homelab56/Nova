@@ -26,22 +26,45 @@ class _StarfieldPainter extends CustomPainter {
   bool shouldRepaint(covariant _StarfieldPainter oldDelegate) => false;
 }
 
-// Gradient-paren blijven bewust binnen dezelfde familie als het logo en de
-// rest van de app (blauw/teal/cyaan, met goud en zilver als accent) i.p.v.
-// een regenboog van losse hues (paars/roze/rood/groen) die niet aansluiten
-// bij het metallic blauw-goud kleurenschema.
-const _avatarGradients = <List<Color>>[
-  [Color(0xFF00b4d8), Color(0xFF0077b6)],
-  [Color(0xFF48cae4), Color(0xFF0096c7)],
-  [Color(0xFF3a86ff), Color(0xFF023e8a)],
-  [Color(0xFF90e0ef), Color(0xFF00b4d8)],
-  [Color(0xFF457b9d), Color(0xFF1d3557)],
-  [Color(0xFF2a9d8f), Color(0xFF264653)],
-  [Color(0xFFffd166), Color(0xFFe09f3e)],
-  [Color(0xFFf4a261), Color(0xFFe76f51)],
-  [Color(0xFFadb5bd), Color(0xFF495057)],
-  [Color(0xFF8ecae6), Color(0xFF219ebc)],
+// Basiskleuren bewust breed gespreid over de kleurenwaaier (niet allemaal
+// blauw/teal) zodat elk profiel in één oogopslag te onderscheiden is - een
+// nauwe familie oogde bij vergelijking "te veel op elkaar". Elke kleur krijgt
+// er zelf (via _gradientFor) een subtiel donkerder gradient-randje bij voor
+// de medaillon-look, zonder de herkenbaarheid van de kleur te verliezen.
+const _avatarBaseColors = <Color>[
+  Color(0xFF00b4d8), Color(0xFFe63946), Color(0xFFf4a261), Color(0xFF2a9d8f),
+  Color(0xFF9b5de5), Color(0xFFffb703), Color(0xFFef476f), Color(0xFF06d6a0),
+  Color(0xFF118ab2), Color(0xFFffd166), Color(0xFFc9184a), Color(0xFF80ffdb),
+  Color(0xFF7209b7), Color(0xFFf72585), Color(0xFF4cc9f0), Color(0xFF43aa8b),
+  Color(0xFFf94144), Color(0xFFf3722c), Color(0xFF90be6d), Color(0xFF577590),
 ];
+
+List<Color> _gradientFor(int index) {
+  final base = _avatarBaseColors[index % _avatarBaseColors.length];
+  return [base, Color.lerp(base, Colors.black, 0.35)!];
+}
+
+// Optionele iconen als alternatief voor de letter-avatar - een profiel kan
+// zowel een kleur als (optioneel) een icoon kiezen dat past bij wat diegene
+// leuk vindt, i.p.v. verplicht een letter te tonen.
+const _avatarIcons = <String, IconData>{
+  'star': Icons.star_rounded,
+  'movie': Icons.movie_rounded,
+  'rocket': Icons.rocket_launch_rounded,
+  'game': Icons.sports_esports_rounded,
+  'music': Icons.music_note_rounded,
+  'heart': Icons.favorite_rounded,
+  'football': Icons.sports_soccer_rounded,
+  'book': Icons.menu_book_rounded,
+  'camera': Icons.camera_alt_rounded,
+  'headphones': Icons.headphones_rounded,
+  'moon': Icons.nightlight_round,
+  'crown': Icons.emoji_events_rounded,
+  'pizza': Icons.local_pizza_rounded,
+  'cat': Icons.pets_rounded,
+  'theater': Icons.theater_comedy_rounded,
+  'fire': Icons.local_fire_department_rounded,
+};
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -137,13 +160,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     // als "bezet", anders zou je het niet kunnen behouden).
     final usedIndices = _profiles
       .where((p) => p.id != existing?.id)
-      .map((p) => p.colorIndex % _avatarGradients.length)
+      .map((p) => p.colorIndex % _avatarBaseColors.length)
       .toSet();
     int colorIndex = existing?.colorIndex ??
-      List.generate(_avatarGradients.length, (i) => i).firstWhere(
+      List.generate(_avatarBaseColors.length, (i) => i).firstWhere(
         (i) => !usedIndices.contains(i),
-        orElse: () => _profiles.length % _avatarGradients.length,
+        orElse: () => _profiles.length % _avatarBaseColors.length,
       );
+    String? selectedIcon = existing?.icon;
 
     final result = await showDialog<bool>(
       context: context,
@@ -163,7 +187,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const Text('Kleur', style: TextStyle(color: Colors.grey, fontSize: 12)),
               const SizedBox(height: 8),
               Wrap(spacing: 10, runSpacing: 10, children: [
-                for (var i = 0; i < _avatarGradients.length; i++)
+                for (var i = 0; i < _avatarBaseColors.length; i++)
                   Builder(builder: (context) {
                     final taken = usedIndices.contains(i);
                     return GestureDetector(
@@ -176,7 +200,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             shape: BoxShape.circle,
                             gradient: LinearGradient(
                               begin: Alignment.topLeft, end: Alignment.bottomRight,
-                              colors: _avatarGradients[i],
+                              colors: _gradientFor(i),
                             ),
                             border: Border.all(
                               color: colorIndex == i ? Colors.white : Colors.white24,
@@ -187,6 +211,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ? const Icon(Icons.check, color: Colors.white, size: 16)
                             : (taken ? const Icon(Icons.block, color: Colors.white70, size: 14) : null),
                         ),
+                      ),
+                    );
+                  }),
+              ]),
+              const SizedBox(height: 16),
+              const Text('Icoon (optioneel)', style: TextStyle(color: Colors.grey, fontSize: 12)),
+              const SizedBox(height: 8),
+              Wrap(spacing: 10, runSpacing: 10, children: [
+                Builder(builder: (context) {
+                  final selected = selectedIcon == null;
+                  return GestureDetector(
+                    onTap: () => setDialogState(() => selectedIcon = null),
+                    child: Container(
+                      width: 34, height: 34,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: const Color(0xFF1a2230),
+                        border: Border.all(color: selected ? Colors.white : Colors.white24, width: selected ? 2.5 : 1),
+                      ),
+                      child: const Center(child: Text('Aa', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w700))),
+                    ),
+                  );
+                }),
+                for (final entry in _avatarIcons.entries)
+                  Builder(builder: (context) {
+                    final selected = selectedIcon == entry.key;
+                    return GestureDetector(
+                      onTap: () => setDialogState(() => selectedIcon = entry.key),
+                      child: Container(
+                        width: 34, height: 34,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: const Color(0xFF1a2230),
+                          border: Border.all(color: selected ? Colors.white : Colors.white24, width: selected ? 2.5 : 1),
+                        ),
+                        child: Icon(entry.value, color: Colors.white70, size: 17),
                       ),
                     );
                   }),
@@ -246,13 +306,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final pin = pinCtrl.text.trim();
     if (existing == null) {
       final wasFirstProfile = _profiles.isEmpty;
-      final profile = await ProfileService.createProfile(name, pin: pin, colorIndex: colorIndex);
+      final profile = await ProfileService.createProfile(name, pin: pin, colorIndex: colorIndex, icon: selectedIcon);
       if (wasFirstProfile) {
         await ProfileService.migrateLegacyDataTo(profile.id);
       }
     } else {
       await ProfileService.updateProfile(existing.copyWith(
-        name: name, pin: pin.isEmpty ? null : pin, clearPin: pin.isEmpty, colorIndex: colorIndex));
+        name: name, pin: pin.isEmpty ? null : pin, clearPin: pin.isEmpty,
+        colorIndex: colorIndex, icon: selectedIcon, clearIcon: selectedIcon == null));
     }
     _load();
   }
@@ -335,7 +396,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // sparkle-accent) i.p.v. platte gekleurde vierkantjes met één letter erin -
   // sluit beter aan bij het metallic logo en het sterrenveld erachter.
   Widget _avatarBadge(Profile profile) {
-    final grad = _avatarGradients[profile.colorIndex % _avatarGradients.length];
+    final grad = _gradientFor(profile.colorIndex);
+    final iconData = profile.icon != null ? _avatarIcons[profile.icon] : null;
     return Stack(clipBehavior: Clip.none, children: [
       Container(
         width: 92, height: 92,
@@ -353,11 +415,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ],
         ),
         child: Center(
-          child: Text(
-            profile.name.isNotEmpty ? profile.name[0].toUpperCase() : '?',
-            style: TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w800,
-              shadows: [Shadow(blurRadius: 8, color: Colors.black.withOpacity(0.6))]),
-          ),
+          child: iconData != null
+            ? Icon(iconData, color: Colors.white, size: 38,
+                shadows: [Shadow(blurRadius: 8, color: Colors.black.withOpacity(0.6))])
+            : Text(
+                profile.name.isNotEmpty ? profile.name[0].toUpperCase() : '?',
+                style: TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w800,
+                  shadows: [Shadow(blurRadius: 8, color: Colors.black.withOpacity(0.6))]),
+              ),
         ),
       ),
       Positioned(top: -2, right: 4,

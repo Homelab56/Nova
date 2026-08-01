@@ -6,23 +6,26 @@ class Profile {
   final String name;
   final String? pin; // 4-cijferige code, null = geen pincode
   final int colorIndex;
+  final String? icon; // sleutel in _avatarIcons, null = toon letter i.p.v. icoon
 
-  Profile({required this.id, required this.name, this.pin, this.colorIndex = 0});
+  Profile({required this.id, required this.name, this.pin, this.colorIndex = 0, this.icon});
 
-  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'pin': pin, 'colorIndex': colorIndex};
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'pin': pin, 'colorIndex': colorIndex, 'icon': icon};
 
   factory Profile.fromJson(Map j) => Profile(
     id: j['id'] as String,
     name: j['name'] as String,
     pin: j['pin'] as String?,
     colorIndex: (j['colorIndex'] as num?)?.toInt() ?? 0,
+    icon: j['icon'] as String?,
   );
 
-  Profile copyWith({String? name, String? pin, bool clearPin = false, int? colorIndex}) => Profile(
+  Profile copyWith({String? name, String? pin, bool clearPin = false, int? colorIndex, String? icon, bool clearIcon = false}) => Profile(
     id: id,
     name: name ?? this.name,
     pin: clearPin ? null : (pin ?? this.pin),
     colorIndex: colorIndex ?? this.colorIndex,
+    icon: clearIcon ? null : (icon ?? this.icon),
   );
 }
 
@@ -46,13 +49,14 @@ class ProfileService {
     await p.setString('profiles', jsonEncode(profiles.map((e) => e.toJson()).toList()));
   }
 
-  static Future<Profile> createProfile(String name, {String? pin, int colorIndex = 0}) async {
+  static Future<Profile> createProfile(String name, {String? pin, int colorIndex = 0, String? icon}) async {
     final profiles = await getProfiles();
     final profile = Profile(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       name: name,
       pin: (pin != null && pin.isNotEmpty) ? pin : null,
       colorIndex: colorIndex,
+      icon: icon,
     );
     profiles.add(profile);
     await _saveProfiles(profiles);
