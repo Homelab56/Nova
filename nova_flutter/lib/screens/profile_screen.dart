@@ -76,14 +76,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
   List<Profile> _profiles = [];
   bool _loading = true;
   bool _editing = false;
+  String? _error;
 
   @override
   void initState() { super.initState(); _load(); }
 
   Future<void> _load() async {
-    final profiles = await ProfileService.getProfiles();
-    if (!mounted) return;
-    setState(() { _profiles = profiles; _loading = false; });
+    setState(() { _loading = true; _error = null; });
+    try {
+      // Eenmalige overzet van lokale profielen (van vóór profielen op de
+      // server leefden) - no-op zodra de server al profielen heeft.
+      await ProfileService.migrateLocalDataToServerIfNeeded();
+      final profiles = await ProfileService.getProfiles();
+      if (!mounted) return;
+      setState(() { _profiles = profiles; _loading = false; });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _error = 'Kan geen verbinding maken met de server.'; _loading = false; });
+    }
   }
 
   Future<void> _selectProfile(Profile profile) async {
@@ -305,11 +315,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (name.isEmpty) return;
     final pin = pinCtrl.text.trim();
     if (existing == null) {
-      final wasFirstProfile = _profiles.isEmpty;
-      final profile = await ProfileService.createProfile(name, pin: pin, colorIndex: colorIndex, icon: selectedIcon);
-      if (wasFirstProfile) {
-        await ProfileService.migrateLegacyDataTo(profile.id);
-      }
+      await ProfileService.createProfile(name, pin: pin, colorIndex: colorIndex, icon: selectedIcon);
     } else {
       await ProfileService.updateProfile(existing.copyWith(
         name: name, pin: pin.isEmpty ? null : pin, clearPin: pin.isEmpty,
@@ -340,6 +346,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const Positioned.fill(child: CustomPaint(painter: _StarfieldPainter())),
           _loading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF00b4d8)))
+          : _error != null
+          ? Center(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.cloud_off, color: Colors.white38, size: 48),
+                const SizedBox(height: 16),
+                Text(_error!, style: const TextStyle(color: Colors.white70, fontSize: 16)),
+                const SizedBox(height: 20),
+                TextButton(onPressed: _load, child: const Text('Opnieuw proberen')),
+              ]),
+            )
           // LayoutBuilder + minHeight i.p.v. gewoon Center: een Column
           // binnenin een SingleChildScrollView krijgt onbegrensde hoogte,
           // waardoor mainAxisAlignment/Center genegeerd wordt en alles naar

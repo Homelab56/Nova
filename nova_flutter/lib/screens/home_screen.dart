@@ -97,7 +97,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _safeList(TmdbService.getTopRatedMovies()),
       _safeList(TmdbService.getTopRatedTv()),
       _safeList(DebridService.getLibrary()),
-      UserDataService.getProgress(),
+      _safeList(UserDataService.getProgress()),
       _safeList(TmdbService.getKidsMovies()),
       _safeList(TmdbService.getKidsTv()),
     ]);
@@ -113,9 +113,12 @@ class _HomeScreenState extends State<HomeScreen> {
       _tvGenreRows.map((g) => _safeList(TmdbService.getGenreItems(g['id'] as int, 'tv'))));
 
     // 1-ster-uitsluitingen en de "Omdat je hield van ..."-zaadjes (de 3
-    // meest recente 3-sterren-rangschikkingen) uit de lokale rangschikkingen
-    // van dit profiel - dit is puur lokaal, geen netwerkverzoek nodig.
-    final ratings = await UserDataService.getRatings();
+    // meest recente 3-sterren-rangschikkingen) uit de rangschikkingen van dit
+    // profiel op de server - falen mag de rest van het scherm niet blokkeren.
+    Map<String, dynamic> ratings = {};
+    try {
+      ratings = await UserDataService.getRatings().timeout(const Duration(seconds: 12));
+    } catch (_) {}
     final excluded = <int>{};
     final topRated = <Map<String, dynamic>>[];
     for (final v in ratings.values) {

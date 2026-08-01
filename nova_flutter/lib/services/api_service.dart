@@ -35,6 +35,17 @@ class ApiService {
     throw Exception('POST $path failed: ${r.statusCode}');
   }
 
+  static Future<dynamic> put(String path, Map<String, dynamic> body) async {
+    final base = await baseUrl;
+    final r = await http.put(
+      Uri.parse('$base$path'),
+      headers: await _headers,
+      body: jsonEncode(body),
+    );
+    if (r.statusCode == 200) return jsonDecode(r.body);
+    throw Exception('PUT $path failed: ${r.statusCode}');
+  }
+
   static Future<dynamic> delete(String path) async {
     final base = await baseUrl;
     final r = await http.delete(Uri.parse('$base$path'), headers: await _headers);
@@ -80,15 +91,6 @@ class ApiService {
       return data['stream_url'] as String?;
     } catch (_) { return null; }
   }
-
-  // --- Watchlist ---
-  static Future<List> getWatchlist() async => await get('/user/watchlist') as List;
-  static Future<void> addToWatchlist(Map<String, dynamic> item) async => await post('/user/watchlist', item);
-  static Future<void> removeFromWatchlist(int id) async => await delete('/user/watchlist/$id');
-
-  // --- Progress ---
-  static Future<List> getProgress() async => await get('/user/progress') as List;
-  static Future<void> saveProgress(Map<String, dynamic> item) async => await post('/user/progress', item);
 
   // --- Settings ---
   static Future<Map> getSettings() async => await get('/settings/') as Map;

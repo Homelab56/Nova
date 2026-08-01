@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'api_service.dart';
 
 class Profile {
   final String id;
@@ -13,7 +14,7 @@ class Profile {
   Map<String, dynamic> toJson() => {'id': id, 'name': name, 'pin': pin, 'colorIndex': colorIndex, 'icon': icon};
 
   factory Profile.fromJson(Map j) => Profile(
-    id: j['id'] as String,
+    id: j['id'].toString(),
     name: j['name'] as String,
     pin: j['pin'] as String?,
     colorIndex: (j['colorIndex'] as num?)?.toInt() ?? 0,
@@ -30,69 +31,96 @@ class Profile {
 }
 
 class ProfileService {
-  static Future<SharedPreferences> get _prefs => SharedPreferences.getInstance();
-
   // Actief profiel voor deze sessie - bewust NIET tussen opstarten bewaard,
   // zodat je (zoals bij Netflix) elke keer dat de app start eerst een
   // profiel moet kiezen.
   static String? activeProfileId;
   static String? activeProfileName;
 
+  // Profielen (en hun watchlist/kijkgeschiedenis/rangschikking) leven nu op
+  // de server, niet meer lokaal op het toestel - zo delen PC, TV en elk
+  // ander toestel dezelfde profielen i.p.v. dat elk toestel zijn eigen lege
+  // set heeft.
   static Future<List<Profile>> getProfiles() async {
-    final p = await _prefs;
-    final raw = p.getString('profiles') ?? '[]';
-    return (jsonDecode(raw) as List).map((j) => Profile.fromJson(j as Map)).toList();
+    final raw = await ApiService.get('/profiles/') as List;
+    return raw.map((j) => Profile.fromJson(j as Map)).toList();
   }
 
-  static Future<void> _saveProfiles(List<Profile> profiles) async {
-    final p = await _prefs;
-    await p.setString('profiles', jsonEncode(profiles.map((e) => e.toJson()).toList()));
-  }
-
-  static Future<Profile> createProfile(String name, {String? pin, int colorIndex = 0, String? icon}) async {
-    final profiles = await getProfiles();
-    final profile = Profile(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      name: name,
-      pin: (pin != null && pin.isNotEmpty) ? pin : null,
-      colorIndex: colorIndex,
-      icon: icon,
-    );
-    profiles.add(profile);
-    await _saveProfiles(profiles);
-    return profile;
+  static Future<Profile> createProfile(String name, {String? pin, int colorIndex = 0, String? icon, String? id}) async {
+    final j = await ApiService.post('/profiles/', {
+      if (id != null) 'id': id,
+      'name': name,
+      'pin': (pin != null && pin.isNotEmpty) ? pin : null,
+      'colorIndex': colorIndex,
+      'icon': icon,
+    }) as Map;
+    return Profile.fromJson(j);
   }
 
   static Future<void> updateProfile(Profile profile) async {
-    final profiles = await getProfiles();
-    final idx = profiles.indexWhere((p) => p.id == profile.id);
-    if (idx != -1) {
-      profiles[idx] = profile;
-      await _saveProfiles(profiles);
-    }
+    await ApiService.put('/profiles/${profile.id}', {
+      'name': profile.name, 'pin': profile.pin, 'colorIndex': profile.colorIndex, 'icon': profile.icon,
+    });
   }
 
   static Future<void> deleteProfile(String id) async {
-    final profiles = await getProfiles();
-    profiles.removeWhere((p) => p.id == id);
-    await _saveProfiles(profiles);
-    final p = await _prefs;
-    for (final key in ['watchlist', 'progress', 'ratings']) {
-      await p.remove('profile_${id}_$key');
-    }
+    await ApiService.delete('/profiles/$id');
   }
 
-  // Bestaande watchlist/kijkgeschiedenis van vóór profielen bestonden wordt
-  // bij het aanmaken van het allereerste profiel overgezet, zodat niemand
-  // zijn geschiedenis kwijtraakt door deze update.
-  static Future<void> migrateLegacyDataTo(String profileId) async {
-    final p = await _prefs;
-    for (final key in ['watchlist', 'progress']) {
-      final legacy = p.getString(key);
-      if (legacy != null) {
-        await p.setString('profile_${profileId}_$key', legacy);
-        await p.remove(key);
+  // Eenmalige overzet: dit toestel (typisch de PC waar profielen voor het
+  // eerst gemaakt zijn) had voorheen alles lokaal opgeslagen. Als de server
+  // nog leeg is maar dit toestel wel lokale profielen heeft, zetten we die
+  // eenmalig over zodat niemand zijn profielen/watchlist/geschiedenis kwijt-
+  // raakt door deze overstap naar gedeelde server-opslag.
+  static Future<void> migrateLocalDataToServerIfNeeded() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool('migrated_profiles_to_server') == true) return;
+
+    try {
+      final serverProfiles = await getProfiles();
+      if (serverProfiles.isNotEmpty) {
+        await prefs.setBool('migrated_profiles_to_server', true);
+        return;
       }
+
+      final raw = prefs.getString('profiles');
+      if (raw == null) {
+        await prefs.setBool('migrated_profiles_to_server', true);
+        return;
+      }
+
+      final localProfiles = (jsonDecode(raw) as List).map((j) => Profile.fromJson(j as Map)).toList();
+      for (final p in localProfiles) {
+        await createProfile(p.name, pin: p.pin, colorIndex: p.colorIndex, icon: p.icon, id: p.id);
+
+        final wlRaw = prefs.getString('profile_${p.id}_watchlist');
+        if (wlRaw != null) {
+          final list = (jsonDecode(wlRaw) as List).cast<Map>().toList().reversed;
+          for (final item in list) {
+            await ApiService.post('/profiles/${p.id}/watchlist', Map<String, dynamic>.from(item));
+          }
+        }
+
+        final progRaw = prefs.getString('profile_${p.id}_progress');
+        if (progRaw != null) {
+          final map = jsonDecode(progRaw) as Map;
+          for (final v in map.values) {
+            await ApiService.post('/profiles/${p.id}/progress', Map<String, dynamic>.from(v as Map));
+          }
+        }
+
+        final ratRaw = prefs.getString('profile_${p.id}_ratings');
+        if (ratRaw != null) {
+          final map = jsonDecode(ratRaw) as Map;
+          for (final v in map.values) {
+            await ApiService.post('/profiles/${p.id}/ratings', Map<String, dynamic>.from(v as Map));
+          }
+        }
+      }
+      await prefs.setBool('migrated_profiles_to_server', true);
+    } catch (e) {
+      // Geen server bereikbaar bij opstarten: gewoon niets doen, we proberen
+      // het opnieuw bij de volgende keer dat het profielscherm opent.
     }
   }
 }
