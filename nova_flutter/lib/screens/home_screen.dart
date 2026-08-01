@@ -315,7 +315,7 @@ class _HomeScreenState extends State<HomeScreen> {
       color: const Color(0xFF080c14).withOpacity(0.9),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(children: [
-        Image.asset('assets/logo.png', height: 32),
+        Image.asset('assets/logo_mark.png', height: 44),
         const SizedBox(width: 24),
         _buildNavBtn('Home', 0),
         _buildNavBtn('Films', 1),
