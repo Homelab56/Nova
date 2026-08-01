@@ -8,6 +8,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import '../widgets/nova_image.dart';
 import '../widgets/media_row.dart';
+import '../widgets/tv_focusable.dart';
 import '../services/tmdb_service.dart';
 import '../services/debrid_service.dart';
 import '../services/userdata_service.dart';
@@ -1190,7 +1191,8 @@ class _WatchScreenState extends State<WatchScreen> {
                             final s = seasons[i];
                             final sn = s['season_number'] as int;
                             final active = sn == _selectedSeason;
-                            return GestureDetector(
+                            return TvFocusable(
+                              borderRadius: BorderRadius.circular(22),
                               onTap: () => _loadSeason(sn),
                               child: AnimatedContainer(
                                 duration: const Duration(milliseconds: 150),
@@ -1271,7 +1273,7 @@ class _WatchScreenState extends State<WatchScreen> {
                   itemBuilder: (_, i) {
                     final item = _similar[i];
                     final p = item['poster_path'];
-                    return GestureDetector(
+                    return TvFocusable(
                       onTap: () => Navigator.pushReplacement(context, MaterialPageRoute(
                         builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
                       child: Container(width: 150, margin: const EdgeInsets.symmetric(horizontal: 6),
@@ -1324,7 +1326,8 @@ class _WatchScreenState extends State<WatchScreen> {
     final epNum = ep['episode_number'] as int;
     final runtime = ep['runtime'];
     final state = _episodeWatchState(epNum);
-    return GestureDetector(
+    return TvFocusable(
+      borderRadius: BorderRadius.circular(12),
       onTap: () => _play(episode: ep),
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),

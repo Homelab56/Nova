@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import '../services/profile_service.dart';
+import '../widgets/tv_focusable.dart';
 import 'home_screen.dart';
 
 // Vaste seed zodat het sterrenveld niet bij elke rebuild/hot-reload
@@ -377,11 +378,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       Wrap(
                         spacing: 24, runSpacing: 24, alignment: WrapAlignment.center,
                         children: [
-                          for (final profile in _profiles) _profileTile(profile),
+                          for (var i = 0; i < _profiles.length; i++)
+                            _profileTile(_profiles[i], autofocus: i == 0),
                           // Ook tonen als er nog geen enkel profiel is, anders
                           // is er op een verse installatie geen zichtbare
                           // manier om het allereerste profiel aan te maken.
-                          if (_editing || _profiles.isEmpty) _addTile(),
+                          if (_editing || _profiles.isEmpty) _addTile(autofocus: _profiles.isEmpty),
                         ],
                       ),
                       const SizedBox(height: 40),
@@ -446,8 +448,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     ]);
   }
 
-  Widget _profileTile(Profile profile) {
-    return GestureDetector(
+  Widget _profileTile(Profile profile, {bool autofocus = false}) {
+    return TvFocusable(
+      autofocus: autofocus,
+      borderRadius: BorderRadius.circular(60),
       onTap: () => _editing ? _createOrEditProfile(existing: profile) : _selectProfile(profile),
       child: SizedBox(
         width: 110,
@@ -475,8 +479,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _addTile() {
-    return GestureDetector(
+  Widget _addTile({bool autofocus = false}) {
+    return TvFocusable(
+      autofocus: autofocus,
+      borderRadius: BorderRadius.circular(60),
       onTap: () => _createOrEditProfile(),
       child: SizedBox(
         width: 110,

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../widgets/nova_image.dart';
+import '../widgets/tv_focusable.dart';
 import '../services/tmdb_service.dart';
 import 'watch_screen.dart';
 
@@ -109,7 +110,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
                         final item = _results[i];
                         final poster = item['poster_path'];
                         final title = item['title'] ?? item['name'] ?? '';
-                        return GestureDetector(
+                        return TvFocusable(
                           onTap: () => Navigator.push(context, MaterialPageRoute(
                             builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
                           child: Column(

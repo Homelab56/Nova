@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../widgets/nova_image.dart';
+import '../widgets/tv_focusable.dart';
 import '../services/userdata_service.dart';
 import 'watch_screen.dart';
 
@@ -58,7 +59,8 @@ class _WatchlistScreenState extends State<WatchlistScreen> {
     final year = date.length >= 4 ? date.substring(0, 4) : '';
     final isMovie = item['title'] != null;
 
-    return GestureDetector(
+    return TvFocusable(
+      borderRadius: BorderRadius.circular(14),
       onTap: () => Navigator.push(context, MaterialPageRoute(
         builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))).then((_) => _load()),
       child: Container(

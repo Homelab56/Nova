@@ -5,6 +5,7 @@ import '../services/debrid_service.dart';
 import '../services/userdata_service.dart';
 import '../widgets/nova_image.dart';
 import '../widgets/media_row.dart';
+import '../widgets/tv_focusable.dart';
 import 'watch_screen.dart';
 import 'settings_screen.dart';
 import 'watchlist_screen.dart';
@@ -407,6 +408,11 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildNavBtn(String label, int index) {
     final bool active = _tab == index;
     return InkWell(
+      // Focus start bewust op de eerste navigatieknop, zodat een afstands-
+      // bediening meteen iets heeft om vanaf te vertrekken i.p.v. dat er
+      // nergens focus staat bij het openen van het scherm.
+      autofocus: index == 0,
+      focusColor: Colors.white24,
       onTap: () {
         if (index == 5) {
           Navigator.push(
@@ -561,7 +567,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // wordt als de poster zelf.
     final double numBoxWidth = rank >= 10 ? 250 : 170;
     final double cardWidth = numVisible + posterWidth;
-    return GestureDetector(
+    return TvFocusable(
       onTap: () => _openWatch(item),
       child: Container(
         width: cardWidth,
@@ -653,8 +659,8 @@ class _HomeScreenState extends State<HomeScreen> {
     // Voor progress tonen we een horizontale kaart (backdrop) zoals in de browser
     if (isProgress) {
       final double progress = (item['current_time'] ?? 0) / (item['duration'] ?? 1);
-      
-      return GestureDetector(
+
+      return TvFocusable(
         onTap: () => _openWatch(item, autoResume: true),
         child: Container(
           width: 230, margin: const EdgeInsets.symmetric(horizontal: 5),
@@ -685,7 +691,7 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    return GestureDetector(
+    return TvFocusable(
       onTap: () => _openWatch(item),
       child: Container(
         width: 168, margin: const EdgeInsets.symmetric(horizontal: 6),
