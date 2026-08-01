@@ -95,18 +95,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
     switch (_tab) {
       case 1: baseRows.addAll([
+        {'title': 'Top 10 films deze week', 'items': _trendMovies, 'is_ranked': true, 'path': '/api/search/trending/movies'},
         {'title': 'Populaire films', 'items': _popularMovies, 'path': '/api/search/popular/movies'},
-        {'title': 'Trending films', 'items': _trendMovies, 'is_ranked': true, 'path': '/api/search/trending/movies'},
         {'title': 'Best beoordeeld', 'items': _topMovies, 'path': '/api/search/toprated/movies'},
       ]); break;
       case 2: baseRows.addAll([
+        {'title': 'Top 10 series deze week', 'items': _trendTv, 'is_ranked': true, 'path': '/api/search/trending/tv'},
         {'title': 'Populaire series', 'items': _popularTv, 'path': '/api/search/popular/tv'},
-        {'title': 'Trending series', 'items': _trendTv, 'is_ranked': true, 'path': '/api/search/trending/tv'},
         {'title': 'Best beoordeeld', 'items': _topTv, 'path': '/api/search/toprated/tv'},
       ]); break;
+      case 3: baseRows.addAll([
+        {'title': 'Top 10 kinderfilms', 'items': _kidsMovies, 'is_ranked': true, 'path': '/api/search/kids/movies'},
+      ]); break;
       case 4: baseRows.addAll([
-        {'title': 'Kinderfilms', 'items': _kidsMovies, 'path': '/api/search/kids/movies'},
-        {'title': 'Kinderseries', 'items': _kidsTv, 'path': '/api/search/kids/tv'},
+        {'title': 'Top 10 kinderseries', 'items': _kidsTv, 'is_ranked': true, 'path': '/api/search/kids/tv'},
       ]); break;
       default: baseRows.addAll([
         {'title': 'Top 10 films deze week', 'items': _trendMovies, 'is_ranked': true},
@@ -124,7 +126,11 @@ class _HomeScreenState extends State<HomeScreen> {
     return baseRows;
   }
 
-  List get _heroItems => _tab == 1 ? _popularMovies : _tab == 2 ? _popularTv : _tab == 4 ? _kidsMovies : _trending;
+  List get _heroItems => _tab == 1 ? _popularMovies
+    : _tab == 2 ? _popularTv
+    : _tab == 3 ? _kidsMovies
+    : _tab == 4 ? _kidsTv
+    : _trending;
 
   Widget _buildHeroCarousel() {
     final items = _heroItems;
@@ -175,8 +181,9 @@ class _HomeScreenState extends State<HomeScreen> {
         _buildNavBtn('Home', 0),
         _buildNavBtn('Films', 1),
         _buildNavBtn('Series', 2),
-        _buildNavBtn('Kids', 4),
-        _buildNavBtn('Watchlist', 3),
+        _buildNavBtn('Kids Films', 3),
+        _buildNavBtn('Kids Series', 4),
+        _buildNavBtn('Watchlist', 5),
         
         const SizedBox(width: 12),
         // Genres knop
@@ -241,7 +248,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final bool active = _tab == index;
     return InkWell(
       onTap: () {
-        if (index == 3) {
+        if (index == 5) {
           Navigator.push(
             context,
             MaterialPageRoute(
