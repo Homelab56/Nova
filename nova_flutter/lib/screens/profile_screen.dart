@@ -198,14 +198,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
       backgroundColor: const Color(0xFF080c14),
       body: SafeArea(
         child: Stack(children: [
+          // Zachte gloed i.p.v. platte kleur - dit is het allereerste scherm
+          // dat je ziet, dat mag iets uitnodigender aanvoelen dan een kaal vlak.
+          const Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment(0, -0.5),
+                  radius: 1.3,
+                  colors: [Color(0xFF122438), Color(0xFF080c14)],
+                ),
+              ),
+            ),
+          ),
           _loading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF00b4d8)))
           : Center(
               child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Image.asset('assets/logo.png', height: 48),
-                const SizedBox(height: 8),
-                const Text('Wie kijkt er?', style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w700)),
-                const SizedBox(height: 40),
+                Image.asset('assets/logo.png', height: 120),
+                const SizedBox(height: 20),
+                const Text('Wie kijkt er?', style: TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 48),
                 Wrap(
                   spacing: 24, runSpacing: 24, alignment: WrapAlignment.center,
                   children: [

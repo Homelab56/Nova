@@ -518,6 +518,106 @@ class _WatchScreenState extends State<WatchScreen> {
     }
   }
 
+  // Titel/metadata/omschrijving/knoppen/sterren - herbruikt zowel overlayed
+  // op de hero-achtergrond (vóór het afspelen) als plat onder de speler/het
+  // laadscherm (tijdens/na het afspelen), zodat je altijd nog kan
+  // rangschikken en de titel/omschrijving blijft zien i.p.v. dat die
+  // volledig verdwijnt zodra de video start.
+  Widget _buildInfoBlock(List seasons, {bool overlay = true}) {
+    final rating = (widget.media['vote_average'] as num?)?.toStringAsFixed(1);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: overlay ? 640 : double.infinity),
+        child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: overlay ? 34 : 26, fontWeight: FontWeight.w900, color: Colors.white,
+            height: 1.1, shadows: overlay ? const [Shadow(blurRadius: 12, color: Colors.black)] : null)),
+      ),
+      const SizedBox(height: 10),
+      Wrap(spacing: 10, children: [
+        if (year.isNotEmpty) Text(year, style: const TextStyle(color: Colors.grey, fontSize: 14)),
+        if (rating != null) Text('★ $rating', style: const TextStyle(color: Colors.amber, fontSize: 14)),
+        if (seasons.isNotEmpty) Text('${seasons.length} seizoen${seasons.length > 1 ? "en" : ""}',
+          style: const TextStyle(color: Colors.grey, fontSize: 14)),
+      ]),
+      const SizedBox(height: 14),
+      ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: overlay ? 560 : double.infinity),
+        child: Text(widget.media['overview'] ?? '', maxLines: 3, overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.5)),
+      ),
+      const SizedBox(height: 18),
+      Row(children: [
+        if (isMovie)
+          ElevatedButton.icon(
+            onPressed: _loadingStream ? null : () => _play(),
+            icon: _loadingStream
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+              : const Icon(Icons.play_arrow, size: 20),
+            label: Text(_loadingStream ? 'Laden...' : 'Afspelen'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _isAvailable == true ? const Color(0xFF00b4d8) : Colors.white,
+              foregroundColor: _isAvailable == true ? Colors.white : Colors.black,
+              textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+            ),
+          ),
+        if (isMovie) ...[
+          const SizedBox(width: 12),
+          OutlinedButton.icon(
+            onPressed: _loadingStream ? null : () => _pickSource(),
+            icon: const Icon(Icons.dns_outlined, size: 18, color: Colors.white),
+            label: const Text('Bronnen', style: TextStyle(color: Colors.white, fontSize: 15)),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Colors.white54),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            ),
+          ),
+        ],
+        const SizedBox(width: 12),
+        OutlinedButton.icon(
+          onPressed: _toggleWatchlist,
+          icon: Icon(_inWatchlist ? Icons.bookmark : Icons.bookmark_outline, size: 18,
+            color: _inWatchlist ? const Color(0xFF00b4d8) : Colors.white),
+          label: Text(_inWatchlist ? 'In watchlist' : '+ Watchlist',
+            style: TextStyle(color: _inWatchlist ? const Color(0xFF00b4d8) : Colors.white, fontSize: 15)),
+          style: OutlinedButton.styleFrom(
+            side: BorderSide(color: _inWatchlist ? const Color(0xFF00b4d8) : Colors.white54),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          ),
+        ),
+      ]),
+      const SizedBox(height: 12),
+      Row(children: [
+        for (int i = 1; i <= 3; i++)
+          IconButton(
+            onPressed: () => _setRating(i),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            icon: Icon(
+              (_rating != null && _rating! >= i) ? Icons.star : Icons.star_border,
+              color: (_rating != null && _rating! >= i) ? Colors.amber : Colors.white54,
+              size: 24,
+            ),
+            tooltip: i == 1 ? 'Niet voor mij' : i == 2 ? 'Oké' : 'Top!',
+          ),
+        if (_rating != null) ...[
+          const SizedBox(width: 4),
+          Text(
+            _rating == 1 ? 'Niet voor mij' : _rating == 2 ? 'Oké' : 'Top!',
+            style: const TextStyle(color: Colors.grey, fontSize: 13),
+          ),
+        ],
+      ]),
+      if (_status.isNotEmpty) Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: Text(_status, style: const TextStyle(color: Color(0xFF00b4d8), fontSize: 13)),
+      ),
+    ]);
+  }
+
   Future<void> _loadDetails() async {
     final id = widget.media['id'];
     if (id is! int) {
@@ -906,7 +1006,6 @@ class _WatchScreenState extends State<WatchScreen> {
   Widget build(BuildContext context) {
     final backdrop = widget.media['backdrop_path'];
     final poster = widget.media['poster_path'];
-    final rating = (widget.media['vote_average'] as num?)?.toStringAsFixed(1);
     final seasons = (_detail?['seasons'] as List?)?.where((s) => (s['season_number'] as int) > 0).toList() ?? [];
 
     return Scaffold(
@@ -1055,99 +1154,18 @@ class _WatchScreenState extends State<WatchScreen> {
                         ),
                       ),
                     ),
-                    Positioned(bottom: 32, left: 32, right: 32,
-                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 640),
-                          child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w900, color: Colors.white,
-                              height: 1.1, shadows: [Shadow(blurRadius: 12, color: Colors.black)])),
-                        ),
-                        const SizedBox(height: 10),
-                        Wrap(spacing: 10, children: [
-                          if (year.isNotEmpty) Text(year, style: const TextStyle(color: Colors.grey, fontSize: 14)),
-                          if (rating != null) Text('★ $rating', style: const TextStyle(color: Colors.amber, fontSize: 14)),
-                          if (seasons.isNotEmpty) Text('${seasons.length} seizoen${seasons.length > 1 ? "en" : ""}',
-                            style: const TextStyle(color: Colors.grey, fontSize: 14)),
-                        ]),
-                        const SizedBox(height: 14),
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 560),
-                          child: Text(widget.media['overview'] ?? '', maxLines: 3, overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.5)),
-                        ),
-                        const SizedBox(height: 18),
-                        Row(children: [
-                          if (isMovie)
-                            ElevatedButton.icon(
-                              onPressed: _loadingStream ? null : () => _play(),
-                              icon: _loadingStream
-                                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                                : const Icon(Icons.play_arrow, size: 20),
-                              label: Text(_loadingStream ? 'Laden...' : 'Afspelen'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: _isAvailable == true ? const Color(0xFF00b4d8) : Colors.white,
-                                foregroundColor: _isAvailable == true ? Colors.white : Colors.black,
-                                textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
-                              ),
-                            ),
-                          if (isMovie) ...[
-                            const SizedBox(width: 12),
-                            OutlinedButton.icon(
-                              onPressed: _loadingStream ? null : () => _pickSource(),
-                              icon: const Icon(Icons.dns_outlined, size: 18, color: Colors.white),
-                              label: const Text('Bronnen', style: TextStyle(color: Colors.white, fontSize: 15)),
-                              style: OutlinedButton.styleFrom(
-                                side: const BorderSide(color: Colors.white54),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                              ),
-                            ),
-                          ],
-                          const SizedBox(width: 12),
-                          OutlinedButton.icon(
-                            onPressed: _toggleWatchlist,
-                            icon: Icon(_inWatchlist ? Icons.bookmark : Icons.bookmark_outline, size: 18,
-                              color: _inWatchlist ? const Color(0xFF00b4d8) : Colors.white),
-                            label: Text(_inWatchlist ? 'In watchlist' : '+ Watchlist',
-                              style: TextStyle(color: _inWatchlist ? const Color(0xFF00b4d8) : Colors.white, fontSize: 15)),
-                            style: OutlinedButton.styleFrom(
-                              side: BorderSide(color: _inWatchlist ? const Color(0xFF00b4d8) : Colors.white54),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                            ),
-                          ),
-                        ]),
-                        const SizedBox(height: 12),
-                        Row(children: [
-                          for (int i = 1; i <= 3; i++)
-                            IconButton(
-                              onPressed: () => _setRating(i),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                              icon: Icon(
-                                (_rating != null && _rating! >= i) ? Icons.star : Icons.star_border,
-                                color: (_rating != null && _rating! >= i) ? Colors.amber : Colors.white54,
-                                size: 24,
-                              ),
-                              tooltip: i == 1 ? 'Niet voor mij' : i == 2 ? 'Oké' : 'Top!',
-                            ),
-                          if (_rating != null) ...[
-                            const SizedBox(width: 4),
-                            Text(
-                              _rating == 1 ? 'Niet voor mij' : _rating == 2 ? 'Oké' : 'Top!',
-                              style: const TextStyle(color: Colors.grey, fontSize: 13),
-                            ),
-                          ],
-                        ]),
-                        if (_status.isNotEmpty) Padding(
-                          padding: const EdgeInsets.only(top: 10),
-                          child: Text(_status, style: const TextStyle(color: Color(0xFF00b4d8), fontSize: 13)),
-                        ),
-                      ])),
+                    Positioned(bottom: 32, left: 32, right: 32, child: _buildInfoBlock(seasons)),
                   ]),
+                ),
+
+              // Titel/omschrijving/knoppen/sterren staan hier ook nog eens
+              // (plat, niet overlayed op de video) zolang er afgespeeld of
+              // geladen wordt - anders verdwijnt alle info (en de kans om te
+              // rangschikken) volledig van het scherm zodra je op Afspelen drukt.
+              if (_showPlayer || _loadingStream)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+                  child: _buildInfoBlock(seasons, overlay: false),
                 ),
 
               Padding(
