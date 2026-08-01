@@ -942,6 +942,21 @@ class _WatchScreenState extends State<WatchScreen> {
                         ),
                       ),
                     ),
+                    // Terugknop moet hier ook beschikbaar zijn - eerder was
+                    // die enkel zichtbaar vóór het afspelen start (hero/
+                    // laadscherm), maar verdween zodra de video echt speelt.
+                    Positioned(
+                      top: 16, left: 16,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(24),
+                        onTap: () => Navigator.pop(context),
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                          child: const Icon(Icons.arrow_back, color: Colors.white, size: 22),
+                        ),
+                      ),
+                    ),
                   ]),
                 )
               else if (_loadingStream)
