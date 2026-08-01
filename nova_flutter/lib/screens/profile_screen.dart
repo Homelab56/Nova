@@ -26,14 +26,20 @@ class _StarfieldPainter extends CustomPainter {
   bool shouldRepaint(covariant _StarfieldPainter oldDelegate) => false;
 }
 
-const _avatarColors = [
-  Color(0xFF00b4d8), Color(0xFFe63946), Color(0xFFf4a261),
-  Color(0xFF2a9d8f), Color(0xFF9b5de5), Color(0xFFffb703),
-  Color(0xFFef476f), Color(0xFF06d6a0), Color(0xFF118ab2),
-  Color(0xFFffd166), Color(0xFF073b4c), Color(0xFFc9184a),
-  Color(0xFF80ffdb), Color(0xFF7209b7), Color(0xFFf72585),
-  Color(0xFF4cc9f0), Color(0xFF43aa8b), Color(0xFFf94144),
-  Color(0xFFf3722c), Color(0xFF90be6d), Color(0xFF577590),
+// Gradient-paren i.p.v. platte kleuren - gekozen om aan te sluiten bij het
+// logo (metallic zilver/blauw/goud) en de sterrenveld-achtergrond, i.p.v.
+// een willekeurig regenbooggrid dat los staat van de rest van de app.
+const _avatarGradients = <List<Color>>[
+  [Color(0xFF4cc9f0), Color(0xFF3a86ff)],
+  [Color(0xFFffd166), Color(0xFFf4a261)],
+  [Color(0xFF06d6a0), Color(0xFF118ab2)],
+  [Color(0xFF9b5de5), Color(0xFFef476f)],
+  [Color(0xFFf72585), Color(0xFF7209b7)],
+  [Color(0xFF43aa8b), Color(0xFF2a9d8f)],
+  [Color(0xFFd4af37), Color(0xFF8d6a00)],
+  [Color(0xFFb0bec5), Color(0xFF546e7a)],
+  [Color(0xFFe63946), Color(0xFFf4a261)],
+  [Color(0xFF00b4d8), Color(0xFF0077b6)],
 ];
 
 class ProfileScreen extends StatefulWidget {
@@ -125,7 +131,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _createOrEditProfile({Profile? existing}) async {
     final nameCtrl = TextEditingController(text: existing?.name ?? '');
     final pinCtrl = TextEditingController(text: existing?.pin ?? '');
-    int colorIndex = existing?.colorIndex ?? (_profiles.length % _avatarColors.length);
+    int colorIndex = existing?.colorIndex ?? (_profiles.length % _avatarGradients.length);
 
     final result = await showDialog<bool>(
       context: context,
@@ -144,14 +150,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 16),
               const Text('Kleur', style: TextStyle(color: Colors.grey, fontSize: 12)),
               const SizedBox(height: 8),
-              Wrap(spacing: 10, children: [
-                for (var i = 0; i < _avatarColors.length; i++)
+              Wrap(spacing: 10, runSpacing: 10, children: [
+                for (var i = 0; i < _avatarGradients.length; i++)
                   GestureDetector(
                     onTap: () => setDialogState(() => colorIndex = i),
-                    child: CircleAvatar(
-                      radius: 16,
-                      backgroundColor: _avatarColors[i],
-                      child: colorIndex == i ? const Icon(Icons.check, color: Colors.white, size: 16) : null,
+                    child: Container(
+                      width: 34, height: 34,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft, end: Alignment.bottomRight,
+                          colors: _avatarGradients[i],
+                        ),
+                        border: Border.all(
+                          color: colorIndex == i ? Colors.white : Colors.white24,
+                          width: colorIndex == i ? 2.5 : 1,
+                        ),
+                      ),
+                      child: colorIndex == i
+                        ? const Icon(Icons.check, color: Colors.white, size: 16)
+                        : null,
                     ),
                   ),
               ]),
@@ -295,29 +313,62 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  // Cirkelvormige medaillon-look (gradient vulling + gloed + lichte rand +
+  // sparkle-accent) i.p.v. platte gekleurde vierkantjes met één letter erin -
+  // sluit beter aan bij het metallic logo en het sterrenveld erachter.
+  Widget _avatarBadge(Profile profile) {
+    final grad = _avatarGradients[profile.colorIndex % _avatarGradients.length];
+    return Stack(clipBehavior: Clip.none, children: [
+      Container(
+        width: 92, height: 92,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(
+            center: const Alignment(-0.3, -0.4),
+            radius: 1.0,
+            colors: [grad[0], grad[1], const Color(0xFF080c14)],
+            stops: const [0.0, 0.55, 1.0],
+          ),
+          border: Border.all(color: Colors.white.withOpacity(0.55), width: 1.6),
+          boxShadow: [
+            BoxShadow(color: grad[0].withOpacity(0.55), blurRadius: 20, spreadRadius: 1),
+          ],
+        ),
+        child: Center(
+          child: Text(
+            profile.name.isNotEmpty ? profile.name[0].toUpperCase() : '?',
+            style: TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w800,
+              shadows: [Shadow(blurRadius: 8, color: Colors.black.withOpacity(0.6))]),
+          ),
+        ),
+      ),
+      Positioned(top: -2, right: 4,
+        child: Icon(Icons.auto_awesome, color: Colors.white.withOpacity(0.85), size: 14)),
+    ]);
+  }
+
   Widget _profileTile(Profile profile) {
-    final color = _avatarColors[profile.colorIndex % _avatarColors.length];
     return GestureDetector(
       onTap: () => _editing ? _createOrEditProfile(existing: profile) : _selectProfile(profile),
       child: SizedBox(
         width: 110,
         child: Column(children: [
           Stack(children: [
-            Container(
-              width: 90, height: 90,
-              decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(16)),
-              child: Center(child: Text(profile.name.isNotEmpty ? profile.name[0].toUpperCase() : '?',
-                style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w700))),
-            ),
+            _avatarBadge(profile),
             if (profile.pin != null)
-              const Positioned(bottom: 4, right: 4, child: Icon(Icons.lock, color: Colors.white70, size: 16)),
+              Positioned(bottom: 2, right: 6,
+                child: Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                  child: const Icon(Icons.lock, color: Colors.white70, size: 13),
+                )),
             if (_editing)
               Positioned.fill(child: DecoratedBox(
-                decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(16)),
+                decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
                 child: const Center(child: Icon(Icons.edit, color: Colors.white, size: 28)),
               )),
           ]),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Text(profile.name, maxLines: 1, overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
         ]),
@@ -332,15 +383,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
         width: 110,
         child: Column(children: [
           Container(
-            width: 90, height: 90,
+            width: 92, height: 92,
             decoration: BoxDecoration(
+              shape: BoxShape.circle,
               color: const Color(0xFF0f1520),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white24),
+              border: Border.all(color: Colors.white24, width: 1.6),
             ),
             child: const Icon(Icons.add, color: Colors.grey, size: 36),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           const Text('Nieuw profiel', style: TextStyle(color: Colors.grey, fontSize: 14)),
         ]),
       ),
