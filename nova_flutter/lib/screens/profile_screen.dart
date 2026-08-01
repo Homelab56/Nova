@@ -29,6 +29,11 @@ class _StarfieldPainter extends CustomPainter {
 const _avatarColors = [
   Color(0xFF00b4d8), Color(0xFFe63946), Color(0xFFf4a261),
   Color(0xFF2a9d8f), Color(0xFF9b5de5), Color(0xFFffb703),
+  Color(0xFFef476f), Color(0xFF06d6a0), Color(0xFF118ab2),
+  Color(0xFFffd166), Color(0xFF073b4c), Color(0xFFc9184a),
+  Color(0xFF80ffdb), Color(0xFF7209b7), Color(0xFFf72585),
+  Color(0xFF4cc9f0), Color(0xFF43aa8b), Color(0xFFf94144),
+  Color(0xFFf3722c), Color(0xFF90be6d), Color(0xFF577590),
 ];
 
 class ProfileScreen extends StatefulWidget {
