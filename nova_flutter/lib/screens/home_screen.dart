@@ -17,12 +17,37 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
+// Extra genres om te doorbladeren op Home/Films/Series, naast de
+// hoofdrijen (Top 10/Populair/Best beoordeeld) - zodat er een echte
+// bibliotheek is om doorheen te scrollen i.p.v. maar een handvol rijen.
+// TV-genre-ID's verschillen deels van film-ID's in TMDB (bv. Sci-Fi
+// "878" voor film vs "10765" "Sci-Fi & Fantasy" voor tv).
+const _movieGenreRows = [
+  {'title': 'Actie films', 'id': 28},
+  {'title': 'Komedie films', 'id': 35},
+  {'title': 'Horror', 'id': 27},
+  {'title': 'Sci-Fi films', 'id': 878},
+  {'title': 'Animatiefilms', 'id': 16},
+  {'title': 'Thrillers', 'id': 53},
+];
+const _tvGenreRows = [
+  {'title': 'Actie & Avontuur series', 'id': 10759},
+  {'title': 'Komedie series', 'id': 35},
+  {'title': 'Drama series', 'id': 18},
+  {'title': 'Sci-Fi & Fantasy series', 'id': 10765},
+  {'title': 'Mystery series', 'id': 9648},
+  {'title': 'Misdaad series', 'id': 80},
+];
+
 class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0;
   List _trending = [], _popularMovies = [], _popularTv = [];
   List _trendMovies = [], _trendTv = [], _topMovies = [], _topTv = [];
   List _kidsMovies = [], _kidsTv = [];
+  List _kidsMoviesTop = [], _kidsMoviesNew = [], _kidsTvTop = [], _kidsTvNew = [];
   List _rdLibrary = [], _progress = [];
+  final Map<int, List> _movieGenreItems = {};
+  final Map<int, List> _tvGenreItems = {};
   bool _loading = true;
   int _heroIndex = 0;
   Timer? _heroTimer;
@@ -55,7 +80,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final results = await Future.wait([
+    // Alle Future.wait-blokken hieronder worden meteen (dus parallel)
+    // gestart - enkel het await'en gebeurt na elkaar.
+    final mainFuture = Future.wait([
       _safeList(TmdbService.getTrending()),
       _safeList(TmdbService.getPopularMovies()),
       _safeList(TmdbService.getPopularTv()),
@@ -68,6 +95,21 @@ class _HomeScreenState extends State<HomeScreen> {
       _safeList(TmdbService.getKidsMovies()),
       _safeList(TmdbService.getKidsTv()),
     ]);
+    final kidsExtraFuture = Future.wait([
+      _safeList(TmdbService.getKidsMoviesTopRated()),
+      _safeList(TmdbService.getKidsMoviesNewest()),
+      _safeList(TmdbService.getKidsTvTopRated()),
+      _safeList(TmdbService.getKidsTvNewest()),
+    ]);
+    final movieGenreFuture = Future.wait(
+      _movieGenreRows.map((g) => _safeList(TmdbService.getGenreItems(g['id'] as int, 'movie'))));
+    final tvGenreFuture = Future.wait(
+      _tvGenreRows.map((g) => _safeList(TmdbService.getGenreItems(g['id'] as int, 'tv'))));
+
+    final results = await mainFuture;
+    final kidsExtra = await kidsExtraFuture;
+    final movieGenreResults = await movieGenreFuture;
+    final tvGenreResults = await tvGenreFuture;
     if (!mounted) return;
     setState(() {
       _trending = results[0];
@@ -81,6 +123,16 @@ class _HomeScreenState extends State<HomeScreen> {
       _progress = (results[8] as List).reversed.toList();
       _kidsMovies = results[9];
       _kidsTv = results[10];
+      _kidsMoviesTop = kidsExtra[0];
+      _kidsMoviesNew = kidsExtra[1];
+      _kidsTvTop = kidsExtra[2];
+      _kidsTvNew = kidsExtra[3];
+      for (var i = 0; i < _movieGenreRows.length; i++) {
+        _movieGenreItems[_movieGenreRows[i]['id'] as int] = movieGenreResults[i];
+      }
+      for (var i = 0; i < _tvGenreRows.length; i++) {
+        _tvGenreItems[_tvGenreRows[i]['id'] as int] = tvGenreResults[i];
+      }
       _loading = false;
     });
   }
@@ -98,17 +150,25 @@ class _HomeScreenState extends State<HomeScreen> {
         {'title': 'Top 10 films deze week', 'items': _trendMovies, 'is_ranked': true, 'path': '/api/search/trending/movies'},
         {'title': 'Populaire films', 'items': _popularMovies, 'path': '/api/search/popular/movies'},
         {'title': 'Best beoordeeld', 'items': _topMovies, 'path': '/api/search/toprated/movies'},
+        for (final g in _movieGenreRows)
+          {'title': g['title'], 'items': _movieGenreItems[g['id']] ?? const []},
       ]); break;
       case 2: baseRows.addAll([
         {'title': 'Top 10 series deze week', 'items': _trendTv, 'is_ranked': true, 'path': '/api/search/trending/tv'},
         {'title': 'Populaire series', 'items': _popularTv, 'path': '/api/search/popular/tv'},
         {'title': 'Best beoordeeld', 'items': _topTv, 'path': '/api/search/toprated/tv'},
+        for (final g in _tvGenreRows)
+          {'title': g['title'], 'items': _tvGenreItems[g['id']] ?? const []},
       ]); break;
       case 3: baseRows.addAll([
         {'title': 'Top 10 kinderfilms', 'items': _kidsMovies, 'is_ranked': true, 'path': '/api/search/kids/movies'},
+        {'title': 'Best beoordeelde kinderfilms', 'items': _kidsMoviesTop, 'path': '/api/search/kids/movies/toprated'},
+        {'title': 'Nieuwste kinderfilms', 'items': _kidsMoviesNew, 'path': '/api/search/kids/movies/newest'},
       ]); break;
       case 4: baseRows.addAll([
         {'title': 'Top 10 kinderseries', 'items': _kidsTv, 'is_ranked': true, 'path': '/api/search/kids/tv'},
+        {'title': 'Best beoordeelde kinderseries', 'items': _kidsTvTop, 'path': '/api/search/kids/tv/toprated'},
+        {'title': 'Nieuwste kinderseries', 'items': _kidsTvNew, 'path': '/api/search/kids/tv/newest'},
       ]); break;
       default: baseRows.addAll([
         {'title': 'Top 10 films deze week', 'items': _trendMovies, 'is_ranked': true},
@@ -117,13 +177,47 @@ class _HomeScreenState extends State<HomeScreen> {
         {'title': 'Populaire series', 'items': _popularTv, 'path': '/api/search/popular/tv'},
         {'title': 'Best beoordeelde films', 'items': _topMovies, 'path': '/api/search/toprated/movies'},
         {'title': 'Best beoordeelde series', 'items': _topTv, 'path': '/api/search/toprated/tv'},
+        // Een representatieve greep genres i.p.v. alle 12 - anders wordt Home
+        // extreem lang; de volledige lijst staat al op de Films/Series-tabs.
+        {'title': 'Actie films', 'items': _movieGenreItems[28] ?? const []},
+        {'title': 'Komedie series', 'items': _tvGenreItems[35] ?? const []},
+        {'title': 'Horror', 'items': _movieGenreItems[27] ?? const []},
+        {'title': 'Sci-Fi & Fantasy series', 'items': _tvGenreItems[10765] ?? const []},
       ]);
     }
 
     if (_rdLibrary.isNotEmpty) {
       baseRows.add({'title': 'Mijn Real-Debrid Bibliotheek', 'items': _rdLibrary, 'is_rd': true});
     }
-    return baseRows;
+    return _dedupeRows(baseRows);
+  }
+
+  // Voorkomt dat dezelfde film/serie in meerdere rijen op dezelfde pagina
+  // opduikt (bv. de populairste actiefilm staat vaak toch al bovenaan
+  // "Populair" én "Actie") - elke volgende rij toont enkel wat nog niet
+  // in een eerdere rij op deze pagina stond. "Verder kijken" en de eigen
+  // RD-bibliotheek blijven ongemoeid, dat zijn geen ontdek-rijen.
+  List<Map<String, dynamic>> _dedupeRows(List<Map<String, dynamic>> rows) {
+    final seen = <dynamic>{};
+    final out = <Map<String, dynamic>>[];
+    for (final r in rows) {
+      if (r['is_progress'] == true || r['is_rd'] == true) {
+        out.add(r);
+        continue;
+      }
+      final items = (r['items'] as List?) ?? const [];
+      final filtered = [];
+      for (final it in items) {
+        final id = (it is Map) ? it['id'] : null;
+        if (id != null) {
+          if (seen.contains(id)) continue;
+          seen.add(id);
+        }
+        filtered.add(it);
+      }
+      out.add({...r, 'items': filtered});
+    }
+    return out;
   }
 
   List get _heroItems => _tab == 1 ? _popularMovies

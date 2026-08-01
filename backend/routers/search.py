@@ -303,6 +303,41 @@ async def kids_tv(page: int = 1):
         allow_kids=True,
     )
 
+# Extra ontdek-hoeken voor de Kids-tabbladen (andere sortering, zelfde
+# kids-veilige genre-gate) zodat er meer dan één rij te doorbladeren is.
+
+@router.get("/kids/movies/toprated")
+async def kids_movies_toprated(page: int = 1):
+    return await tmdb_list(
+        "/discover/movie", page=page,
+        params={"sort_by": "vote_average.desc", "with_genres": "10751", "vote_count.gte": 200},
+        prefetch_pages=5, media_type="movie", suggestion_mode=True, allow_kids=True,
+    )
+
+@router.get("/kids/movies/newest")
+async def kids_movies_newest(page: int = 1):
+    return await tmdb_list(
+        "/discover/movie", page=page,
+        params={"sort_by": "primary_release_date.desc", "with_genres": "10751", "vote_count.gte": 5},
+        prefetch_pages=5, media_type="movie", suggestion_mode=True, allow_kids=True,
+    )
+
+@router.get("/kids/tv/toprated")
+async def kids_tv_toprated(page: int = 1):
+    return await tmdb_list(
+        "/discover/tv", page=page,
+        params={"sort_by": "vote_average.desc", "with_genres": "10762|10751", "vote_count.gte": 100},
+        prefetch_pages=5, media_type="tv", suggestion_mode=True, allow_kids=True,
+    )
+
+@router.get("/kids/tv/newest")
+async def kids_tv_newest(page: int = 1):
+    return await tmdb_list(
+        "/discover/tv", page=page,
+        params={"sort_by": "first_air_date.desc", "with_genres": "10762|10751", "vote_count.gte": 3},
+        prefetch_pages=5, media_type="tv", suggestion_mode=True, allow_kids=True,
+    )
+
 
 # --- Genre discover ---
 

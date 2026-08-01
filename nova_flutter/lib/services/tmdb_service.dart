@@ -149,6 +149,18 @@ class TmdbService {
     return _extractItems(d);
   }
 
+  static Future<List> getKidsMoviesTopRated() async => _extractItems(await _backendGet('/api/search/kids/movies/toprated'));
+  static Future<List> getKidsMoviesNewest() async => _extractItems(await _backendGet('/api/search/kids/movies/newest'));
+  static Future<List> getKidsTvTopRated() async => _extractItems(await _backendGet('/api/search/kids/tv/toprated'));
+  static Future<List> getKidsTvNewest() async => _extractItems(await _backendGet('/api/search/kids/tv/newest'));
+
+  // Voor extra ontdek-rijen (genres) op Home/Films/Series - geeft enkel de
+  // itemlijst terug, geen paginering nodig zoals bij het volledige genre-scherm.
+  static Future<List> getGenreItems(int genreId, String type) async {
+    final data = await discoverGenre(genreId, type);
+    return data['items'] as List;
+  }
+
   static Future<bool> testKey(String key) async {
     if (key.trim().isEmpty) return false;
     final uri = Uri.parse('https://api.themoviedb.org/3/configuration')
