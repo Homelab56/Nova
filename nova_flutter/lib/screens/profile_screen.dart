@@ -1,6 +1,30 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import '../services/profile_service.dart';
 import 'home_screen.dart';
+
+// Vaste seed zodat het sterrenveld niet bij elke rebuild/hot-reload
+// verspringt - het moet een rustige, stabiele achtergrond zijn.
+class _StarfieldPainter extends CustomPainter {
+  final int starCount;
+  const _StarfieldPainter({this.starCount = 140});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rnd = Random(42);
+    for (var i = 0; i < starCount; i++) {
+      final dx = rnd.nextDouble() * size.width;
+      final dy = rnd.nextDouble() * size.height;
+      final radius = rnd.nextDouble() * 1.4 + 0.3;
+      final opacity = rnd.nextDouble() * 0.5 + 0.15;
+      final paint = Paint()..color = Colors.white.withOpacity(opacity);
+      canvas.drawCircle(Offset(dx, dy), radius, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _StarfieldPainter oldDelegate) => false;
+}
 
 const _avatarColors = [
   Color(0xFF00b4d8), Color(0xFFe63946), Color(0xFFf4a261),
@@ -198,8 +222,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       backgroundColor: const Color(0xFF080c14),
       body: SafeArea(
         child: Stack(children: [
-          // Zachte gloed i.p.v. platte kleur - dit is het allereerste scherm
-          // dat je ziet, dat mag iets uitnodigender aanvoelen dan een kaal vlak.
+          // Zachte gloed + een subtiel sterrenveld i.p.v. een kaal vlak -
+          // dit is het allereerste scherm dat je ziet en past bij "Nova".
           const Positioned.fill(
             child: DecoratedBox(
               decoration: BoxDecoration(
@@ -211,14 +235,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
           ),
+          const Positioned.fill(child: CustomPaint(painter: _StarfieldPainter())),
           _loading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF00b4d8)))
           : Center(
-              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              // Bij het grote logo past de inhoud niet altijd op kleinere
+              // vensters - scrollbaar i.p.v. te laten overlopen.
+              child: SingleChildScrollView(
+                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                 // Het bestand heeft best wat doorzichtige ruimte rond het
                 // eigenlijke beeldmerk, dus een royale hoogte om het logo zelf
                 // écht groot te doen ogen.
-                Image.asset('assets/logo.png', height: 340),
+                Image.asset('assets/logo.png', height: 680),
                 const SizedBox(height: 4),
                 const Text('Wie kijkt er?', style: TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w800)),
                 const SizedBox(height: 48),
@@ -235,7 +263,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   child: Text(_editing ? 'Klaar' : 'Profielen beheren',
                     style: TextStyle(color: _editing ? const Color(0xFF00b4d8) : Colors.grey, fontSize: 14)),
                 ),
-              ]),
+                ]),
+              ),
             ),
           if (Navigator.canPop(context))
             Positioned(
