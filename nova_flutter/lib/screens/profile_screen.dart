@@ -265,7 +265,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         spacing: 24, runSpacing: 24, alignment: WrapAlignment.center,
                         children: [
                           for (final profile in _profiles) _profileTile(profile),
-                          _addTile(),
+                          // Ook tonen als er nog geen enkel profiel is, anders
+                          // is er op een verse installatie geen zichtbare
+                          // manier om het allereerste profiel aan te maken.
+                          if (_editing || _profiles.isEmpty) _addTile(),
                         ],
                       ),
                       const SizedBox(height: 40),
