@@ -238,34 +238,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const Positioned.fill(child: CustomPaint(painter: _StarfieldPainter())),
           _loading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF00b4d8)))
-          : Center(
-              // Bij het grote logo past de inhoud niet altijd op kleinere
-              // vensters - scrollbaar i.p.v. te laten overlopen.
-              child: SingleChildScrollView(
-                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                // Het bestand heeft best wat doorzichtige ruimte rond het
-                // eigenlijke beeldmerk, dus een royale hoogte om het logo zelf
-                // écht groot te doen ogen.
-                Image.asset('assets/logo.png', height: 680),
-                const SizedBox(height: 4),
-                const Text('Wie kijkt er?', style: TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w800)),
-                const SizedBox(height: 48),
-                Wrap(
-                  spacing: 24, runSpacing: 24, alignment: WrapAlignment.center,
-                  children: [
-                    for (final profile in _profiles) _profileTile(profile),
-                    _addTile(),
-                  ],
+          // LayoutBuilder + minHeight i.p.v. gewoon Center: een Column
+          // binnenin een SingleChildScrollView krijgt onbegrensde hoogte,
+          // waardoor mainAxisAlignment/Center genegeerd wordt en alles naar
+          // boven schuift zodra het scrollbaar is - dit dwingt "centreer
+          // wanneer het past, scroll wanneer het niet past" af.
+          : LayoutBuilder(builder: (context, constraints) {
+              return SingleChildScrollView(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                  child: Center(
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      // Het bestand heeft best wat doorzichtige ruimte rond het
+                      // eigenlijke beeldmerk, dus een royale hoogte om het logo
+                      // zelf écht groot te doen ogen.
+                      Image.asset('assets/logo.png', height: 600),
+                      const SizedBox(height: 4),
+                      const Text('Wie kijkt er?', style: TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 48),
+                      Wrap(
+                        spacing: 24, runSpacing: 24, alignment: WrapAlignment.center,
+                        children: [
+                          for (final profile in _profiles) _profileTile(profile),
+                          _addTile(),
+                        ],
+                      ),
+                      const SizedBox(height: 40),
+                      TextButton(
+                        onPressed: () => setState(() => _editing = !_editing),
+                        child: Text(_editing ? 'Klaar' : 'Profielen beheren',
+                          style: TextStyle(color: _editing ? const Color(0xFF00b4d8) : Colors.grey, fontSize: 14)),
+                      ),
+                    ]),
+                  ),
                 ),
-                const SizedBox(height: 40),
-                TextButton(
-                  onPressed: () => setState(() => _editing = !_editing),
-                  child: Text(_editing ? 'Klaar' : 'Profielen beheren',
-                    style: TextStyle(color: _editing ? const Color(0xFF00b4d8) : Colors.grey, fontSize: 14)),
-                ),
-                ]),
-              ),
-            ),
+              );
+            }),
           if (Navigator.canPop(context))
             Positioned(
               top: 8, left: 8,
