@@ -1,100 +1,60 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
+import 'settings_service.dart';
 
+// Dunne client voor de eigen backend (momenteel enkel gebruikt voor de
+// profielen-API) - gebruikt bewust dezelfde adresresolutie en met/zonder
+// "/api"-prefix-aanpak als TmdbService, zodat dit werkt ongeacht hoe de
+// server precies voor je opgezet is.
 class ApiService {
-  static const _kServer = 'server_url';
-
-  // Verander dit naar het IP van je Debian server
-  static const String _defaultBase = 'http://192.168.1.100:8005';
-
-  static Future<String> get baseUrl async {
-    final p = await SharedPreferences.getInstance();
-    return p.getString(_kServer) ?? _defaultBase;
+  static Future<String> _base() async {
+    final raw = (await SettingsService.getBackendUrl()).trim();
+    return raw.isEmpty ? 'http://localhost:8000' : raw.replaceAll(RegExp(r'/$'), '');
   }
 
-  static Future<Map<String, String>> get _headers async => {
-    'Content-Type': 'application/json',
-  };
+  static List<String> _candidatePaths(String path) =>
+      path.startsWith('/api') ? [path, path.replaceFirst('/api', '')] : [path, '/api$path'];
 
-  static Future<dynamic> get(String path) async {
-    final base = await baseUrl;
-    final r = await http.get(Uri.parse('$base$path'), headers: await _headers);
-    if (r.statusCode == 200) return jsonDecode(r.body);
-    throw Exception('GET $path failed: ${r.statusCode}');
-  }
-
-  static Future<dynamic> post(String path, Map<String, dynamic> body) async {
-    final base = await baseUrl;
-    final r = await http.post(
-      Uri.parse('$base$path'),
-      headers: await _headers,
-      body: jsonEncode(body),
-    );
-    if (r.statusCode == 200) return jsonDecode(r.body);
-    throw Exception('POST $path failed: ${r.statusCode}');
-  }
-
-  static Future<dynamic> put(String path, Map<String, dynamic> body) async {
-    final base = await baseUrl;
-    final r = await http.put(
-      Uri.parse('$base$path'),
-      headers: await _headers,
-      body: jsonEncode(body),
-    );
-    if (r.statusCode == 200) return jsonDecode(r.body);
-    throw Exception('PUT $path failed: ${r.statusCode}');
-  }
-
-  static Future<dynamic> delete(String path) async {
-    final base = await baseUrl;
-    final r = await http.delete(Uri.parse('$base$path'), headers: await _headers);
-    if (r.statusCode == 200) return jsonDecode(r.body);
-    throw Exception('DELETE $path failed: ${r.statusCode}');
-  }
-
-  static Future<List> _getItems(String path) async {
-    final data = await get(path);
-    if (data is List) return data;
-    if (data is Map && data['items'] is List) return data['items'] as List;
-    return const [];
+  static Future<dynamic> _request(
+    String method,
+    String path, {
+    Map<String, dynamic>? body,
+  }) async {
+    final base = await _base();
+    String? lastError;
+    for (final p in _candidatePaths(path)) {
+      try {
+        final uri = Uri.parse('$base$p');
+        final headers = {'Content-Type': 'application/json'};
+        final http.Response r;
+        switch (method) {
+          case 'GET':
+            r = await http.get(uri, headers: headers).timeout(const Duration(seconds: 12));
+            break;
+          case 'POST':
+            r = await http.post(uri, headers: headers, body: jsonEncode(body ?? {})).timeout(const Duration(seconds: 12));
+            break;
+          case 'PUT':
+            r = await http.put(uri, headers: headers, body: jsonEncode(body ?? {})).timeout(const Duration(seconds: 12));
+            break;
+          case 'DELETE':
+            r = await http.delete(uri, headers: headers).timeout(const Duration(seconds: 12));
+            break;
+          default:
+            throw ArgumentError('Onbekende methode: $method');
+        }
+        if (r.statusCode == 200) return r.body.isEmpty ? null : jsonDecode(r.body);
+        lastError = '$method $p failed: ${r.statusCode}';
+      } catch (e) {
+        lastError = '$method $p failed: $e';
+        continue;
+      }
+    }
+    throw Exception(lastError ?? '$method $path failed');
   }
 
-  // --- TMDB ---
-  static Future<List> getTrending() async => await _getItems('/search/trending');
-  static Future<List> getPopularMovies() async => await _getItems('/search/popular/movies');
-  static Future<List> getPopularTv() async => await _getItems('/search/popular/tv');
-  static Future<List> searchMovies(String q, {int page = 1}) async {
-    final data = await get('/search/movie?q=${Uri.encodeComponent(q)}&page=$page');
-    return data['items'] as List;
-  }
-  static Future<List> searchTv(String q, {int page = 1}) async {
-    final data = await get('/search/tv?q=${Uri.encodeComponent(q)}&page=$page');
-    return data['items'] as List;
-  }
-  static Future<Map> getMovieDetail(int id) async => await get('/search/movie/$id') as Map;
-  static Future<Map> getTvDetail(int id) async => await get('/search/tv/$id') as Map;
-  static Future<List> getMovieCredits(int id) async => await get('/search/movie/$id/credits') as List;
-  static Future<List> getTvCredits(int id) async => await get('/search/tv/$id/credits') as List;
-  static Future<List> getSimilarMovies(int id) async => await get('/search/movie/$id/similar') as List;
-  static Future<List> getSimilarTv(int id) async => await get('/search/tv/$id/similar') as List;
-  static Future<Map> getSeason(int id, int season) async => await get('/search/tv/$id/season/$season') as Map;
-  static Future<List> getGenre(int genreId, String type, {int page = 1}) async {
-    final data = await get('/search/genre/$genreId?type=$type&page=$page');
-    return data['items'] as List;
-  }
-
-  // --- Debrid ---
-  static Future<String?> getStreamUrl(String query) async {
-    try {
-      final data = await get('/debrid/search?q=${Uri.encodeComponent(query)}');
-      return data['stream_url'] as String?;
-    } catch (_) { return null; }
-  }
-
-  // --- Settings ---
-  static Future<Map> getSettings() async => await get('/settings/') as Map;
-  static Future<void> saveSettings(Map<String, dynamic> s) async => await post('/settings/', s);
-  static Future<Map> testTmdb() async => await get('/settings/test/tmdb') as Map;
-  static Future<Map> testRd() async => await get('/settings/test/rd') as Map;
+  static Future<dynamic> get(String path) => _request('GET', path);
+  static Future<dynamic> post(String path, Map<String, dynamic> body) => _request('POST', path, body: body);
+  static Future<dynamic> put(String path, Map<String, dynamic> body) => _request('PUT', path, body: body);
+  static Future<dynamic> delete(String path) => _request('DELETE', path);
 }
