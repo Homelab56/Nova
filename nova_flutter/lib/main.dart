@@ -5,6 +5,23 @@ import 'screens/settings_screen.dart';
 import 'screens/profile_screen.dart';
 import 'services/settings_service.dart';
 
+String _keyName(LogicalKeyboardKey k) {
+  final known = {
+    LogicalKeyboardKey.arrowUp: 'arrowUp',
+    LogicalKeyboardKey.arrowDown: 'arrowDown',
+    LogicalKeyboardKey.arrowLeft: 'arrowLeft',
+    LogicalKeyboardKey.arrowRight: 'arrowRight',
+    LogicalKeyboardKey.select: 'select',
+    LogicalKeyboardKey.enter: 'enter',
+    LogicalKeyboardKey.numpadEnter: 'numpadEnter',
+    LogicalKeyboardKey.space: 'space',
+    LogicalKeyboardKey.goBack: 'goBack',
+    LogicalKeyboardKey.escape: 'escape',
+    LogicalKeyboardKey.gameButtonA: 'gameButtonA',
+  };
+  return known[k] ?? 'keyId=0x${k.keyId.toRadixString(16)}';
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
@@ -12,9 +29,12 @@ void main() async {
   // Tijdelijke diagnose voor de TV-afstandsbediening: logt elke ontvangen
   // toets + wie op dat moment focus heeft, zodat navigatieproblemen via
   // logcat te herleiden zijn i.p.v. te moeten gokken wat er precies gebeurt.
+  // debugName/debugLabel geven altijd null terug in een release-build (met
+  // opzet weggelaten door Flutter om de apk klein te houden), dus hier
+  // bewust build-mode-onafhankelijke velden gebruikt.
   HardwareKeyboard.instance.addHandler((event) {
-    debugPrint('[Nova][key] ${event.runtimeType} ${event.logicalKey.debugName} '
-      '| focus=${FocusManager.instance.primaryFocus?.debugLabel}');
+    debugPrint('[Nova][key] ${event.runtimeType} ${_keyName(event.logicalKey)} '
+      '| focus=${FocusManager.instance.primaryFocus?.context?.widget.runtimeType}');
     return false;
   });
   final configured = await SettingsService.isConfigured();

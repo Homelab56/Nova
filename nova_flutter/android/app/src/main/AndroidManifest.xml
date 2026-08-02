@@ -34,10 +34,5 @@
             </intent-filter>
         </activity>
         <meta-data android:name="flutterEmbedding" android:value="2"/>
-        <!-- Impeller/Vulkan (Flutter's nieuwe standaard renderer) geeft op
-             deze TV's chip merkbaar "Skipped X frames"-hapering, ook los van
-             videospelen - de oudere Skia/OpenGL-renderer werkt breder
-             betrouwbaar op zwakkere/embedded GPU's zoals in smart-TV's. -->
-        <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false"/>
     </application>
 </manifest>
