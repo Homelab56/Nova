@@ -371,10 +371,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   constraints: BoxConstraints(minHeight: constraints.maxHeight),
                   child: Center(
                     child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      // Het bestand heeft best wat doorzichtige ruimte rond het
-                      // eigenlijke beeldmerk, dus een royale hoogte om het logo
-                      // zelf écht groot te doen ogen.
-                      Image.asset('assets/logo.png', height: 600),
+                      // Twee losse afbeeldingen i.p.v. één grote gecombineerde
+                      // logo.png - op een TV bleek enkel de onderste helft
+                      // (de "NOVA"-tekst) te renderen en het bovenste
+                      // N-beeldmerk gewoon te ontbreken, ook al was het
+                      // bestand zelf perfect in orde. Apart tonen is minder
+                      // gevoelig voor wat daar ook de oorzaak van was.
+                      Image.asset('assets/logo_mark.png', height: 300),
+                      const SizedBox(height: 16),
+                      Image.asset('assets/logo_text.png', height: 184),
                       const SizedBox(height: 4),
                       const Text('Wie kijkt er?', style: TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w800)),
                       const SizedBox(height: 48),

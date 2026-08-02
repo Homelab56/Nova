@@ -97,14 +97,20 @@ class _WatchScreenState extends State<WatchScreen> {
     // beeld).
     _controller = VideoController(_player);
     // Ruimere netwerkbuffer zodat streamen van een externe (Real-Debrid) URL
-    // niet steeds hapert bij kleine snelheidsschommelingen.
+    // niet steeds hapert bij kleine snelheidsschommelingen. Op Android is dit
+    // veel te zwaar: logcat op een Shield toonde de systeem-lowmemorykiller
+    // Nova (én de TV-launcher én de Chromecast-service) tegelijk afschieten
+    // vlak na het starten van een 4K-bron, met tot 512+64MiB aan buffers
+    // bovenop decodeerbuffers en de rest van het toestel se geheugengebruik.
+    // Op de zwakkere Philips (minder geheugen, geen harde kill maar wel
+    // constante druk) verklaart dat vermoedelijk ook de aanhoudende traagheid.
     final native = _player.platform;
     if (native is NativePlayer) {
       native.setProperty('cache', 'yes');
-      native.setProperty('cache-secs', '120');
-      native.setProperty('demuxer-max-bytes', '512MiB');
-      native.setProperty('demuxer-max-back-bytes', '64MiB');
-      native.setProperty('demuxer-readahead-secs', '60');
+      native.setProperty('cache-secs', Platform.isAndroid ? '30' : '120');
+      native.setProperty('demuxer-max-bytes', Platform.isAndroid ? '96MiB' : '512MiB');
+      native.setProperty('demuxer-max-back-bytes', Platform.isAndroid ? '16MiB' : '64MiB');
+      native.setProperty('demuxer-readahead-secs', Platform.isAndroid ? '20' : '60');
       native.setProperty('network-timeout', '30');
       // Hardware-decodering: zonder dit decodeert mpv HEVC/4K+ bronnen op de
       // CPU, wat op hoge resolutie tot haperend beeld leidt ondanks vlotte audio.
