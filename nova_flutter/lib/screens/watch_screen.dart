@@ -57,6 +57,9 @@ class _WatchScreenState extends State<WatchScreen> {
   Map? _savedProgress;
   int? _rating;
   final _scrollCtrl = ScrollController();
+  final FocusNode _playFocus = FocusNode();
+  final FocusNode _sourcesFocus = FocusNode();
+  final FocusNode _watchlistFocus = FocusNode();
 
   @override
   void initState() {
@@ -558,44 +561,56 @@ class _WatchScreenState extends State<WatchScreen> {
       const SizedBox(height: 18),
       Row(children: [
         if (isMovie)
-          ElevatedButton.icon(
-            onPressed: _loadingStream ? null : () => _play(),
-            icon: _loadingStream
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-              : const Icon(Icons.play_arrow, size: 20),
-            label: Text(_loadingStream ? 'Laden...' : 'Afspelen'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _isAvailable == true ? const Color(0xFF00b4d8) : Colors.white,
-              foregroundColor: _isAvailable == true ? Colors.white : Colors.black,
-              textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+          _focusRing(
+            focusNode: _playFocus,
+            child: ElevatedButton.icon(
+              focusNode: _playFocus,
+              onPressed: _loadingStream ? null : () => _play(),
+              icon: _loadingStream
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                : const Icon(Icons.play_arrow, size: 20),
+              label: Text(_loadingStream ? 'Laden...' : 'Afspelen'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _isAvailable == true ? const Color(0xFF00b4d8) : Colors.white,
+                foregroundColor: _isAvailable == true ? Colors.white : Colors.black,
+                textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+              ),
             ),
           ),
         if (isMovie) ...[
           const SizedBox(width: 12),
-          OutlinedButton.icon(
-            onPressed: _loadingStream ? null : () => _pickSource(),
-            icon: const Icon(Icons.dns_outlined, size: 18, color: Colors.white),
-            label: const Text('Bronnen', style: TextStyle(color: Colors.white, fontSize: 15)),
-            style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: Colors.white54),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          _focusRing(
+            focusNode: _sourcesFocus,
+            child: OutlinedButton.icon(
+              focusNode: _sourcesFocus,
+              onPressed: _loadingStream ? null : () => _pickSource(),
+              icon: const Icon(Icons.dns_outlined, size: 18, color: Colors.white),
+              label: const Text('Bronnen', style: TextStyle(color: Colors.white, fontSize: 15)),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Colors.white54),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+              ),
             ),
           ),
         ],
         const SizedBox(width: 12),
-        OutlinedButton.icon(
-          onPressed: _toggleWatchlist,
-          icon: Icon(_inWatchlist ? Icons.bookmark : Icons.bookmark_outline, size: 18,
-            color: _inWatchlist ? const Color(0xFF00b4d8) : Colors.white),
-          label: Text(_inWatchlist ? 'In watchlist' : '+ Watchlist',
-            style: TextStyle(color: _inWatchlist ? const Color(0xFF00b4d8) : Colors.white, fontSize: 15)),
-          style: OutlinedButton.styleFrom(
-            side: BorderSide(color: _inWatchlist ? const Color(0xFF00b4d8) : Colors.white54),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+        _focusRing(
+          focusNode: _watchlistFocus,
+          child: OutlinedButton.icon(
+            focusNode: _watchlistFocus,
+            onPressed: _toggleWatchlist,
+            icon: Icon(_inWatchlist ? Icons.bookmark : Icons.bookmark_outline, size: 18,
+              color: _inWatchlist ? const Color(0xFF00b4d8) : Colors.white),
+            label: Text(_inWatchlist ? 'In watchlist' : '+ Watchlist',
+              style: TextStyle(color: _inWatchlist ? const Color(0xFF00b4d8) : Colors.white, fontSize: 15)),
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: _inWatchlist ? const Color(0xFF00b4d8) : Colors.white54),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            ),
           ),
         ),
       ]),
@@ -989,6 +1004,25 @@ class _WatchScreenState extends State<WatchScreen> {
     return const [];
   }
 
+  // Zichtbare focus-ring rond de Afspelen/Bronnen/Watchlist-knoppen -
+  // Material's ingebouwde focus-highlight bleek op de TV amper zichtbaar.
+  Widget _focusRing({required FocusNode focusNode, required Widget child}) {
+    return AnimatedBuilder(
+      animation: focusNode,
+      builder: (context, c) {
+        final focused = focusNode.hasFocus;
+        return Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: focused ? const Color(0xFF00b4d8) : Colors.transparent, width: 3),
+          ),
+          child: c,
+        );
+      },
+      child: child,
+    );
+  }
+
   Widget _trackButton(IconData icon, VoidCallback onTap, String tooltip, {bool autofocus = false}) {
     return Tooltip(
       message: tooltip,
@@ -1013,6 +1047,9 @@ class _WatchScreenState extends State<WatchScreen> {
   void dispose() {
     _player.dispose();
     _scrollCtrl.dispose();
+    _playFocus.dispose();
+    _sourcesFocus.dispose();
+    _watchlistFocus.dispose();
     super.dispose();
   }
 

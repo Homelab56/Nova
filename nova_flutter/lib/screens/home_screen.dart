@@ -64,6 +64,8 @@ class _HomeScreenState extends State<HomeScreen> {
   // met de hero-banner, waardoor Flutter's automatische "dichtstbijzijnde
   // widget in die richting"-zoektocht dit niet betrouwbaar zelf vindt.
   final List<FocusNode> _navFocusNodes = List.generate(6, (_) => FocusNode());
+  final FocusNode _heroPlayFocus = FocusNode();
+  final FocusNode _heroWatchlistFocus = FocusNode();
 
   @override
   void initState() {
@@ -81,6 +83,8 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _heroTimer?.cancel();
     for (final n in _navFocusNodes) { n.dispose(); }
+    _heroPlayFocus.dispose();
+    _heroWatchlistFocus.dispose();
     super.dispose();
   }
 
@@ -413,6 +417,26 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // Zichtbare focus-ring rond knoppen met een eigen (soms witte) achtergrond,
+  // waar een gekleurde overlay niet zou opvallen - Material's ingebouwde
+  // focus-highlight bleek op de TV amper zichtbaar, net als bij de navigatie.
+  Widget _focusRing({required FocusNode focusNode, required Widget child}) {
+    return AnimatedBuilder(
+      animation: focusNode,
+      builder: (context, c) {
+        final focused = focusNode.hasFocus;
+        return Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: focused ? const Color(0xFF00b4d8) : Colors.transparent, width: 3),
+          ),
+          child: c,
+        );
+      },
+      child: child,
+    );
+  }
+
   Widget _buildNavBtn(String label, int index) {
     final bool active = _tab == index;
     // InkWell's ingebouwde focusColor-overlay bleek in de praktijk op de TV
@@ -544,25 +568,33 @@ class _HomeScreenState extends State<HomeScreen> {
                   return KeyEventResult.ignored;
                 },
                 child: Row(children: [
-                ElevatedButton.icon(
-                  onPressed: () => _openWatch(item),
-                  icon: const Icon(Icons.play_arrow, size: 20),
-                  label: const Text('Afspelen'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white, foregroundColor: Colors.black,
-                    textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14)),
+                _focusRing(
+                  focusNode: _heroPlayFocus,
+                  child: ElevatedButton.icon(
+                    focusNode: _heroPlayFocus,
+                    onPressed: () => _openWatch(item),
+                    icon: const Icon(Icons.play_arrow, size: 20),
+                    label: const Text('Afspelen'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white, foregroundColor: Colors.black,
+                      textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14)),
+                  ),
                 ),
                 const SizedBox(width: 12),
-                OutlinedButton.icon(
-                  onPressed: () => UserDataService.addToWatchlist(Map<String, dynamic>.from(item)),
-                  icon: const Icon(Icons.add, size: 18, color: Colors.white),
-                  label: const Text('Watchlist', style: TextStyle(color: Colors.white, fontSize: 15)),
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: Colors.white54),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14)),
+                _focusRing(
+                  focusNode: _heroWatchlistFocus,
+                  child: OutlinedButton.icon(
+                    focusNode: _heroWatchlistFocus,
+                    onPressed: () => UserDataService.addToWatchlist(Map<String, dynamic>.from(item)),
+                    icon: const Icon(Icons.add, size: 18, color: Colors.white),
+                    label: const Text('Watchlist', style: TextStyle(color: Colors.white, fontSize: 15)),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.white54),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14)),
+                  ),
                 ),
               ]),
               ),
