@@ -68,6 +68,19 @@ class _WatchScreenState extends State<WatchScreen> {
   final FocusNode _playerSourceFocus = FocusNode();
   final List<FocusNode> _starFocusNodes = List.generate(3, (_) => FocusNode());
   bool _endRatingPromptShown = false;
+  // Terug-knop en bron/audio/ondertitels-rij verdwijnen na een paar seconden
+  // inactiviteit i.p.v. constant over de video te blijven staan - net als
+  // bij elke andere videospeler, en verschijnen weer bij de minste interactie.
+  bool _controlsVisible = true;
+  Timer? _controlsHideTimer;
+
+  void _showControlsBriefly() {
+    setState(() => _controlsVisible = true);
+    _controlsHideTimer?.cancel();
+    _controlsHideTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted) setState(() => _controlsVisible = false);
+    });
+  }
   String? _seekIndicator;
   Timer? _seekIndicatorTimer;
 
@@ -790,6 +803,18 @@ class _WatchScreenState extends State<WatchScreen> {
     });
   }
 
+  // "Terug" tijdens het afspelen sluit enkel de speler en toont opnieuw het
+  // scherm met titel/omschrijving/rangschikking - niet de hele detailpagina
+  // verlaten, dat voelde niet als "terug" maar als "weg".
+  void _handleBack() {
+    if (_showPlayer) {
+      _player.pause();
+      setState(() => _showPlayer = false);
+    } else {
+      Navigator.pop(context);
+    }
+  }
+
   void _togglePlayPause() {
     if (_player.state.playing) {
       _player.pause();
@@ -964,6 +989,7 @@ class _WatchScreenState extends State<WatchScreen> {
         _status = '';
         _showPlayer = true;
       });
+      _showControlsBriefly();
     }
   }
 
@@ -1139,6 +1165,7 @@ class _WatchScreenState extends State<WatchScreen> {
     _playerSourceFocus.dispose();
     for (final n in _starFocusNodes) { n.dispose(); }
     _seekIndicatorTimer?.cancel();
+    _controlsHideTimer?.cancel();
     super.dispose();
   }
 
@@ -1148,7 +1175,15 @@ class _WatchScreenState extends State<WatchScreen> {
     final poster = widget.media['poster_path'];
     final seasons = (_detail?['seasons'] as List?)?.where((s) => (s['season_number'] as int) > 0).toList() ?? [];
 
-    return Scaffold(
+    return PopScope<void>(
+      // Tijdens het afspelen vangt dit ook de fysieke/afstandsbediening-
+      // terugknop op (niet enkel het pijltje in beeld) - anders verlaat die
+      // meteen de hele pagina i.p.v. eerst gewoon de speler te sluiten.
+      canPop: !_showPlayer,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) _handleBack();
+      },
+      child: Scaffold(
       backgroundColor: const Color(0xFF080c14),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -1195,6 +1230,7 @@ class _WatchScreenState extends State<WatchScreen> {
                               focusNode: _playerAreaFocus,
                               onKeyEvent: (node, event) {
                                 if (event is! KeyDownEvent) return KeyEventResult.ignored;
+                                _showControlsBriefly();
                                 if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
                                   _seek(-10);
                                   return KeyEventResult.handled;
@@ -1241,27 +1277,43 @@ class _WatchScreenState extends State<WatchScreen> {
                               ),
                             Positioned(
                               top: 8, right: 8,
-                              child: Focus(
-                                canRequestFocus: false,
-                                skipTraversal: true,
-                                onKeyEvent: (node, event) {
-                                  if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowDown) {
-                                    _playerAreaFocus.requestFocus();
-                                    return KeyEventResult.handled;
-                                  }
-                                  return KeyEventResult.ignored;
-                                },
-                                child: Row(children: [
-                                  _trackButton(Icons.dns_outlined, () => _pickSource(episode: _currentEpisode), 'Andere bron', focusNode: _playerSourceFocus),
-                                  if (_hasSelectableTracks(_tracks.audio)) ...[
-                                    const SizedBox(width: 8),
-                                    _trackButton(Icons.multitrack_audio, _pickAudioTrack, 'Audio'),
-                                  ],
-                                  if (_hasSelectableTracks(_tracks.subtitle)) ...[
-                                    const SizedBox(width: 8),
-                                    _trackButton(Icons.subtitles, _pickSubtitleTrack, 'Ondertitels'),
-                                  ],
-                                ]),
+                              // Verdwijnt na een paar seconden inactiviteit
+                              // i.p.v. constant over de video te blijven
+                              // staan - net als bij elke andere speler.
+                              // Enkel de aanraakbaarheid met de muis wordt
+                              // genegeerd zolang onzichtbaar; D-pad-focus
+                              // blijft gewoon werken (IgnorePointer raakt
+                              // enkel pointer-hittesting, geen toetsenbord).
+                              child: AnimatedOpacity(
+                                opacity: _controlsVisible ? 1 : 0,
+                                duration: const Duration(milliseconds: 250),
+                                child: IgnorePointer(
+                                  ignoring: !_controlsVisible,
+                                  child: Focus(
+                                    canRequestFocus: false,
+                                    skipTraversal: true,
+                                    onKeyEvent: (node, event) {
+                                      if (event is! KeyDownEvent) return KeyEventResult.ignored;
+                                      _showControlsBriefly();
+                                      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                                        _playerAreaFocus.requestFocus();
+                                        return KeyEventResult.handled;
+                                      }
+                                      return KeyEventResult.ignored;
+                                    },
+                                    child: Row(children: [
+                                      _trackButton(Icons.dns_outlined, () => _pickSource(episode: _currentEpisode), 'Andere bron', focusNode: _playerSourceFocus),
+                                      if (_hasSelectableTracks(_tracks.audio)) ...[
+                                        const SizedBox(width: 8),
+                                        _trackButton(Icons.multitrack_audio, _pickAudioTrack, 'Audio'),
+                                      ],
+                                      if (_hasSelectableTracks(_tracks.subtitle)) ...[
+                                        const SizedBox(width: 8),
+                                        _trackButton(Icons.subtitles, _pickSubtitleTrack, 'Ondertitels'),
+                                      ],
+                                    ]),
+                                  ),
+                                ),
                               ),
                             ),
                           ]),
@@ -1271,15 +1323,24 @@ class _WatchScreenState extends State<WatchScreen> {
                     // Terugknop moet hier ook beschikbaar zijn - eerder was
                     // die enkel zichtbaar vóór het afspelen start (hero/
                     // laadscherm), maar verdween zodra de video echt speelt.
+                    // Zelfde auto-verberg-gedrag als de bron/audio/
+                    // ondertitels-knoppen hierboven.
                     Positioned(
                       top: 16, left: 16,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(24),
-                        onTap: () => Navigator.pop(context),
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
-                          child: const Icon(Icons.arrow_back, color: Colors.white, size: 22),
+                      child: AnimatedOpacity(
+                        opacity: _controlsVisible ? 1 : 0,
+                        duration: const Duration(milliseconds: 250),
+                        child: IgnorePointer(
+                          ignoring: !_controlsVisible,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(24),
+                            onTap: _handleBack,
+                            child: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                              child: const Icon(Icons.arrow_back, color: Colors.white, size: 22),
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -1499,6 +1560,7 @@ class _WatchScreenState extends State<WatchScreen> {
             ],
           ),
         ),
+      ),
       ),
     );
   }
