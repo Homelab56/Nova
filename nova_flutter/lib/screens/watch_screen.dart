@@ -519,7 +519,14 @@ class _WatchScreenState extends State<WatchScreen> {
     await _tryStartProcess('cmd', ['/c', 'start', '', '"$url"']);
   }
 
-  bool get isMovie => widget.media['title'] != null && widget.media['first_air_date'] == null;
+  // Sommige meegegeven media-data (bv. een oude rangschikking die ooit met
+  // het foute media_type werd opgeslagen) kan zeggen "film" terwijl TMDB het
+  // als serie kent of omgekeerd - _loadDetails() zet dit recht zodra de TMDB-
+  // aanroep met het aangenomen type mislukt, zodat de Afspelen-knop niet
+  // stilletjes verdwijnt.
+  bool? _mediaTypeOverride;
+  bool get isMovie => _mediaTypeOverride ??
+    (widget.media['title'] != null && widget.media['first_air_date'] == null);
   String get title => widget.media['title'] ?? widget.media['name'] ?? '';
   String get year {
     final d = (widget.media['release_date'] ?? widget.media['first_air_date'] ?? '') as String;
@@ -731,12 +738,30 @@ class _WatchScreenState extends State<WatchScreen> {
       return;
     }
 
-    final type = isMovie ? 'movie' : 'tv';
-    final results = await Future.wait([
-      isMovie ? TmdbService.getMovieDetail(id) : TmdbService.getTvDetail(id),
-      TmdbService.getCredits(id, type),
-      TmdbService.getSimilar(id, type),
-    ]);
+    final assumedIsMovie = isMovie;
+    List results;
+    try {
+      results = await Future.wait([
+        assumedIsMovie ? TmdbService.getMovieDetail(id) : TmdbService.getTvDetail(id),
+        TmdbService.getCredits(id, assumedIsMovie ? 'movie' : 'tv'),
+        TmdbService.getSimilar(id, assumedIsMovie ? 'movie' : 'tv'),
+      ]);
+    } catch (_) {
+      // Aangenomen type klopte niet - probeer het andere type i.p.v. hier
+      // stil vast te lopen (en daardoor bv. de Afspelen-knop nooit te tonen
+      // als dit eigenlijk wél een film bleek).
+      final correctedIsMovie = !assumedIsMovie;
+      results = await Future.wait([
+        correctedIsMovie ? TmdbService.getMovieDetail(id) : TmdbService.getTvDetail(id),
+        TmdbService.getCredits(id, correctedIsMovie ? 'movie' : 'tv'),
+        TmdbService.getSimilar(id, correctedIsMovie ? 'movie' : 'tv'),
+      ]);
+      if (mounted) setState(() => _mediaTypeOverride = correctedIsMovie);
+      // Liep initState() al mis met het foute type, dan is de beschikbaar-
+      // heidscheck voor een film toen overgeslagen - alsnog inhalen.
+      if (correctedIsMovie) _checkAvailability();
+    }
+    if (!mounted) return;
     setState(() {
       _detail = results[0] as Map;
       _cast = results[1] as List;
@@ -1196,7 +1221,13 @@ class _WatchScreenState extends State<WatchScreen> {
                 Container(
                   width: double.infinity,
                   color: Colors.black,
-                  child: Stack(alignment: Alignment.center, children: [
+                  // Muisbeweging telt ook als interactie voor de auto-
+                  // verberg-timer van de knoppen - zonder dit verdwijnen ze
+                  // na 4s en komen ze nooit meer terug voor een muisgebruiker
+                  // (toetsenbord-navigatie ververst de timer al apart).
+                  child: MouseRegion(
+                    onHover: (_) => _showControlsBriefly(),
+                    child: Stack(alignment: Alignment.center, children: [
                     // Wazige, gedimde achtergrond op basis van de eigen
                     // backdrop i.p.v. kale zwarte leegte rond de (met opzet
                     // smallere) speler.
@@ -1345,6 +1376,7 @@ class _WatchScreenState extends State<WatchScreen> {
                       ),
                     ),
                   ]),
+                  ),
                 )
               else if (_loadingStream)
                 // Duidelijk laadscherm i.p.v. enkel een klein statuszinnetje
