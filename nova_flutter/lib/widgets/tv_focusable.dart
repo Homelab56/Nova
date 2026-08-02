@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 // Maakt een willekeurige tegel/kaart bedienbaar met een afstandsbediening
-// (D-pad + "OK"/Enter/Space activeert de tap) met een duidelijke witte
-// focus-ring + lichte vergroting, en scrollt zichzelf in beeld zodra hij
-// focus krijgt. Gewone GestureDetectors hebben geen toetsenbord-/D-pad-
-// ondersteuning, dus zonder dit heeft een afstandsbediening niets om
-// naartoe te bewegen in rijen zoals de posterlijsten.
+// (D-pad + "OK"/Enter/Space activeert de tap) met een subtiele focus-gloed
+// + lichte vergroting, en scrollt zichzelf in beeld zodra hij focus krijgt.
+// Gewone GestureDetectors hebben geen toetsenbord-/D-pad-ondersteuning, dus
+// zonder dit heeft een afstandsbediening niets om naartoe te bewegen in
+// rijen zoals de posterlijsten.
 class TvFocusable extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
@@ -53,16 +53,16 @@ class _TvFocusableState extends State<TvFocusable> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedScale(
-          scale: _focused ? 1.08 : 1.0,
+          scale: _focused ? 1.04 : 1.0,
           duration: const Duration(milliseconds: 120),
           curve: Curves.easeOut,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
             decoration: BoxDecoration(
               borderRadius: widget.borderRadius,
-              border: Border.all(color: _focused ? Colors.white : Colors.transparent, width: 3),
+              border: Border.all(color: _focused ? Colors.white70 : Colors.transparent, width: 2),
               boxShadow: _focused
-                ? [BoxShadow(color: Colors.white.withOpacity(0.55), blurRadius: 16, spreadRadius: 1)]
+                ? [BoxShadow(color: Colors.white.withOpacity(0.25), blurRadius: 8)]
                 : const [],
             ),
             child: widget.child,
