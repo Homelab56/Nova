@@ -62,18 +62,14 @@ class _WatchScreenState extends State<WatchScreen> {
   void initState() {
     super.initState();
     _player = Player();
-    // Standaard (vo=gpu + hwdec=auto-safe) laat de hardware-decoder wél
-    // decoderen maar kopieert elk beeld nog terug naar een gewone GPU-
-    // textuur omdat "gpu" geen rechtstreekse Android Surface begrijpt - op
-    // een zwakkere TV-chip is die kopie per beeld duur genoeg om zichtbaar
-    // te haperen. mediacodec_embed laat mpv rechtstreeks op de Android
-    // Surface tekenen (geen kopie), wat op Android veel lichter is.
-    _controller = VideoController(
-      _player,
-      configuration: Platform.isAndroid
-        ? const VideoControllerConfiguration(vo: 'mediacodec_embed', hwdec: 'mediacodec')
-        : const VideoControllerConfiguration(),
-    );
+    // mediacodec_embed (rechtstreeks op de Android Surface tekenen, geen
+    // kopie) leek een logische snelheidswinst, maar bleek op deze TV-chip
+    // de Codec2-bufferqueue helemaal vast te laten lopen (duizenden
+    // opeenvolgende dequeue-fouts in de log, stream laadt dan nooit) - erger
+    // dan de kopie die we probeerden te vermijden. Terug naar de standaard
+    // vo=gpu + hwdec=auto-safe, die wél werkt (zij het met een kopie per
+    // beeld).
+    _controller = VideoController(_player);
     // Ruimere netwerkbuffer zodat streamen van een externe (Real-Debrid) URL
     // niet steeds hapert bij kleine snelheidsschommelingen.
     final native = _player.platform;
@@ -84,14 +80,9 @@ class _WatchScreenState extends State<WatchScreen> {
       native.setProperty('demuxer-max-back-bytes', '64MiB');
       native.setProperty('demuxer-readahead-secs', '60');
       native.setProperty('network-timeout', '30');
-      if (!Platform.isAndroid) {
-        // Op Android wordt hwdec al via VideoControllerConfiguration hierboven
-        // gezet (mediacodec, niet auto-safe) - dit zou dat overschrijven.
-        // Hardware-decodering: zonder dit decodeert mpv HEVC/4K+ bronnen op
-        // de CPU, wat op hoge resolutie tot haperend beeld leidt ondanks
-        // vlotte audio.
-        native.setProperty('hwdec', 'auto-safe');
-      }
+      // Hardware-decodering: zonder dit decodeert mpv HEVC/4K+ bronnen op de
+      // CPU, wat op hoge resolutie tot haperend beeld leidt ondanks vlotte audio.
+      native.setProperty('hwdec', 'auto-safe');
     }
     _loadDetails();
     _checkWatchlist();

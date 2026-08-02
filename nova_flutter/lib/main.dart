@@ -9,6 +9,14 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
+  // Tijdelijke diagnose voor de TV-afstandsbediening: logt elke ontvangen
+  // toets + wie op dat moment focus heeft, zodat navigatieproblemen via
+  // logcat te herleiden zijn i.p.v. te moeten gokken wat er precies gebeurt.
+  HardwareKeyboard.instance.addHandler((event) {
+    debugPrint('[Nova][key] ${event.runtimeType} ${event.logicalKey.debugName} '
+      '| focus=${FocusManager.instance.primaryFocus?.debugLabel}');
+    return false;
+  });
   final configured = await SettingsService.isConfigured();
   runApp(NovaApp(startOnSettings: !configured));
 }
