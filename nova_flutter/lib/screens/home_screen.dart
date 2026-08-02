@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../services/tmdb_service.dart';
 import '../services/debrid_service.dart';
 import '../services/userdata_service.dart';
@@ -58,6 +59,11 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _loading = true;
   int _heroIndex = 0;
   Timer? _heroTimer;
+  // Eén per navigatietab, zodat "omhoog" vanuit de hero/eerste rij hier
+  // altijd expliciet naartoe kan springen - de koptekst overlapt visueel
+  // met de hero-banner, waardoor Flutter's automatische "dichtstbijzijnde
+  // widget in die richting"-zoektocht dit niet betrouwbaar zelf vindt.
+  final List<FocusNode> _navFocusNodes = List.generate(6, (_) => FocusNode());
 
   @override
   void initState() {
@@ -74,6 +80,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _heroTimer?.cancel();
+    for (final n in _navFocusNodes) { n.dispose(); }
     super.dispose();
   }
 
@@ -299,12 +306,13 @@ class _HomeScreenState extends State<HomeScreen> {
               child: CustomScrollView(
                 slivers: [
                   if (_heroItems.isNotEmpty) SliverToBoxAdapter(child: _buildHeroCarousel()),
-                  ..._rows.map((r) => SliverToBoxAdapter(
-                    child: _buildRow(r['title'] as String, r['items'] as List,
-                      isRd: r['is_rd'] == true,
-                      isProgress: r['is_progress'] == true,
-                      isRanked: r['is_ranked'] == true,
-                      path: r['path'] as String?))),
+                  ..._rows.asMap().entries.map((entry) => SliverToBoxAdapter(
+                    child: _buildRow(entry.value['title'] as String, entry.value['items'] as List,
+                      isRd: entry.value['is_rd'] == true,
+                      isProgress: entry.value['is_progress'] == true,
+                      isRanked: entry.value['is_ranked'] == true,
+                      isFirstRow: entry.key == 0 && _heroItems.isEmpty,
+                      path: entry.value['path'] as String?))),
                   const SliverToBoxAdapter(child: SizedBox(height: 50)),
                 ],
               ),
@@ -412,6 +420,7 @@ class _HomeScreenState extends State<HomeScreen> {
       // bediening meteen iets heeft om vanaf te vertrekken i.p.v. dat er
       // nergens focus staat bij het openen van het scherm.
       autofocus: index == 0,
+      focusNode: _navFocusNodes[index],
       focusColor: Colors.white24,
       onTap: () {
         if (index == 5) {
@@ -505,7 +514,20 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ],
               const SizedBox(height: 20),
-              Row(children: [
+              // Focus i.p.v. focusbaar zelf: onderschept enkel "omhoog"
+              // vanuit de knoppen eronder en stuurt die expliciet naar de
+              // actieve navigatietab, want die overlapt hier visueel mee.
+              Focus(
+                canRequestFocus: false,
+                skipTraversal: true,
+                onKeyEvent: (node, event) {
+                  if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowUp) {
+                    _navFocusNodes[_tab].requestFocus();
+                    return KeyEventResult.handled;
+                  }
+                  return KeyEventResult.ignored;
+                },
+                child: Row(children: [
                 ElevatedButton.icon(
                   onPressed: () => _openWatch(item),
                   icon: const Icon(Icons.play_arrow, size: 20),
@@ -527,13 +549,14 @@ class _HomeScreenState extends State<HomeScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14)),
                 ),
               ]),
+              ),
             ])),
         ]),
       ),
     );
   }
 
-  Widget _buildRow(String title, List items, {bool isRd = false, bool isProgress = false, bool isRanked = false, String? path}) {
+  Widget _buildRow(String title, List items, {bool isRd = false, bool isProgress = false, bool isRanked = false, String? path, bool isFirstRow = false}) {
     if (items.isEmpty) return const SizedBox.shrink();
     return MediaRow(
       title: title,
@@ -544,15 +567,15 @@ class _HomeScreenState extends State<HomeScreen> {
       onSeeAll: path == null ? null : () => Navigator.push(context, MaterialPageRoute(
         builder: (_) => CategoryScreen(title: title, path: path))),
       itemBuilder: (_, i) => isRanked
-        ? _buildRankedCard(items[i], i + 1)
-        : _buildCard(items[i], isRd: isRd, isProgress: isProgress),
+        ? _buildRankedCard(items[i], i + 1, isFirstRow: isFirstRow)
+        : _buildCard(items[i], isRd: isRd, isProgress: isProgress, isFirstRow: isFirstRow),
     );
   }
 
   // Netflix-achtige "Top 10" kaart. Rang "10" krijgt een bredere cijfer-zone
   // dan 1-9 (2 tekens i.p.v. 1) zodat beide cijfers altijd volledig leesbaar
   // blijven i.p.v. dat de poster het merendeel van "10" wegneemt.
-  Widget _buildRankedCard(Map item, int rank) {
+  Widget _buildRankedCard(Map item, int rank, {bool isFirstRow = false}) {
     final poster = item['poster_path'] as String?;
     final title = item['title'] ?? item['name'] ?? '';
     const posterWidth = 165.0;
@@ -568,6 +591,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final double numBoxWidth = rank >= 10 ? 250 : 170;
     final double cardWidth = numVisible + posterWidth;
     return TvFocusable(
+      escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
       onTap: () => _openWatch(item),
       child: Container(
         width: cardWidth,
@@ -649,7 +673,7 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _progress.removeWhere((p) => p['id'] == item['id']));
   }
 
-  Widget _buildCard(Map item, {bool isRd = false, bool isProgress = false}) {
+  Widget _buildCard(Map item, {bool isRd = false, bool isProgress = false, bool isFirstRow = false}) {
     final poster = item['poster_path'] as String?;
     final backdrop = item['backdrop_path'] as String?;
     final title = item['title'] ?? item['name'] ?? item['filename'] ?? '';
@@ -661,6 +685,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final double progress = (item['current_time'] ?? 0) / (item['duration'] ?? 1);
 
       return TvFocusable(
+        escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
         onTap: () => _openWatch(item, autoResume: true),
         child: Container(
           width: 230, margin: const EdgeInsets.symmetric(horizontal: 5),
@@ -692,6 +717,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return TvFocusable(
+      escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
       onTap: () => _openWatch(item),
       child: Container(
         width: 168, margin: const EdgeInsets.symmetric(horizontal: 6),

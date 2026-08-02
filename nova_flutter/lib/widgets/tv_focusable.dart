@@ -12,12 +12,20 @@ class TvFocusable extends StatefulWidget {
   final VoidCallback? onTap;
   final BorderRadius borderRadius;
   final bool autofocus;
+  // Sommige schermdelen overlappen elkaar visueel (bv. de doorschijnende
+  // koptekst bovenop de hero-banner), waardoor Flutter's automatische
+  // "dichtstbijzijnde focusbare widget in deze richting"-logica soms niet
+  // betrouwbaar de koptekst terugvindt vanuit het bovenste rij-item. Geef
+  // hier een FocusNode op om "omhoog" vanaf dit item altijd expliciet naar
+  // over te springen i.p.v. te vertrouwen op die automatische zoektocht.
+  final FocusNode? escapeUp;
   const TvFocusable({
     super.key,
     required this.child,
     this.onTap,
     this.borderRadius = const BorderRadius.all(Radius.circular(10)),
     this.autofocus = false,
+    this.escapeUp,
   });
 
   @override
@@ -39,14 +47,19 @@ class _TvFocusableState extends State<TvFocusable> {
         }
       },
       onKeyEvent: (node, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-             event.logicalKey == LogicalKeyboardKey.enter ||
-             event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-             event.logicalKey == LogicalKeyboardKey.space ||
-             event.logicalKey == LogicalKeyboardKey.gameButtonA)) {
-          widget.onTap?.call();
-          return KeyEventResult.handled;
+        if (event is KeyDownEvent) {
+          if (widget.escapeUp != null && event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            widget.escapeUp!.requestFocus();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.select ||
+              event.logicalKey == LogicalKeyboardKey.enter ||
+              event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+              event.logicalKey == LogicalKeyboardKey.space ||
+              event.logicalKey == LogicalKeyboardKey.gameButtonA) {
+            widget.onTap?.call();
+            return KeyEventResult.handled;
+          }
         }
         return KeyEventResult.ignored;
       },

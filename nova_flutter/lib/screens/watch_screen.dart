@@ -303,12 +303,13 @@ class _WatchScreenState extends State<WatchScreen> {
               padding: EdgeInsets.all(16),
               child: Text('Audio', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
             ),
-            for (final t in options)
+            for (var i = 0; i < options.length; i++)
               ListTile(
-                title: Text(_trackLabel(t), style: const TextStyle(color: Colors.white)),
-                trailing: t == _currentTrack.audio ? const Icon(Icons.check, color: Color(0xFF00b4d8)) : null,
+                autofocus: i == 0,
+                title: Text(_trackLabel(options[i]), style: const TextStyle(color: Colors.white)),
+                trailing: options[i] == _currentTrack.audio ? const Icon(Icons.check, color: Color(0xFF00b4d8)) : null,
                 onTap: () {
-                  _player.setAudioTrack(t);
+                  _player.setAudioTrack(options[i]);
                   Navigator.pop(context);
                 },
               ),
@@ -335,12 +336,13 @@ class _WatchScreenState extends State<WatchScreen> {
               padding: EdgeInsets.all(16),
               child: Text('Ondertitels', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
             ),
-            for (final t in options)
+            for (var i = 0; i < options.length; i++)
               ListTile(
-                title: Text(_trackLabel(t), style: const TextStyle(color: Colors.white)),
-                trailing: t == _currentTrack.subtitle ? const Icon(Icons.check, color: Color(0xFF00b4d8)) : null,
+                autofocus: i == 0,
+                title: Text(_trackLabel(options[i]), style: const TextStyle(color: Colors.white)),
+                trailing: options[i] == _currentTrack.subtitle ? const Icon(Icons.check, color: Color(0xFF00b4d8)) : null,
                 onTap: () {
-                  _player.setSubtitleTrack(t);
+                  _player.setSubtitleTrack(options[i]);
                   Navigator.pop(context);
                 },
               ),
@@ -910,10 +912,11 @@ class _WatchScreenState extends State<WatchScreen> {
                     final current = currentIdx == -1 ? null : list.removeAt(currentIdx);
                     return [
                       if (current != null) ...[
-                        _sourceTile(current, episode: episode, sheetContext: sheetContext, isCurrent: true),
+                        _sourceTile(current, episode: episode, sheetContext: sheetContext, isCurrent: true, autofocus: true),
                         const Divider(color: Colors.white12, height: 1),
                       ],
-                      for (final s in list) _sourceTile(s, episode: episode, sheetContext: sheetContext),
+                      for (var i = 0; i < list.length; i++)
+                        _sourceTile(list[i], episode: episode, sheetContext: sheetContext, autofocus: current == null && i == 0),
                     ];
                   })(),
                 ],
@@ -925,8 +928,9 @@ class _WatchScreenState extends State<WatchScreen> {
     );
   }
 
-  Widget _sourceTile(Map s, {Map? episode, required BuildContext sheetContext, bool isCurrent = false}) {
+  Widget _sourceTile(Map s, {Map? episode, required BuildContext sheetContext, bool isCurrent = false, bool autofocus = false}) {
     return ListTile(
+      autofocus: autofocus,
       leading: isCurrent ? const Icon(Icons.play_circle_fill, color: Color(0xFF00b4d8)) : null,
       title: Text(s['title'] as String, maxLines: 2, overflow: TextOverflow.ellipsis,
         style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal)),
@@ -978,10 +982,12 @@ class _WatchScreenState extends State<WatchScreen> {
     return const [];
   }
 
-  Widget _trackButton(IconData icon, VoidCallback onTap, String tooltip) {
+  Widget _trackButton(IconData icon, VoidCallback onTap, String tooltip, {bool autofocus = false}) {
     return Tooltip(
       message: tooltip,
       child: InkWell(
+        autofocus: autofocus,
+        focusColor: Colors.white24,
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
         child: Container(
@@ -1047,7 +1053,12 @@ class _WatchScreenState extends State<WatchScreen> {
                             Positioned(
                               top: 8, right: 8,
                               child: Row(children: [
-                                _trackButton(Icons.dns_outlined, () => _pickSource(episode: _currentEpisode), 'Andere bron'),
+                                // Autofocus: zodra de speler start heeft
+                                // niets meer focus (het vorige focusbare
+                                // element - bv. een episoderij - verdween
+                                // uit de boom), dus een afstandsbediening
+                                // had zonder dit nergens naartoe te gaan.
+                                _trackButton(Icons.dns_outlined, () => _pickSource(episode: _currentEpisode), 'Andere bron', autofocus: true),
                                 if (_hasSelectableTracks(_tracks.audio)) ...[
                                   const SizedBox(width: 8),
                                   _trackButton(Icons.multitrack_audio, _pickAudioTrack, 'Audio'),
