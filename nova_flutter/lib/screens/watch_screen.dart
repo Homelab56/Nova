@@ -868,33 +868,42 @@ class _WatchScreenState extends State<WatchScreen> {
 
     try {
       final baseUrl = (await SettingsService.getBackendUrl()).trim().replaceAll(RegExp(r'/$'), '');
-      
-      final apiPaths = ['/api/debrid/search', '/debrid/search'];
+
       String? url;
       String? source;
       String? errorMessage;
 
-      for (final path in apiPaths) {
-        try {
-          final apiUrl = '$baseUrl$path?q=${Uri.encodeComponent(q)}&tmdb_id=${widget.media['id']}&media_type=${isMovie ? "movie" : "tv"}&client=windows';
-          final response = await http.get(Uri.parse(apiUrl)).timeout(const Duration(seconds: 25));
+      // "Verder kijken" kan meteen bij het openen automatisch afspelen, nog
+      // vóór _loadDetails() een verkeerd aangenomen film/serie-type heeft
+      // kunnen rechtzetten (dat vergt zelf al een mislukte + een geslaagde
+      // netwerk-aanroep). Dus hier niet vertrouwen op timing, maar gewoon
+      // zelf het andere type proberen als het eerste niets oplevert.
+      Future<void> attempt(String mediaType) async {
+        for (final path in ['/api/debrid/search', '/debrid/search']) {
+          try {
+            final apiUrl = '$baseUrl$path?q=${Uri.encodeComponent(q)}&tmdb_id=${widget.media['id']}&media_type=$mediaType&client=windows';
+            final response = await http.get(Uri.parse(apiUrl)).timeout(const Duration(seconds: 25));
 
-          if (response.statusCode == 200) {
-            final data = jsonDecode(response.body);
-            final direct = data['direct_url'] as String?;
-            final stream = data['stream_url'] as String?;
-            url = (direct != null && direct.isNotEmpty) ? direct : stream;
-            source = data['source'] ?? 'unknown';
-            if (url != null) break;
-            errorMessage = data['message'];
-          } else {
-            errorMessage = 'Server fout: ${response.statusCode}';
+            if (response.statusCode == 200) {
+              final data = jsonDecode(response.body);
+              final direct = data['direct_url'] as String?;
+              final stream = data['stream_url'] as String?;
+              url = (direct != null && direct.isNotEmpty) ? direct : stream;
+              source = data['source'] ?? 'unknown';
+              if (url != null) return;
+              errorMessage = data['message'];
+            } else {
+              errorMessage = 'Server fout: ${response.statusCode}';
+            }
+          } catch (e) {
+            errorMessage = 'Verbindingsfout: $e';
+            continue;
           }
-        } catch (e) {
-          errorMessage = 'Verbindingsfout: $e';
-          continue;
         }
       }
+
+      await attempt(isMovie ? 'movie' : 'tv');
+      if (url == null) await attempt(isMovie ? 'tv' : 'movie');
 
       if (url == null) {
         setState(() {
@@ -903,7 +912,11 @@ class _WatchScreenState extends State<WatchScreen> {
         });
         return;
       }
-      setState(() => _currentSourceUrl = url);
+      // Losse non-nullable kopie: `url` zelf blijft String? voor de analyzer
+      // omdat het binnen de attempt()-closure hierboven muteert, waardoor
+      // type-promotie na de null-check hierboven niet standhoudt.
+      final resolvedUrl = url!;
+      setState(() => _currentSourceUrl = resolvedUrl);
 
       final statusLabel = source == 'scraper' ? 'Gevonden op internet. Laden...' : 'Gevonden in bibliotheek. Laden...';
       final resume = await _resumeSeconds(episode: episode);
@@ -918,16 +931,16 @@ class _WatchScreenState extends State<WatchScreen> {
       String? externalSubUri;
       if (_prefs['subtitles_enabled'] == true) {
         setState(() => _status = 'Nederlandse ondertitels zoeken en synchroniseren (kan ~1 min duren)...');
-        externalSubUri = await _fetchExternalSubtitleUri(url, episode: episode);
+        externalSubUri = await _fetchExternalSubtitleUri(resolvedUrl, episode: episode);
         if (externalSubUri == null && mounted) {
           setState(() => _status = 'Ondertitels controleren...');
-          final hasEmbeddedNl = await _hasEmbeddedDutchSubtitle(url);
+          final hasEmbeddedNl = await _hasEmbeddedDutchSubtitle(resolvedUrl);
           debugPrint('[Nova] geen externe NL-ondertitel gevonden, ingebouwd spoor aanwezig: $hasEmbeddedNl');
         }
       }
       if (!mounted) return;
 
-      await _playUrl(url, statusLabel: statusLabel, resumeSeconds: resume, externalSubtitleUri: externalSubUri);
+      await _playUrl(resolvedUrl, statusLabel: statusLabel, resumeSeconds: resume, externalSubtitleUri: externalSubUri);
     } catch (e) {
       setState(() {
         _status = 'Fout bij afspelen: $e';
