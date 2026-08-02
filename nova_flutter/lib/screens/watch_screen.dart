@@ -66,6 +66,8 @@ class _WatchScreenState extends State<WatchScreen> {
   // die effectief speelt.
   final FocusNode _playerAreaFocus = FocusNode();
   final FocusNode _playerSourceFocus = FocusNode();
+  final List<FocusNode> _starFocusNodes = List.generate(3, (_) => FocusNode());
+  bool _endRatingPromptShown = false;
   String? _seekIndicator;
   Timer? _seekIndicatorTimer;
 
@@ -135,6 +137,16 @@ class _WatchScreenState extends State<WatchScreen> {
             'duration': dur.inSeconds.toDouble(),
           });
         }
+      }
+    });
+
+    // Bij het einde van een film (niet per aflevering, dat zou te opdringerig
+    // zijn) meteen om een rangschikking vragen - anders scrol je zelf niet
+    // meer naar het sterren-rijtje onderaan eens de aftiteling loopt.
+    _player.stream.completed.listen((completed) {
+      if (completed && isMovie && !_endRatingPromptShown && _rating == null) {
+        _endRatingPromptShown = true;
+        _showEndRatingPrompt();
       }
     });
 
@@ -539,6 +551,39 @@ class _WatchScreenState extends State<WatchScreen> {
     }
   }
 
+  Future<void> _showEndRatingPrompt() async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => StatefulBuilder(builder: (context, setDialogState) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF0f1520),
+          title: const Text('Wat vond je ervan?', style: TextStyle(color: Colors.white)),
+          content: Row(mainAxisSize: MainAxisSize.min, children: [
+            for (int i = 1; i <= 3; i++)
+              IconButton(
+                autofocus: i == 1,
+                onPressed: () async {
+                  await _setRating(i);
+                  setDialogState(() {});
+                  if (context.mounted) Navigator.pop(context);
+                },
+                icon: Icon(
+                  (_rating != null && _rating! >= i) ? Icons.star : Icons.star_border,
+                  color: (_rating != null && _rating! >= i) ? Colors.amber : Colors.white54,
+                  size: 32,
+                ),
+                tooltip: i == 1 ? 'Niet voor mij' : i == 2 ? 'Oké' : 'Top!',
+              ),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Overslaan')),
+          ],
+        );
+      }),
+    );
+  }
+
   // Titel/metadata/omschrijving/knoppen/sterren - herbruikt zowel overlayed
   // op de hero-achtergrond (vóór het afspelen) als plat onder de speler/het
   // laadscherm (tijdens/na het afspelen), zodat je altijd nog kan
@@ -625,16 +670,20 @@ class _WatchScreenState extends State<WatchScreen> {
       const SizedBox(height: 12),
       Row(children: [
         for (int i = 1; i <= 3; i++)
-          IconButton(
-            onPressed: () => _setRating(i),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            icon: Icon(
-              (_rating != null && _rating! >= i) ? Icons.star : Icons.star_border,
-              color: (_rating != null && _rating! >= i) ? Colors.amber : Colors.white54,
-              size: 24,
+          _focusRing(
+            focusNode: _starFocusNodes[i - 1],
+            child: IconButton(
+              focusNode: _starFocusNodes[i - 1],
+              onPressed: () => _setRating(i),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              icon: Icon(
+                (_rating != null && _rating! >= i) ? Icons.star : Icons.star_border,
+                color: (_rating != null && _rating! >= i) ? Colors.amber : Colors.white54,
+                size: 24,
+              ),
+              tooltip: i == 1 ? 'Niet voor mij' : i == 2 ? 'Oké' : 'Top!',
             ),
-            tooltip: i == 1 ? 'Niet voor mij' : i == 2 ? 'Oké' : 'Top!',
           ),
         if (_rating != null) ...[
           const SizedBox(width: 4),
@@ -1088,6 +1137,7 @@ class _WatchScreenState extends State<WatchScreen> {
     _watchlistFocus.dispose();
     _playerAreaFocus.dispose();
     _playerSourceFocus.dispose();
+    for (final n in _starFocusNodes) { n.dispose(); }
     _seekIndicatorTimer?.cancel();
     super.dispose();
   }
@@ -1136,8 +1186,10 @@ class _WatchScreenState extends State<WatchScreen> {
                             // meer focus (het vorige focusbare element - bv.
                             // een episoderij - verdween uit de boom), dus
                             // een afstandsbediening had zonder dit nergens
-                            // naartoe te gaan. Links/rechts spoelt, omlaag
-                            // springt naar de bron/audio/ondertitels-rij.
+                            // naartoe te gaan. Links/rechts spoelt, omhoog
+                            // springt naar de bron/audio/ondertitels-rij
+                            // (die staat bovenaan rechts), omlaag naar de
+                            // rest van de pagina (rangschikking, seizoenen...).
                             Focus(
                               autofocus: true,
                               focusNode: _playerAreaFocus,
@@ -1151,8 +1203,12 @@ class _WatchScreenState extends State<WatchScreen> {
                                   _seek(10);
                                   return KeyEventResult.handled;
                                 }
-                                if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                                if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
                                   _playerSourceFocus.requestFocus();
+                                  return KeyEventResult.handled;
+                                }
+                                if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                                  _playFocus.requestFocus();
                                   return KeyEventResult.handled;
                                 }
                                 if (event.logicalKey == LogicalKeyboardKey.select ||
@@ -1189,7 +1245,7 @@ class _WatchScreenState extends State<WatchScreen> {
                                 canRequestFocus: false,
                                 skipTraversal: true,
                                 onKeyEvent: (node, event) {
-                                  if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowUp) {
+                                  if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowDown) {
                                     _playerAreaFocus.requestFocus();
                                     return KeyEventResult.handled;
                                   }
