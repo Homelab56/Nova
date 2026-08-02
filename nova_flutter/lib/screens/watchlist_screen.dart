@@ -42,6 +42,7 @@ class _WatchlistScreenState extends State<WatchlistScreen> {
           ]))
         : ListView.separated(
             padding: const EdgeInsets.all(16),
+            cacheExtent: 2000,
             itemCount: _list.length,
             separatorBuilder: (_, __) => const SizedBox(height: 14),
             itemBuilder: (_, i) => _buildRow(_list[i]),

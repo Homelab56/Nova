@@ -147,6 +147,7 @@ class _SearchScreenState extends State<SearchScreen> {
                     return GridView.builder(
                       controller: _scrollCtrl,
                       padding: const EdgeInsets.all(12),
+                      cacheExtent: 2000,
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: crossAxisCount,
                         childAspectRatio: 0.62,

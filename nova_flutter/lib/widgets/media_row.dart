@@ -115,6 +115,10 @@ class _MediaRowState extends State<MediaRow> {
               controller: _scrollCtrl,
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 12),
+              // Een stuk groter dan de standaard (~250px) zodat een D-pad
+              // meerdere kaarten voorbij het scherm al kan focussen i.p.v.
+              // vast te lopen zodra hij een nog niet opgebouwde kaart nadert.
+              cacheExtent: 2000,
               itemCount: widget.itemCount,
               itemBuilder: widget.itemBuilder,
             ),

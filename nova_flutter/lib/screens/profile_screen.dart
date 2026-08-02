@@ -201,7 +201,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 for (var i = 0; i < _avatarBaseColors.length; i++)
                   Builder(builder: (context) {
                     final taken = usedIndices.contains(i);
-                    return GestureDetector(
+                    return TvFocusable(
+                      borderRadius: BorderRadius.circular(17),
                       onTap: taken ? null : () => setDialogState(() => colorIndex = i),
                       child: Opacity(
                         opacity: taken ? 0.25 : 1,
@@ -232,7 +233,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Wrap(spacing: 10, runSpacing: 10, children: [
                 Builder(builder: (context) {
                   final selected = selectedIcon == null;
-                  return GestureDetector(
+                  return TvFocusable(
+                    borderRadius: BorderRadius.circular(17),
                     onTap: () => setDialogState(() => selectedIcon = null),
                     child: Container(
                       width: 34, height: 34,
@@ -248,7 +250,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 for (final entry in _avatarIcons.entries)
                   Builder(builder: (context) {
                     final selected = selectedIcon == entry.key;
-                    return GestureDetector(
+                    return TvFocusable(
+                      borderRadius: BorderRadius.circular(17),
                       onTap: () => setDialogState(() => selectedIcon = entry.key),
                       child: Container(
                         width: 34, height: 34,

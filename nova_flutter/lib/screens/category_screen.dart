@@ -93,6 +93,10 @@ class _CategoryScreenState extends State<CategoryScreen> {
                     return GridView.builder(
                       controller: _scrollCtrl,
                       padding: const EdgeInsets.all(12),
+                      // Groter dan standaard zodat een D-pad meerdere rijen
+                      // voorbij het scherm al kan focussen i.p.v. vast te
+                      // lopen bij een nog niet opgebouwde tegel.
+                      cacheExtent: 2000,
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: crossAxisCount,
                         childAspectRatio: 0.62,

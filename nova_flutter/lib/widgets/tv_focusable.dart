@@ -53,16 +53,17 @@ class _TvFocusableState extends State<TvFocusable> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedScale(
-          scale: _focused ? 1.04 : 1.0,
+          scale: _focused ? 1.035 : 1.0,
           duration: const Duration(milliseconds: 120),
           curve: Curves.easeOut,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
             decoration: BoxDecoration(
               borderRadius: widget.borderRadius,
-              border: Border.all(color: _focused ? Colors.white70 : Colors.transparent, width: 2),
+              // Zachte gekleurde gloed i.p.v. een hard wit kader - leest als
+              // een subtiele markering, niet als een opvallende doos errond.
               boxShadow: _focused
-                ? [BoxShadow(color: Colors.white.withOpacity(0.25), blurRadius: 8)]
+                ? [BoxShadow(color: const Color(0xFF00b4d8).withOpacity(0.65), blurRadius: 12, spreadRadius: 0.5)]
                 : const [],
             ),
             child: widget.child,
