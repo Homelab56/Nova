@@ -33,8 +33,9 @@ void main() async {
   // opzet weggelaten door Flutter om de apk klein te houden), dus hier
   // bewust build-mode-onafhankelijke velden gebruikt.
   HardwareKeyboard.instance.addHandler((event) {
+    final f = FocusManager.instance.primaryFocus;
     debugPrint('[Nova][key] ${event.runtimeType} ${_keyName(event.logicalKey)} '
-      '| focus=${FocusManager.instance.primaryFocus?.context?.widget.runtimeType}');
+      '| focus=${f?.context?.widget.runtimeType}#${identityHashCode(f)}');
     return false;
   });
   final configured = await SettingsService.isConfigured();

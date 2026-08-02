@@ -415,50 +415,66 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildNavBtn(String label, int index) {
     final bool active = _tab == index;
-    return InkWell(
-      // Focus start bewust op de eerste navigatieknop, zodat een afstands-
-      // bediening meteen iets heeft om vanaf te vertrekken i.p.v. dat er
-      // nergens focus staat bij het openen van het scherm.
-      autofocus: index == 0,
-      focusNode: _navFocusNodes[index],
-      focusColor: Colors.white24,
-      onTap: () {
-        if (index == 5) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const WatchlistScreen(),
-              settings: const RouteSettings(name: 'watchlist'),
-            ),
-          ).then((_) => _load());
-        } else {
-          setState(() {
-            _tab = index;
-            _heroIndex = 0;
-          });
-        }
+    // InkWell's ingebouwde focusColor-overlay bleek in de praktijk op de TV
+    // amper zichtbaar - FocusNode is zelf een ChangeNotifier, dus een
+    // AnimatedBuilder erop geeft een veel duidelijker eigen highlight zodra
+    // deze specifieke knop echt focus heeft.
+    return AnimatedBuilder(
+      animation: _navFocusNodes[index],
+      builder: (context, child) {
+        final focused = _navFocusNodes[index].hasFocus;
+        return Container(
+          decoration: BoxDecoration(
+            color: focused ? const Color(0xFF00b4d8).withOpacity(0.25) : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: child,
+        );
       },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                color: active ? const Color(0xFF00b4d8) : Colors.grey,
-                fontWeight: active ? FontWeight.bold : FontWeight.normal,
-                fontSize: 15,
+      child: InkWell(
+        // Focus start bewust op de eerste navigatieknop, zodat een afstands-
+        // bediening meteen iets heeft om vanaf te vertrekken i.p.v. dat er
+        // nergens focus staat bij het openen van het scherm.
+        autofocus: index == 0,
+        focusNode: _navFocusNodes[index],
+        onTap: () {
+          if (index == 5) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const WatchlistScreen(),
+                settings: const RouteSettings(name: 'watchlist'),
               ),
-            ),
-            const SizedBox(height: 4),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              height: 2,
-              width: active ? 20 : 0,
-              color: const Color(0xFF00b4d8),
-            ),
-          ],
+            ).then((_) => _load());
+          } else {
+            setState(() {
+              _tab = index;
+              _heroIndex = 0;
+            });
+          }
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  color: active ? const Color(0xFF00b4d8) : Colors.grey,
+                  fontWeight: active ? FontWeight.bold : FontWeight.normal,
+                  fontSize: 15,
+                ),
+              ),
+              const SizedBox(height: 4),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                height: 2,
+                width: active ? 20 : 0,
+                color: const Color(0xFF00b4d8),
+              ),
+            ],
+          ),
         ),
       ),
     );
