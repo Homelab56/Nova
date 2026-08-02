@@ -856,6 +856,16 @@ class _WatchScreenState extends State<WatchScreen> {
 
   Future<void> _play({Map? episode}) async {
     _currentEpisode = episode;
+    if (Platform.isAndroid) {
+      // Op een TV-toestel met maar ~2GB RAM (logcat op een Shield bevestigde
+      // dit) kan alles wat Flutter's afbeeldingscache nog vasthoudt van het
+      // doorbladeren van posterrijen samen met de decodeerbuffers van de
+      // speler genoeg zijn om het systeem geheugen te laten leegdraaien - de
+      // systeem-lowmemorykiller schiet dan zowel Nova als andere apps af.
+      // Ruim dat op vlak vóór de zware decodeerbelasting begint.
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+    }
     setState(() {
       _loadingStream = true;
       _status = 'Zoeken naar streams...';
