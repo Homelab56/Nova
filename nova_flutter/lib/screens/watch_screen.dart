@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -60,6 +61,13 @@ class _WatchScreenState extends State<WatchScreen> {
   final FocusNode _playFocus = FocusNode();
   final FocusNode _sourcesFocus = FocusNode();
   final FocusNode _watchlistFocus = FocusNode();
+  // Losstaand van de knoppen in het infoblok hierboven - dit zijn de kleine
+  // pictogram-knoppen die enkel bovenop de speler zelf verschijnen zodra
+  // die effectief speelt.
+  final FocusNode _playerAreaFocus = FocusNode();
+  final FocusNode _playerSourceFocus = FocusNode();
+  String? _seekIndicator;
+  Timer? _seekIndicatorTimer;
 
   @override
   void initState() {
@@ -716,6 +724,31 @@ class _WatchScreenState extends State<WatchScreen> {
     return t;
   }
 
+  // D-pad-vriendelijk vooruit-/terugspoelen: er is geen aanraakbare
+  // voortgangsbalk (die vereist slepen, wat een afstandsbediening niet kan),
+  // dus links/rechts op de speler zelf springt in vaste stappen.
+  void _seek(int deltaSeconds) {
+    final pos = _player.state.position;
+    final dur = _player.state.duration;
+    var target = pos + Duration(seconds: deltaSeconds);
+    if (target < Duration.zero) target = Duration.zero;
+    if (dur > Duration.zero && target > dur) target = dur;
+    _player.seek(target);
+    setState(() => _seekIndicator = deltaSeconds > 0 ? '+${deltaSeconds}s' : '${deltaSeconds}s');
+    _seekIndicatorTimer?.cancel();
+    _seekIndicatorTimer = Timer(const Duration(milliseconds: 700), () {
+      if (mounted) setState(() => _seekIndicator = null);
+    });
+  }
+
+  void _togglePlayPause() {
+    if (_player.state.playing) {
+      _player.pause();
+    } else {
+      _player.play();
+    }
+  }
+
   Future<void> _play({Map? episode}) async {
     _currentEpisode = episode;
     setState(() {
@@ -1023,15 +1056,15 @@ class _WatchScreenState extends State<WatchScreen> {
     );
   }
 
-  Widget _trackButton(IconData icon, VoidCallback onTap, String tooltip, {bool autofocus = false}) {
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        autofocus: autofocus,
-        focusColor: Colors.white24,
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
+  Widget _trackButton(IconData icon, VoidCallback onTap, String tooltip, {bool autofocus = false, FocusNode? focusNode}) {
+    final node = focusNode ?? FocusNode();
+    final button = InkWell(
+      autofocus: autofocus,
+      focusNode: node,
+      focusColor: Colors.white24,
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
             color: Colors.black54,
@@ -1039,7 +1072,10 @@ class _WatchScreenState extends State<WatchScreen> {
           ),
           child: Icon(icon, color: Colors.white, size: 18),
         ),
-      ),
+    );
+    return Tooltip(
+      message: tooltip,
+      child: _focusRing(focusNode: node, child: button),
     );
   }
 
@@ -1050,6 +1086,9 @@ class _WatchScreenState extends State<WatchScreen> {
     _playFocus.dispose();
     _sourcesFocus.dispose();
     _watchlistFocus.dispose();
+    _playerAreaFocus.dispose();
+    _playerSourceFocus.dispose();
+    _seekIndicatorTimer?.cancel();
     super.dispose();
   }
 
@@ -1093,25 +1132,81 @@ class _WatchScreenState extends State<WatchScreen> {
                         child: AspectRatio(
                           aspectRatio: 16/9,
                           child: Stack(children: [
-                            Video(controller: _controller),
+                            // Autofocus: zodra de speler start heeft niets
+                            // meer focus (het vorige focusbare element - bv.
+                            // een episoderij - verdween uit de boom), dus
+                            // een afstandsbediening had zonder dit nergens
+                            // naartoe te gaan. Links/rechts spoelt, omlaag
+                            // springt naar de bron/audio/ondertitels-rij.
+                            Focus(
+                              autofocus: true,
+                              focusNode: _playerAreaFocus,
+                              onKeyEvent: (node, event) {
+                                if (event is! KeyDownEvent) return KeyEventResult.ignored;
+                                if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                                  _seek(-10);
+                                  return KeyEventResult.handled;
+                                }
+                                if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                                  _seek(10);
+                                  return KeyEventResult.handled;
+                                }
+                                if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                                  _playerSourceFocus.requestFocus();
+                                  return KeyEventResult.handled;
+                                }
+                                if (event.logicalKey == LogicalKeyboardKey.select ||
+                                    event.logicalKey == LogicalKeyboardKey.enter ||
+                                    event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                                    event.logicalKey == LogicalKeyboardKey.space) {
+                                  _togglePlayPause();
+                                  return KeyEventResult.handled;
+                                }
+                                return KeyEventResult.ignored;
+                              },
+                              child: Video(controller: _controller),
+                            ),
+                            // Korte visuele bevestiging dat spoelen effectief
+                            // iets deed - zonder aanraakbare voortgangsbalk is
+                            // dit anders onzichtbaar feedback-loos.
+                            if (_seekIndicator != null)
+                              Center(
+                                child: IgnorePointer(
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black54,
+                                      borderRadius: BorderRadius.circular(30),
+                                    ),
+                                    child: Text(_seekIndicator!,
+                                      style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700)),
+                                  ),
+                                ),
+                              ),
                             Positioned(
                               top: 8, right: 8,
-                              child: Row(children: [
-                                // Autofocus: zodra de speler start heeft
-                                // niets meer focus (het vorige focusbare
-                                // element - bv. een episoderij - verdween
-                                // uit de boom), dus een afstandsbediening
-                                // had zonder dit nergens naartoe te gaan.
-                                _trackButton(Icons.dns_outlined, () => _pickSource(episode: _currentEpisode), 'Andere bron', autofocus: true),
-                                if (_hasSelectableTracks(_tracks.audio)) ...[
-                                  const SizedBox(width: 8),
-                                  _trackButton(Icons.multitrack_audio, _pickAudioTrack, 'Audio'),
-                                ],
-                                if (_hasSelectableTracks(_tracks.subtitle)) ...[
-                                  const SizedBox(width: 8),
-                                  _trackButton(Icons.subtitles, _pickSubtitleTrack, 'Ondertitels'),
-                                ],
-                              ]),
+                              child: Focus(
+                                canRequestFocus: false,
+                                skipTraversal: true,
+                                onKeyEvent: (node, event) {
+                                  if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowUp) {
+                                    _playerAreaFocus.requestFocus();
+                                    return KeyEventResult.handled;
+                                  }
+                                  return KeyEventResult.ignored;
+                                },
+                                child: Row(children: [
+                                  _trackButton(Icons.dns_outlined, () => _pickSource(episode: _currentEpisode), 'Andere bron', focusNode: _playerSourceFocus),
+                                  if (_hasSelectableTracks(_tracks.audio)) ...[
+                                    const SizedBox(width: 8),
+                                    _trackButton(Icons.multitrack_audio, _pickAudioTrack, 'Audio'),
+                                  ],
+                                  if (_hasSelectableTracks(_tracks.subtitle)) ...[
+                                    const SizedBox(width: 8),
+                                    _trackButton(Icons.subtitles, _pickSubtitleTrack, 'Ondertitels'),
+                                  ],
+                                ]),
+                              ),
                             ),
                           ]),
                         ),
