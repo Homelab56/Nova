@@ -14,6 +14,7 @@ import '../services/tmdb_service.dart';
 import '../services/debrid_service.dart';
 import '../services/userdata_service.dart';
 import '../services/settings_service.dart';
+import '../services/device_capability_service.dart';
 
 const tmdbPoster = 'https://image.tmdb.org/t/p/w342';
 const tmdbProfile = 'https://image.tmdb.org/t/p/w185';
@@ -884,6 +885,10 @@ class _WatchScreenState extends State<WatchScreen> {
 
     try {
       final baseUrl = (await SettingsService.getBackendUrl()).trim().replaceAll(RegExp(r'/$'), '');
+      // Op geheugenarme TV-toestellen laat de server automatisch geen 4K-
+      // bronnen kiezen (crasht anders soms door de systeem-lowmemorykiller) -
+      // via "Bronnen" kan je alsnog zelf bewust een hogere resolutie kiezen.
+      final maxRes = await DeviceCapabilityService.maxAutoResolution;
 
       String? url;
       String? source;
@@ -897,7 +902,8 @@ class _WatchScreenState extends State<WatchScreen> {
       Future<void> attempt(String mediaType) async {
         for (final path in ['/api/debrid/search', '/debrid/search']) {
           try {
-            final apiUrl = '$baseUrl$path?q=${Uri.encodeComponent(q)}&tmdb_id=${widget.media['id']}&media_type=$mediaType&client=windows';
+            final apiUrl = '$baseUrl$path?q=${Uri.encodeComponent(q)}&tmdb_id=${widget.media['id']}&media_type=$mediaType&client=windows'
+              '${maxRes != null ? '&max_resolution=$maxRes' : ''}';
             final response = await http.get(Uri.parse(apiUrl)).timeout(const Duration(seconds: 25));
 
             if (response.statusCode == 200) {

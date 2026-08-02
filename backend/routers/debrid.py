@@ -55,14 +55,45 @@ def _aiostreams_search_id(media_type: str | None, tmdb_id: int, q: str) -> tuple
     return "series", f"tmdb:{int(tmdb_id)}:{season}:{episode}"
 
 
-def _aio_rank_result(item: dict) -> tuple[int, int]:
-    name = (
+def _result_name(item: dict) -> str:
+    return (
         str(item.get("name") or "")
         + " "
         + str(item.get("filename") or "")
         + " "
         + str((item.get("parsedFile") or {}).get("resolution") or "")
     ).lower()
+
+
+def _resolution_height(item: dict) -> int:
+    """Beeldhoogte in pixels afgeleid uit de releasenaam (2160/1080/720/480),
+    0 als onbekend - onbekende resolutie wordt bij het toepassen van een
+    max_resolution-limiet nooit uitgesloten (kan evengoed prima afspeelbaar
+    zijn, enkel de naam verraadt het niet)."""
+    name = _result_name(item)
+    if any(x in name for x in ("2160", "4k", "uhd", "4320")):
+        return 2160
+    if "1440" in name or "1080" in name:
+        return 1080
+    if "720" in name:
+        return 720
+    if "480" in name:
+        return 480
+    return 0
+
+
+def _filter_by_max_resolution(items: list[dict], max_resolution: int | None) -> list[dict]:
+    """Sluit bronnen boven [max_resolution] uit (bv. geen 4K auto-kiezen op
+    een geheugenarm TV-toestel) - tenzij dat alles zou wegfilteren, dan
+    liever nog iets afspelen dan niets."""
+    if not max_resolution:
+        return items
+    capped = [x for x in items if _resolution_height(x) <= max_resolution]
+    return capped if capped else items
+
+
+def _aio_rank_result(item: dict) -> tuple[int, int]:
+    name = _result_name(item)
     size = 0
     try:
         size = int(item.get("size") or 0)
@@ -73,15 +104,7 @@ def _aio_rank_result(item: dict) -> tuple[int, int]:
     # zwaar om vlot af te spelen. Nooit automatisch als beste kiezen.
     if any(x in name for x in ("ai upscale", "ai-upscale", "upscaled", "ai upscaled")):
         return (-1, size)
-    tier = 0
-    if any(x in name for x in ("2160", "4k", "uhd", "4320")):
-        tier = 4000
-    elif "1440" in name or "1080" in name:
-        tier = 3000
-    elif "720" in name:
-        tier = 2000
-    elif "480" in name:
-        tier = 1000
+    tier = _resolution_height(item)
     if item.get("cached"):
         tier += 50
     return (tier, size)
@@ -252,7 +275,9 @@ async def _probe_playable(url: str, timeout: float = 10.0) -> bool:
     return duration >= _MIN_PLAYABLE_DURATION_SECS
 
 
-async def _pick_best_with_dutch_subs(results: list[dict], max_probe: int = 30, batch_size: int = 10) -> tuple[str | None, dict | None, bool]:
+async def _pick_best_with_dutch_subs(
+    results: list[dict], max_probe: int = 30, batch_size: int = 10, max_resolution: int | None = None
+) -> tuple[str | None, dict | None, bool]:
     """
     Kiest de best gerangschikte kandidaat die ook echt afspeelbaar blijkt
     (snelle ffprobe duur-check, om AIOStreams-placeholderclips uit te
@@ -278,6 +303,7 @@ async def _pick_best_with_dutch_subs(results: list[dict], max_probe: int = 30, b
     with_url = [x for x in results if _is_usable_now(x) and not _looks_like_junk_release(x)]
     if not with_url:
         return None, None, False
+    with_url = _filter_by_max_resolution(with_url, max_resolution)
     with_url.sort(key=_aio_rank_result, reverse=True)
 
     pool = with_url[:max_probe]
@@ -682,14 +708,23 @@ async def check_availability(q: str, tmdb_id: int | None = None, media_type: str
 SEARCH_SEMAPHORE = asyncio.Semaphore(2)
 
 @router.get("/search")
-async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str | None = None, client_id: str | None = None):
+async def search_and_stream(
+    q: str, tmdb_id: int | None = None, media_type: str | None = None, client_id: str | None = None,
+    max_resolution: int | None = None,
+):
     """
     Zoekt automatisch naar een beschikbare stream voor een titel.
     Met semaphore om de server te beschermen tegen overbelasting.
     Met cache om te voorkomen dat dezelfde zoekopdracht te vaak wordt uitgevoerd.
+
+    max_resolution (in pixels hoogte, bv. 1080) sluit bij automatisch kiezen
+    bronnen boven die resolutie uit - voor geheugenarme TV-toestellen die 4K
+    niet vlot aankunnen. Beïnvloedt enkel de automatische keuze hier, niet
+    de volledige lijst in /sources (waar je zelf bewust nog altijd 4K kan
+    kiezen als je dat wil).
     """
     # Cache key
-    cache_key = f"{q}:{tmdb_id}:{media_type}"
+    cache_key = f"{q}:{tmdb_id}:{media_type}:{max_resolution or ''}"
     current_time = time.time()
     
     # Check cache
@@ -735,7 +770,7 @@ async def search_and_stream(q: str, tmdb_id: int | None = None, media_type: str 
                     print(f"AIOStreams: {aio_type} {aio_id}")
                     aio_res = await _fetch_aiostreams_results(aio_cfg, aio_type, aio_id, timeout=55.0)
                     print(f"AIOStreams resultaten: {len(aio_res)} items")
-                    stream_url, picked, has_nl_subs = await _pick_best_with_dutch_subs(aio_res)
+                    stream_url, picked, has_nl_subs = await _pick_best_with_dutch_subs(aio_res, max_resolution=max_resolution)
                     if stream_url:
                         label = (picked or {}).get("name") or (picked or {}).get("filename") or q
                         print(f"AIOStreams stream URL ({'NL subs' if has_nl_subs else 'geen bevestigde NL subs'}): {stream_url[:200]}...")
