@@ -1452,8 +1452,12 @@ _OS_USER_AGENT = "Nova v1.0"
 # Persistente cache op schijf (i.p.v. in-memory) zodat een eenmaal gezochte en
 # gesynchroniseerde ondertitel bij een herbekijking - ook na een herstart of
 # nieuwe deploy van de backend - meteen klaarstaat i.p.v. opnieuw te moeten
-# zoeken/downloaden/synchroniseren.
+# zoeken/downloaden/synchroniseren. _SUB_CACHE_VERSION zit in de cache-key
+# verwerkt: verhoog deze bij een wijziging aan de sync-logica zelf (ffsubsync-
+# parameters, referentie-venster, kandidaat-selectie, ...), anders blijven
+# oude, met de vorige logica gesynchroniseerde resultaten hangen.
 _SUB_CACHE_DIR = "/app/data/subtitles_cache"
+_SUB_CACHE_VERSION = "v2"
 
 
 def _subtitle_cache_path(cache_key: str) -> str:
@@ -1667,7 +1671,7 @@ async def subtitle_external_vtt(
     if not get_opensubtitles_key():
         raise HTTPException(status_code=503, detail="OpenSubtitles is niet geconfigureerd op de server.")
 
-    cache_key = f"{tmdb_id}:{media_type}:{season}:{episode}:{lang}"
+    cache_key = f"{_SUB_CACHE_VERSION}:{tmdb_id}:{media_type}:{season}:{episode}:{lang}"
     cached = _subtitle_cache_get(cache_key)
     if cached:
         return Response(content=cached, media_type="text/vtt", headers={"Cache-Control": "no-cache"})
