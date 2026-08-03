@@ -1492,10 +1492,13 @@ def _os_headers() -> dict:
 
 
 async def _search_opensubtitles(
-    tmdb_id: int, media_type: str, language: str, season: int | None, episode: int | None
-) -> dict | None:
+    tmdb_id: int, media_type: str, language: str, season: int | None, episode: int | None, max_candidates: int = 3
+) -> list[dict]:
+    """Geeft de top [max_candidates] resultaten terug (meeste downloads eerst),
+    zodat de caller een volgende kan proberen als de beste niet lukt om te
+    downloaden of niet betrouwbaar te synchroniseren is."""
     if not get_opensubtitles_key():
-        return None
+        return []
     params: dict = {"tmdb_id": tmdb_id, "languages": language}
     if media_type == "tv" and season and episode:
         params["season_number"] = season
@@ -1505,20 +1508,23 @@ async def _search_opensubtitles(
             r = await client.get(f"{_OS_BASE}/subtitles", params=params, headers=_os_headers())
         if r.status_code != 200:
             print(f"OpenSubtitles zoekfout: {r.status_code} {r.text[:300]}")
-            return None
+            return []
         items = (r.json().get("data")) or []
         if not items:
-            return None
+            return []
         # Beste match: meeste downloads (proxy voor betrouwbaarheid/kwaliteit).
         items.sort(key=lambda x: ((x.get("attributes") or {}).get("download_count") or 0), reverse=True)
+        candidates = []
         for item in items:
             files = (item.get("attributes") or {}).get("files") or []
             if files and files[0].get("file_id"):
-                return {"file_id": files[0]["file_id"]}
-        return None
+                candidates.append({"file_id": files[0]["file_id"]})
+            if len(candidates) >= max_candidates:
+                break
+        return candidates
     except Exception as e:
         print(f"OpenSubtitles zoekfout: {e}")
-        return None
+        return []
 
 
 async def _download_opensubtitles(file_id: int) -> str | None:
@@ -1552,13 +1558,15 @@ async def _download_opensubtitles(file_id: int) -> str | None:
         return None
 
 
-async def _extract_reference_audio(video_url: str, out_path: str, duration_secs: int = 300, timeout: float = 150.0) -> bool:
+async def _extract_reference_audio(video_url: str, out_path: str, duration_secs: int = 600, timeout: float = 260.0) -> bool:
     """
     ffsubsync valideert zijn referentiebestand met os.access(), wat nooit
     lukt voor een URL - dus eerst audio naar een lokaal bestand extraheren.
     Mono/16kHz WAV, beperkt tot de eerste [duration_secs] (genoeg spraak om
     een betrouwbare sync te berekenen, zonder de hele - vaak 10+ GB - bron
-    te moeten downloaden).
+    te moeten downloaden). 10 minuten ipv 5: films met een lange dialoogloze
+    intro (openingscrawl, muziek, actie zonder tekst) gaven met 5 minuten
+    soms te weinig spraak om een betrouwbare sync tegen te berekenen.
     """
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
@@ -1593,9 +1601,11 @@ async def _extract_reference_audio(video_url: str, out_path: str, duration_secs:
         return False
 
 
-async def _run_ffsubsync(video_url: str, srt_text: str, timeout: float = 60.0) -> str | None:
+async def _run_ffsubsync(video_url: str, srt_text: str, timeout: float = 120.0) -> str | None:
     """Lijnt een ondertitel automatisch uit op de audio van de echte stream
-    (spraakdetectie), ongeacht welke exacte release we binnenkregen."""
+    (spraakdetectie), ongeacht welke exacte release we binnenkregen. Ruimere
+    max-offset omdat een langere referentie-clip soms een grotere
+    verschuiving nodig heeft om correct te correleren."""
     with tempfile.TemporaryDirectory() as tmp:
         ref_path = os.path.join(tmp, "reference.wav")
         in_path = os.path.join(tmp, "in.srt")
@@ -1606,7 +1616,10 @@ async def _run_ffsubsync(video_url: str, srt_text: str, timeout: float = 60.0) -
         if not await _extract_reference_audio(video_url, ref_path):
             return None
 
-        cmd = ["ffsubsync", ref_path, "-i", in_path, "-o", out_path]
+        cmd = [
+            "ffsubsync", ref_path, "-i", in_path, "-o", out_path,
+            "--max-offset-seconds", "180",
+        ]
         proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -1666,18 +1679,30 @@ async def subtitle_external_vtt(
             detail=f"Dagelijkse OpenSubtitles-limiet bereikt, probeer opnieuw na {reset_str}.",
         )
 
-    found = await _search_opensubtitles(tmdb_id, media_type, lang, season, episode)
-    if not found:
+    candidates = await _search_opensubtitles(tmdb_id, media_type, lang, season, episode)
+    if not candidates:
         raise HTTPException(status_code=404, detail=f"Geen {lang}-ondertitels gevonden op OpenSubtitles.")
 
-    srt_text = await _download_opensubtitles(found["file_id"])
-    if not srt_text:
+    input_value = urllib.parse.unquote(url)
+    fallback_srt = None  # eerste succesvolle download, voor als geen enkele kandidaat wil synchroniseren
+    for candidate in candidates:
+        srt_text = await _download_opensubtitles(candidate["file_id"])
+        if not srt_text:
+            continue
+        if fallback_srt is None:
+            fallback_srt = srt_text
+        synced_srt = await _run_ffsubsync(input_value, srt_text)
+        if synced_srt:
+            vtt = _srt_to_vtt(synced_srt)
+            _subtitle_cache_set(cache_key, vtt)
+            return Response(content=vtt, media_type="text/vtt", headers={"Cache-Control": "no-cache"})
+
+    if fallback_srt is None:
         raise HTTPException(status_code=502, detail="Kon ondertitel niet downloaden van OpenSubtitles.")
 
-    input_value = urllib.parse.unquote(url)
-    synced_srt = await _run_ffsubsync(input_value, srt_text)
-    final_srt = synced_srt or srt_text  # val terug op ongesynchroniseerde versie als sync mislukt
-    vtt = _srt_to_vtt(final_srt)
+    # Geen enkele kandidaat kon betrouwbaar gesynchroniseerd worden: val terug
+    # op de ongesynchroniseerde beste match in plaats van niets te tonen.
+    vtt = _srt_to_vtt(fallback_srt)
     _subtitle_cache_set(cache_key, vtt)
     return Response(content=vtt, media_type="text/vtt", headers={"Cache-Control": "no-cache"})
 
