@@ -377,9 +377,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       // N-beeldmerk gewoon te ontbreken, ook al was het
                       // bestand zelf perfect in orde. Apart tonen is minder
                       // gevoelig voor wat daar ook de oorzaak van was.
-                      Image.asset('assets/logo_mark.png', height: 300),
+                      // Tijdelijke diagnose: logt of elke afbeelding ooit een
+                      // frame tekent en/of een fout geeft, zodat op de TV
+                      // (waar enkel de tekst zichtbaar is) via logcat te zien
+                      // is wat er met logo_mark precies misloopt.
+                      Container(
+                        color: Colors.red.withOpacity(0.15),
+                        child: Image.asset(
+                          'assets/logo_mark.png',
+                          height: 300,
+                          errorBuilder: (context, error, stackTrace) {
+                            debugPrint('[Nova][logo] logo_mark ERROR: $error');
+                            return const SizedBox(width: 300, height: 300,
+                              child: Center(child: Icon(Icons.error, color: Colors.red, size: 64)));
+                          },
+                          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                            debugPrint('[Nova][logo] logo_mark frame=$frame sync=$wasSynchronouslyLoaded');
+                            return child;
+                          },
+                        ),
+                      ),
                       const SizedBox(height: 16),
-                      Image.asset('assets/logo_text.png', height: 184),
+                      Container(
+                        color: Colors.blue.withOpacity(0.15),
+                        child: Image.asset(
+                          'assets/logo_text.png',
+                          height: 184,
+                          errorBuilder: (context, error, stackTrace) {
+                            debugPrint('[Nova][logo] logo_text ERROR: $error');
+                            return const SizedBox(width: 300, height: 184,
+                              child: Center(child: Icon(Icons.error, color: Colors.red, size: 64)));
+                          },
+                          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                            debugPrint('[Nova][logo] logo_text frame=$frame sync=$wasSynchronouslyLoaded');
+                            return child;
+                          },
+                        ),
+                      ),
                       const SizedBox(height: 4),
                       const Text('Wie kijkt er?', style: TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w800)),
                       const SizedBox(height: 48),
