@@ -366,6 +366,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
           // boven schuift zodra het scrollbaar is - dit dwingt "centreer
           // wanneer het past, scroll wanneer het niet past" af.
           : LayoutBuilder(builder: (context, constraints) {
+              // Het logo krijgt zoveel ruimte als na aftrek van wat de rest
+              // van de inhoud (titel, profielen, knop) sowieso nodig heeft
+              // nog overblijft, geschaald tussen een minimum en het volledige
+              // formaat - zo past alles altijd in één beeld, zonder te
+              // moeten scrollen, ongeacht of dit een groot PC-venster of een
+              // kortere TV-viewport is. Vaste pixelwaarden pasten wel op een
+              // groot venster maar duwden op een kleiner scherm de profielen
+              // (het belangrijkste, interactieve deel) voorbij de rand.
+              const restBudget = 380.0;
+              const logoBudgetFull = 500.0; // mark(300) + gap(16) + text(184)
+              final logoBudget = (constraints.maxHeight - restBudget).clamp(160.0, logoBudgetFull);
+              final logoScale = logoBudget / logoBudgetFull;
+              final markH = 300 * logoScale;
+              final gapH = 16 * logoScale;
+              final textH = 184 * logoScale;
+
               return SingleChildScrollView(
                 child: ConstrainedBox(
                   constraints: BoxConstraints(minHeight: constraints.maxHeight),
@@ -377,9 +393,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       // N-beeldmerk gewoon te ontbreken, ook al was het
                       // bestand zelf perfect in orde. Apart tonen is minder
                       // gevoelig voor wat daar ook de oorzaak van was.
-                      Image.asset('assets/logo_mark.png', height: 300),
-                      const SizedBox(height: 16),
-                      Image.asset('assets/logo_text.png', height: 184),
+                      Image.asset('assets/logo_mark.png', height: markH),
+                      SizedBox(height: gapH),
+                      Image.asset('assets/logo_text.png', height: textH),
                       const SizedBox(height: 4),
                       const Text('Wie kijkt er?', style: TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w800)),
                       const SizedBox(height: 48),
