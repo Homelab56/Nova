@@ -1457,7 +1457,7 @@ _OS_USER_AGENT = "Nova v1.0"
 # parameters, referentie-venster, kandidaat-selectie, ...), anders blijven
 # oude, met de vorige logica gesynchroniseerde resultaten hangen.
 _SUB_CACHE_DIR = "/app/data/subtitles_cache"
-_SUB_CACHE_VERSION = "v2"
+_SUB_CACHE_VERSION = "v3"
 
 
 def _subtitle_cache_path(cache_key: str) -> str:
@@ -1607,9 +1607,12 @@ async def _extract_reference_audio(video_url: str, out_path: str, duration_secs:
 
 async def _run_ffsubsync(video_url: str, srt_text: str, timeout: float = 120.0) -> str | None:
     """Lijnt een ondertitel automatisch uit op de audio van de echte stream
-    (spraakdetectie), ongeacht welke exacte release we binnenkregen. Ruimere
-    max-offset omdat een langere referentie-clip soms een grotere
-    verschuiving nodig heeft om correct te correleren."""
+    (spraakdetectie), ongeacht welke exacte release we binnenkregen. Ruime
+    max-offset: series-afleveringen hebben vaak een "previously on"-recap
+    en/of intro die wel/niet in de ondertitel-bron zit, wat een constante
+    verschuiving van enkele minuten kan geven - een te krappe grens laat
+    ffsubsync dan de verkeerde (dichtstbijzijnde binnen bereik) uitlijning
+    kiezen in plaats van de echte."""
     with tempfile.TemporaryDirectory() as tmp:
         ref_path = os.path.join(tmp, "reference.wav")
         in_path = os.path.join(tmp, "in.srt")
@@ -1622,7 +1625,7 @@ async def _run_ffsubsync(video_url: str, srt_text: str, timeout: float = 120.0) 
 
         cmd = [
             "ffsubsync", ref_path, "-i", in_path, "-o", out_path,
-            "--max-offset-seconds", "180",
+            "--max-offset-seconds", "300",
         ]
         proc = None
         try:
