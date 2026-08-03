@@ -1457,7 +1457,7 @@ _OS_USER_AGENT = "Nova v1.0"
 # parameters, referentie-venster, kandidaat-selectie, ...), anders blijven
 # oude, met de vorige logica gesynchroniseerde resultaten hangen.
 _SUB_CACHE_DIR = "/app/data/subtitles_cache"
-_SUB_CACHE_VERSION = "v3"
+_SUB_CACHE_VERSION = "v4"
 
 
 def _subtitle_cache_path(cache_key: str) -> str:
@@ -1636,6 +1636,13 @@ async def _run_ffsubsync(video_url: str, srt_text: str, timeout: float = 120.0) 
             if proc.returncode != 0 or not os.path.exists(out_path):
                 print(f"ffsubsync fout: {(err or b'').decode('utf-8', errors='ignore')[:600]}")
                 return None
+            # ffsubsync logt zijn berekende verschuiving via logging (-> stderr),
+            # ook bij succes. Loggen voor diagnose van toekomstige sync-klachten.
+            offset_line = next(
+                (l for l in (err or b"").decode("utf-8", errors="ignore").splitlines() if "offset seconds" in l.lower()),
+                None,
+            )
+            print(f"ffsubsync ok, {offset_line or '(geen offset-regel gevonden in output)'}")
             with open(out_path, "r", encoding="utf-8", errors="ignore") as f:
                 return f.read()
         except asyncio.TimeoutError:
