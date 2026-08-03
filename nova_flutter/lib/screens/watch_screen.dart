@@ -67,6 +67,8 @@ class _WatchScreenState extends State<WatchScreen> {
   // die effectief speelt.
   final FocusNode _playerAreaFocus = FocusNode();
   final FocusNode _playerSourceFocus = FocusNode();
+  final FocusNode _playerAudioFocus = FocusNode();
+  final FocusNode _playerSubtitleFocus = FocusNode();
   final List<FocusNode> _starFocusNodes = List.generate(3, (_) => FocusNode());
   bool _endRatingPromptShown = false;
   // Terug-knop en bron/audio/ondertitels-rij verdwijnen na een paar seconden
@@ -1223,6 +1225,8 @@ class _WatchScreenState extends State<WatchScreen> {
     _watchlistFocus.dispose();
     _playerAreaFocus.dispose();
     _playerSourceFocus.dispose();
+    _playerAudioFocus.dispose();
+    _playerSubtitleFocus.dispose();
     for (final n in _starFocusNodes) { n.dispose(); }
     _seekIndicatorTimer?.cancel();
     _controlsHideTimer?.cancel();
@@ -1355,30 +1359,55 @@ class _WatchScreenState extends State<WatchScreen> {
                                 duration: const Duration(milliseconds: 250),
                                 child: IgnorePointer(
                                   ignoring: !_controlsVisible,
-                                  child: Focus(
-                                    canRequestFocus: false,
-                                    skipTraversal: true,
-                                    onKeyEvent: (node, event) {
-                                      if (event is! KeyDownEvent) return KeyEventResult.ignored;
-                                      _showControlsBriefly();
-                                      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-                                        _playerAreaFocus.requestFocus();
-                                        return KeyEventResult.handled;
-                                      }
-                                      return KeyEventResult.ignored;
-                                    },
-                                    child: Row(children: [
-                                      _trackButton(Icons.dns_outlined, () => _pickSource(episode: _currentEpisode), 'Andere bron', focusNode: _playerSourceFocus),
-                                      if (_hasSelectableTracks(_tracks.audio)) ...[
-                                        const SizedBox(width: 8),
-                                        _trackButton(Icons.multitrack_audio, _pickAudioTrack, 'Audio'),
-                                      ],
-                                      if (_hasSelectableTracks(_tracks.subtitle)) ...[
-                                        const SizedBox(width: 8),
-                                        _trackButton(Icons.subtitles, _pickSubtitleTrack, 'Ondertitels'),
-                                      ],
-                                    ]),
-                                  ),
+                                  child: Builder(builder: (context) {
+                                    // Expliciete links/rechts-koppeling i.p.v. te
+                                    // vertrouwen op Flutter's automatische
+                                    // "dichtstbijzijnde widget"-navigatie tussen
+                                    // deze kleine, dicht opeengepakte knopjes -
+                                    // die bleek op deze TV's niet altijd
+                                    // betrouwbaar.
+                                    final order = <FocusNode>[
+                                      _playerSourceFocus,
+                                      if (_hasSelectableTracks(_tracks.audio)) _playerAudioFocus,
+                                      if (_hasSelectableTracks(_tracks.subtitle)) _playerSubtitleFocus,
+                                    ];
+                                    return Focus(
+                                      canRequestFocus: false,
+                                      skipTraversal: true,
+                                      onKeyEvent: (node, event) {
+                                        if (event is! KeyDownEvent) return KeyEventResult.ignored;
+                                        _showControlsBriefly();
+                                        if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                                          _playerAreaFocus.requestFocus();
+                                          return KeyEventResult.handled;
+                                        }
+                                        if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+                                            event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                                          final current = order.indexWhere((n) => n.hasFocus);
+                                          if (current == -1) return KeyEventResult.ignored;
+                                          final delta = event.logicalKey == LogicalKeyboardKey.arrowRight ? 1 : -1;
+                                          final next = current + delta;
+                                          if (next >= 0 && next < order.length) {
+                                            order[next].requestFocus();
+                                            return KeyEventResult.handled;
+                                          }
+                                          return KeyEventResult.handled;
+                                        }
+                                        return KeyEventResult.ignored;
+                                      },
+                                      child: Row(children: [
+                                        _trackButton(Icons.dns_outlined, () => _pickSource(episode: _currentEpisode), 'Andere bron', focusNode: _playerSourceFocus),
+                                        if (_hasSelectableTracks(_tracks.audio)) ...[
+                                          const SizedBox(width: 8),
+                                          _trackButton(Icons.multitrack_audio, _pickAudioTrack, 'Audio', focusNode: _playerAudioFocus),
+                                        ],
+                                        if (_hasSelectableTracks(_tracks.subtitle)) ...[
+                                          const SizedBox(width: 8),
+                                          _trackButton(Icons.subtitles, _pickSubtitleTrack, 'Ondertitels', focusNode: _playerSubtitleFocus),
+                                        ],
+                                      ]),
+                                    );
+                                  }),
                                 ),
                               ),
                             ),

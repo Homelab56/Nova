@@ -112,17 +112,23 @@ def _aio_rank_result(item: dict) -> tuple[int, int]:
 
 _JUNK_RELEASE_MARKERS = ("ai upscale", "ai-upscale", "upscaled", "ai upscaled")
 
+# TrueHD wordt door de meegeleverde decoder gewoon niet ondersteund ("Failed
+# to initialize a decoder for codec 'truehd'" - live bevestigd tijdens
+# testen), dus zulke bronnen spelen sowieso nooit af, ongeacht toestel.
+_UNSUPPORTED_CODEC_MARKERS = ("truehd", "true-hd", "true hd")
+
 
 def _looks_like_junk_release(item: dict) -> bool:
     """
     Releases die zichzelf als "AI upscale" aanprijzen zijn zelden echt hogere
-    kwaliteit en vaak te zwaar om vlot af te spelen. Deze worden overal
-    volledig uitgesloten (niet enkel laag gerankt), zodat ze ook nooit via
-    een ondertitel-fallback alsnog gekozen kunnen worden wanneer er weinig
-    andere resultaten zijn.
+    kwaliteit en vaak te zwaar om vlot af te spelen. Bronnen met een
+    audiocodec die de speler niet kan decoderen (bv. TrueHD) spelen sowieso
+    nooit af. Beide worden overal volledig uitgesloten (niet enkel laag
+    gerankt), zodat ze ook nooit via een ondertitel-fallback alsnog gekozen
+    kunnen worden wanneer er weinig andere resultaten zijn.
     """
     name = (str(item.get("name") or "") + " " + str(item.get("filename") or "")).lower()
-    return any(x in name for x in _JUNK_RELEASE_MARKERS)
+    return any(x in name for x in _JUNK_RELEASE_MARKERS) or any(x in name for x in _UNSUPPORTED_CODEC_MARKERS)
 
 
 async def _fetch_aiostreams_results(
