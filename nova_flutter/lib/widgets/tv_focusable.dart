@@ -34,6 +34,13 @@ class TvFocusable extends StatefulWidget {
 
 class _TvFocusableState extends State<TvFocusable> {
   bool _focused = false;
+  // De állereerste focus-gebeurtenis (autofocus bij het openen van het
+  // scherm) mag niet scrollen: dat duwde op het profielscherm het logo
+  // erboven zomaar uit beeld om de eerste focusbare tegel te centreren -
+  // onopgemerkt op een groot venster (alles paste toch al), wel zichtbaar
+  // stuk op een kleiner TV-scherm. Latere, echte D-pad-navigatie scrollt
+  // gewoon normaal mee.
+  bool _hadFocusChange = false;
 
   @override
   Widget build(BuildContext context) {
@@ -41,7 +48,9 @@ class _TvFocusableState extends State<TvFocusable> {
       autofocus: widget.autofocus,
       onFocusChange: (has) {
         setState(() => _focused = has);
-        if (has) {
+        final skipScroll = widget.autofocus && !_hadFocusChange;
+        _hadFocusChange = true;
+        if (has && !skipScroll) {
           Scrollable.ensureVisible(context,
             duration: const Duration(milliseconds: 200), alignment: 0.5, curve: Curves.easeOut);
         }
