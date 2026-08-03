@@ -298,15 +298,25 @@ class _WatchScreenState extends State<WatchScreen> {
     }
   }
 
-  // Vertaalt een taalcode naar een leesbare naam. mpv's "title" veld is vaak
-  // maar een vlag (Forced/Regular/SDH) i.p.v. de taal, dus die tonen we enkel
-  // als aanvulling, niet als hoofdlabel.
-  String _langName(String? lang) {
+  static const _nlTitlePrefixes = ['nl', 'nld', 'dut', 'vla', 'vlaams', 'dutch', 'flemish', 'nederlands'];
+  static const _enTitlePrefixes = ['en', 'eng', 'english'];
+  static final RegExp _nlTitleRe =
+      RegExp(r'\b(nl|nld|dut|vla|vlaams|dutch|flemish|nederlands)\b', caseSensitive: false);
+  static final RegExp _enTitleRe = RegExp(r'\b(en|eng|english)\b', caseSensitive: false);
+
+  // Herleidt taal uit de taalcode, en indien die ontbreekt/onbekend is uit de
+  // titel (mkv-titels bevatten soms wel "English"/"Nederlands" maar geen
+  // taalcode-metadata). \b zodat "Bengali" niet als "en" matcht.
+  String? _resolveLangName(String? lang, String? title) {
     final l = _normLang(lang ?? '');
-    if (l.isEmpty) return '';
     if (l.startsWith('nl') || l.startsWith('dut') || l.startsWith('vla')) return 'Nederlands';
     if (l.startsWith('en')) return 'Engels';
-    return lang!;
+    final t = title ?? '';
+    if (t.isNotEmpty) {
+      if (_nlTitleRe.hasMatch(t)) return 'Nederlands';
+      if (_enTitleRe.hasMatch(t)) return 'Engels';
+    }
+    return null;
   }
 
   String _trackLabel(dynamic track) {
@@ -315,7 +325,7 @@ class _WatchScreenState extends State<WatchScreen> {
     if (id == 'auto') return 'Automatisch';
     final lang = track.language as String?;
     final title = track.title as String?;
-    final langName = _langName(lang);
+    final langName = _resolveLangName(lang, title) ?? '';
     if (langName.isNotEmpty) {
       if (title != null && title.isNotEmpty && title.toLowerCase() != langName.toLowerCase()) {
         return '$langName ($title)';
@@ -325,10 +335,7 @@ class _WatchScreenState extends State<WatchScreen> {
     return title ?? lang ?? 'Spoor $id';
   }
 
-  static const _allowedLangPrefixes = [
-    'nl', 'nld', 'dut', 'vla', 'vlaams', 'dutch', 'flemish', 'nederlands',
-    'en', 'eng', 'english',
-  ];
+  static const _allowedLangPrefixes = [..._nlTitlePrefixes, ..._enTitlePrefixes];
 
   bool _isAllowedLang(dynamic track) {
     final id = track.id as String;
@@ -337,6 +344,16 @@ class _WatchScreenState extends State<WatchScreen> {
     final title = (track.title as String? ?? '').toLowerCase();
     if (lang.isEmpty && title.isEmpty) return true;
     return _allowedLangPrefixes.any((p) => lang.startsWith(p) || title.contains(p));
+  }
+
+  // Strenger dan _isAllowedLang: enkel sporen met een BEVESTIGDE NL/EN-taal
+  // (code of titel) worden getoond. Gebruikt voor de ondertitel-lijst, want
+  // die bevat vaak veel niet-getagde sporen in andere talen (FR/DE/ES/...)
+  // die de gebruiker daar niet wil zien.
+  bool _isConfirmedNlOrEn(dynamic track) {
+    final id = track.id as String;
+    if (id == 'auto' || id == 'no') return true;
+    return _resolveLangName(track.language as String?, track.title as String?) != null;
   }
 
   bool _hasSelectableTracks(List tracks) =>
@@ -372,7 +389,7 @@ class _WatchScreenState extends State<WatchScreen> {
   }
 
   void _pickSubtitleTrack() {
-    final options = _tracks.subtitle.where(_isAllowedLang).toList();
+    final options = _tracks.subtitle.where(_isConfirmedNlOrEn).toList();
     final hasEmbeddedNl = options.any((t) {
       final lang = _normLang(t.language ?? '');
       return lang.startsWith('nl') || lang.startsWith('dut');
@@ -459,7 +476,9 @@ class _WatchScreenState extends State<WatchScreen> {
       };
       for (final path in ['/stream/subtitle-external.vtt', '/api/stream/subtitle-external.vtt']) {
         final vttUrl = Uri.parse('$baseUrl$path').replace(queryParameters: params);
-        final check = await http.get(vttUrl).timeout(const Duration(seconds: 240));
+        // Ruim: bij meerdere kandidaten kan de backend meerdere audio-
+        // extracties + ffsubsync-runs na elkaar proberen voor er 1 lukt.
+        final check = await http.get(vttUrl).timeout(const Duration(seconds: 600));
         if (check.statusCode == 200) return vttUrl.toString();
         if (check.statusCode != 404) continue;
         return null;

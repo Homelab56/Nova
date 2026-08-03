@@ -1457,7 +1457,7 @@ _OS_USER_AGENT = "Nova v1.0"
 # parameters, referentie-venster, kandidaat-selectie, ...), anders blijven
 # oude, met de vorige logica gesynchroniseerde resultaten hangen.
 _SUB_CACHE_DIR = "/app/data/subtitles_cache"
-_SUB_CACHE_VERSION = "v4"
+_SUB_CACHE_VERSION = "v5"
 
 
 def _subtitle_cache_path(cache_key: str) -> str:
@@ -1562,15 +1562,17 @@ async def _download_opensubtitles(file_id: int) -> str | None:
         return None
 
 
-async def _extract_reference_audio(video_url: str, out_path: str, duration_secs: int = 600, timeout: float = 260.0) -> bool:
+async def _extract_reference_audio(video_url: str, out_path: str, duration_secs: int = 900, timeout: float = 420.0) -> bool:
     """
     ffsubsync valideert zijn referentiebestand met os.access(), wat nooit
     lukt voor een URL - dus eerst audio naar een lokaal bestand extraheren.
     Mono/16kHz WAV, beperkt tot de eerste [duration_secs] (genoeg spraak om
     een betrouwbare sync te berekenen, zonder de hele - vaak 10+ GB - bron
-    te moeten downloaden). 10 minuten ipv 5: films met een lange dialoogloze
-    intro (openingscrawl, muziek, actie zonder tekst) gaven met 5 minuten
-    soms te weinig spraak om een betrouwbare sync tegen te berekenen.
+    te moeten downloaden). 15 minuten: naast dialoogloze intro's (openings-
+    crawl, muziek) hebben seizoenspremières vaak ook een lange recap die niet
+    in de ondertitel-bron zit, wat een verschuiving van enkele minuten geeft -
+    het venster moet ruim voorbij die verschuiving nog echte, matchende
+    dialoog bevatten om betrouwbaar te kunnen correleren.
     """
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
@@ -1605,7 +1607,7 @@ async def _extract_reference_audio(video_url: str, out_path: str, duration_secs:
         return False
 
 
-async def _run_ffsubsync(video_url: str, srt_text: str, timeout: float = 120.0) -> str | None:
+async def _run_ffsubsync(video_url: str, srt_text: str, timeout: float = 200.0) -> str | None:
     """Lijnt een ondertitel automatisch uit op de audio van de echte stream
     (spraakdetectie), ongeacht welke exacte release we binnenkregen. Ruime
     max-offset: series-afleveringen hebben vaak een "previously on"-recap
@@ -1625,7 +1627,7 @@ async def _run_ffsubsync(video_url: str, srt_text: str, timeout: float = 120.0) 
 
         cmd = [
             "ffsubsync", ref_path, "-i", in_path, "-o", out_path,
-            "--max-offset-seconds", "300",
+            "--max-offset-seconds", "480",
         ]
         proc = None
         try:
