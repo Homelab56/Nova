@@ -589,6 +589,12 @@ async def person_credits(person_id: int):
         mt = c.get("media_type")
         if mt not in ("movie", "tv"):
             continue
+        # "Self"/lege personagenaam = talkshow-optreden, documentaire-
+        # cameo, podcast, e.d. - technisch een cast-credit in TMDB, maar
+        # geen rol "waar de acteur in speelt" zoals bedoeld.
+        character = (c.get("character") or "").strip().lower()
+        if not character or character.startswith("self"):
+            continue
         key = (mt, c.get("id"))
         if key in seen:
             continue
