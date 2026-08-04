@@ -1457,7 +1457,7 @@ _OS_USER_AGENT = "Nova v1.0"
 # parameters, referentie-venster, kandidaat-selectie, ...), anders blijven
 # oude, met de vorige logica gesynchroniseerde resultaten hangen.
 _SUB_CACHE_DIR = "/app/data/subtitles_cache"
-_SUB_CACHE_VERSION = "v5"
+_SUB_CACHE_VERSION = "v6"
 
 
 def _subtitle_cache_path(cache_key: str) -> str:
@@ -1665,6 +1665,18 @@ def _srt_to_vtt(srt_text: str) -> str:
     return "WEBVTT\n\n" + body.strip() + "\n"
 
 
+def _release_name_from_url(decoded_url: str) -> str:
+    """Bestandsnaam uit de (al gedecodeerde) stream-URL. Verschillende
+    releases van dezelfde episode/film kunnen een andere montage hebben
+    (recap wel/niet, andere intro-lengte, ...), dus de sync-offset die voor
+    de ene release berekend is, is niet per se geldig voor een andere."""
+    try:
+        path = urllib.parse.urlparse(decoded_url).path
+        return path.rsplit("/", 1)[-1] or decoded_url
+    except Exception:
+        return decoded_url
+
+
 @router.get("/subtitle-external.vtt")
 async def subtitle_external_vtt(
     url: str,
@@ -1683,7 +1695,10 @@ async def subtitle_external_vtt(
     if not get_opensubtitles_key():
         raise HTTPException(status_code=503, detail="OpenSubtitles is niet geconfigureerd op de server.")
 
-    cache_key = f"{_SUB_CACHE_VERSION}:{tmdb_id}:{media_type}:{season}:{episode}:{lang}"
+    input_value = urllib.parse.unquote(url)
+    release = _release_name_from_url(input_value)
+    release_hash = hashlib.sha256(release.encode("utf-8")).hexdigest()[:12]
+    cache_key = f"{_SUB_CACHE_VERSION}:{tmdb_id}:{media_type}:{season}:{episode}:{lang}:{release_hash}"
     cached = _subtitle_cache_get(cache_key)
     if cached:
         return Response(content=cached, media_type="text/vtt", headers={"Cache-Control": "no-cache"})
@@ -1699,7 +1714,6 @@ async def subtitle_external_vtt(
     if not candidates:
         raise HTTPException(status_code=404, detail=f"Geen {lang}-ondertitels gevonden op OpenSubtitles.")
 
-    input_value = urllib.parse.unquote(url)
     fallback_srt = None  # eerste succesvolle download, voor als geen enkele kandidaat wil synchroniseren
     for candidate in candidates:
         srt_text = await _download_opensubtitles(candidate["file_id"])
