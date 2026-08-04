@@ -124,8 +124,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final tvGenreFuture = Future.wait(
       _tvGenreRows.map((g) => _safeList(TmdbService.getGenreItems(g['id'] as int, 'tv'))));
 
-    // 1-ster-uitsluitingen en de "Omdat je hield van ..."-zaadjes (de 3
-    // meest recente 3-sterren-rangschikkingen) uit de rangschikkingen van dit
+    // 1-ster-uitsluitingen en de 3-sterren-rangschikkingen ("top!") van dit
     // profiel op de server - falen mag de rest van het scherm niet blokkeren.
     Map<String, dynamic> ratings = {};
     try {
@@ -149,9 +148,11 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
     topRated.sort((a, b) => (b['rated_at'] as num).compareTo(a['rated_at'] as num));
-    final seeds = topRated.take(3).toList();
+    // Alle 3-sterren-rangschikkingen als zaad (niet enkel de 3 recentste) -
+    // hoe meer zaden, hoe rijker en accurater de gecombineerde suggestielijst.
+    final seeds = topRated;
     final recsFuture = Future.wait(
-      seeds.map((s) => _safeList(TmdbService.getSimilar(s['id'] as int, s['media_type'] as String))));
+      seeds.map((s) => _safeList(TmdbService.getRecommendations(s['id'] as int, s['media_type'] as String))));
 
     final results = await mainFuture;
     final kidsExtra = await kidsExtraFuture;
@@ -163,10 +164,30 @@ class _HomeScreenState extends State<HomeScreen> {
       _excludedIds
         ..clear()
         ..addAll(excluded);
-      _recommendationRows = [
-        for (var i = 0; i < seeds.length; i++)
-          if (recLists[i].isNotEmpty)
-            {'title': 'Omdat je hield van ${seeds[i]['title']}', 'items': recLists[i]},
+      // Alle zaden samenvoegen tot 1 rij i.p.v. één rij per 3-sterren-titel -
+      // gededupliceerd (op media_type+id, iets kan gelijkaardig zijn aan
+      // meerdere zaden) en de zaden zelf + 1-ster-uitsluitingen eruit, zodat
+      // je nooit iets al bekeken/afgewezens als "suggestie" terugziet.
+      final seedKeys = seeds.map((s) => '${s['media_type']}:${s['id']}').toSet();
+      final merged = <String, dynamic>{};
+      for (final list in recLists) {
+        for (final item in list) {
+          final id = item['id'];
+          if (id == null || excluded.contains(id)) continue;
+          final mt = (item['media_type'] as String?) ?? (item['first_air_date'] != null ? 'tv' : 'movie');
+          final key = '$mt:$id';
+          if (seedKeys.contains(key)) continue;
+          merged.putIfAbsent(key, () => item);
+        }
+      }
+      final threeStarSuggestions = merged.values.toList()
+        ..sort((a, b) => ((b['popularity'] ?? 0) as num).compareTo((a['popularity'] ?? 0) as num));
+      _recommendationRows = threeStarSuggestions.isEmpty ? [] : [
+        {
+          'title': '★★★ Suggesties voor jou',
+          'items': threeStarSuggestions.take(30).toList(),
+          'seeAllItems': threeStarSuggestions,
+        },
       ];
       _trending = results[0];
       _popularMovies = results[1];
@@ -316,7 +337,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       isProgress: entry.value['is_progress'] == true,
                       isRanked: entry.value['is_ranked'] == true,
                       isFirstRow: entry.key == 0 && _heroItems.isEmpty,
-                      path: entry.value['path'] as String?))),
+                      path: entry.value['path'] as String?,
+                      seeAllItems: entry.value['seeAllItems'] as List?))),
                   const SliverToBoxAdapter(child: SizedBox(height: 50)),
                 ],
               ),
@@ -604,7 +626,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildRow(String title, List items, {bool isRd = false, bool isProgress = false, bool isRanked = false, String? path, bool isFirstRow = false}) {
+  Widget _buildRow(String title, List items, {bool isRd = false, bool isProgress = false, bool isRanked = false, String? path, List? seeAllItems, bool isFirstRow = false}) {
     if (items.isEmpty) return const SizedBox.shrink();
     return MediaRow(
       title: title,
@@ -612,8 +634,11 @@ class _HomeScreenState extends State<HomeScreen> {
       height: isProgress ? 185 : (isRanked ? 320 : 300),
       itemCount: isRanked ? (items.length < 10 ? items.length : 10) : items.length,
       path: path,
-      onSeeAll: path == null ? null : () => Navigator.push(context, MaterialPageRoute(
-        builder: (_) => CategoryScreen(title: title, path: path))),
+      onSeeAll: path != null
+        ? () => Navigator.push(context, MaterialPageRoute(builder: (_) => CategoryScreen(title: title, path: path)))
+        : (seeAllItems != null && seeAllItems.isNotEmpty
+            ? () => Navigator.push(context, MaterialPageRoute(builder: (_) => CategoryScreen(title: title, items: seeAllItems)))
+            : null),
       itemBuilder: (_, i) => isRanked
         ? _buildRankedCard(items[i], i + 1, isFirstRow: isFirstRow)
         : _buildCard(items[i], isRd: isRd, isProgress: isProgress, isFirstRow: isFirstRow),

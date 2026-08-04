@@ -8,10 +8,16 @@ const _tmdbPoster = 'https://image.tmdb.org/t/p/w342';
 
 // Volledig, doorbladerbaar grid-overzicht van een home-rij ("Meer bekijken"),
 // i.p.v. enkel de eerste ~20 items die in de horizontale rij passen.
+// Ofwel gepagineerd via een backend-pad (path), ofwel een al kant-en-klare
+// lijst (items) - voor rijen zoals de 3-sterren-suggesties die client-side
+// samengesteld worden (meerdere zaad-titels samengevoegd) i.p.v. van één
+// enkel paginerend endpoint te komen.
 class CategoryScreen extends StatefulWidget {
   final String title;
-  final String path;
-  const CategoryScreen({super.key, required this.title, required this.path});
+  final String? path;
+  final List? items;
+  const CategoryScreen({super.key, required this.title, this.path, this.items})
+      : assert(path != null || items != null);
   @override
   State<CategoryScreen> createState() => _CategoryScreenState();
 }
@@ -25,8 +31,14 @@ class _CategoryScreenState extends State<CategoryScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
-    _scrollCtrl.addListener(_onScroll);
+    if (widget.items != null) {
+      _results = widget.items!;
+      _total = _results.length;
+      _loading = false;
+    } else {
+      _load();
+      _scrollCtrl.addListener(_onScroll);
+    }
   }
 
   @override
@@ -37,6 +49,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
   }
 
   void _onScroll() {
+    if (widget.path == null) return; // statische lijst, geen paginering nodig
     if (_loading || _page >= _totalPages) return;
     if (!_scrollCtrl.hasClients) return;
     if (_scrollCtrl.position.pixels < _scrollCtrl.position.maxScrollExtent - 600) return;
@@ -44,9 +57,10 @@ class _CategoryScreenState extends State<CategoryScreen> {
   }
 
   Future<void> _load({bool append = false}) async {
+    if (widget.path == null) return;
     setState(() => _loading = true);
     try {
-      final data = await TmdbService.getPaged(widget.path, page: append ? _page + 1 : 1);
+      final data = await TmdbService.getPaged(widget.path!, page: append ? _page + 1 : 1);
       setState(() {
         _results = append ? [..._results, ...(data['items'] as List)] : data['items'] as List;
         _page = append ? _page + 1 : 1;

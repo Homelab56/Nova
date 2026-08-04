@@ -540,7 +540,18 @@ async def movie_credits(tmdb_id: int):
 @router.get("/movie/{tmdb_id}/similar")
 async def movie_similar(tmdb_id: int):
     data = await tmdb_get(f"/movie/{tmdb_id}/similar")
-    return data.get("results", [])[:18]
+    items = _filter_items(data.get("results", []) or [], media_type="movie", suggestion_mode=True, allow_kids=False)
+    return items[:18]
+
+# TMDB maakt zelf onderscheid tussen "similar" (genre-gebaseerd, vaak zwak/
+# lukraak) en "recommendations" (gebaseerd op wat andere kijkers ook keken -
+# geeft veel vaker echt logisch gerelateerde titels zoals vervolgen van
+# dezelfde franchise). Gebruikt voor de 3-sterren-suggesties.
+@router.get("/movie/{tmdb_id}/recommendations")
+async def movie_recommendations(tmdb_id: int):
+    data = await tmdb_get(f"/movie/{tmdb_id}/recommendations")
+    items = _filter_items(data.get("results", []) or [], media_type="movie", suggestion_mode=True, allow_kids=False)
+    return items[:18]
 
 @router.get("/tv/{tmdb_id}")
 async def tv_detail(tmdb_id: int):
@@ -554,7 +565,14 @@ async def tv_credits(tmdb_id: int):
 @router.get("/tv/{tmdb_id}/similar")
 async def tv_similar(tmdb_id: int):
     data = await tmdb_get(f"/tv/{tmdb_id}/similar")
-    return data.get("results", [])[:18]
+    items = _filter_items(data.get("results", []) or [], media_type="tv", suggestion_mode=True, allow_kids=False)
+    return items[:18]
+
+@router.get("/tv/{tmdb_id}/recommendations")
+async def tv_recommendations(tmdb_id: int):
+    data = await tmdb_get(f"/tv/{tmdb_id}/recommendations")
+    items = _filter_items(data.get("results", []) or [], media_type="tv", suggestion_mode=True, allow_kids=False)
+    return items[:18]
 
 @router.get("/tv/{tmdb_id}/season/{season_number}")
 async def tv_season(tmdb_id: int, season_number: int):

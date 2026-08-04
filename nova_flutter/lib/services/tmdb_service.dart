@@ -137,6 +137,15 @@ class TmdbService {
     return items.take(20).toList();
   }
 
+  // TMDB's "recommendations" (gebaseerd op wat andere kijkers ook keken)
+  // geeft doorgaans veel relevantere resultaten dan "similar" (puur
+  // genre-gebaseerd) - bv. vervolgen van dezelfde franchise komen hier
+  // wél consistent naar boven.
+  static Future<List> getRecommendations(int id, String type) async {
+    final d = await _backendGet('/api/search/$type/$id/recommendations');
+    return _extractItems(d).take(20).toList();
+  }
+
   static Future<Map> getSeason(int id, int season) async {
     return await _backendGet('/api/search/tv/$id/season/$season') as Map;
   }
