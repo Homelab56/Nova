@@ -12,32 +12,49 @@ DATA_FILE = "/app/data/profiles.json"
 BACKUP_DIR = "/app/data/profiles_backups"
 MAX_BACKUPS = 20
 
+# Alle endpoints hieronder doen een read-modify-write op hetzelfde gedeelde
+# bestand. Zonder lock kunnen twee gelijktijdige requests (bv. een profiel
+# aanmaken op de ene TV terwijl een andere net kijkvoortgang opslaat) elkaars
+# wijziging overschrijven - de langzaamste "wint" en herschrijft het bestand
+# met zijn eigen, inmiddels verouderde snapshot, wat stilzwijgend andere
+# profielen kan wissen. Eén lock per proces (uvicorn draait hier single-
+# worker) sluit die race volledig uit.
+_lock = asyncio.Lock()
+
 
 def _load_sync() -> dict:
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r") as f:
-                data = json.load(f)
-                if isinstance(data, dict):
-                    data.setdefault("profiles", [])
-                    data.setdefault("data", {})
-                    return data
-        except Exception as e:
-            print(f"Fout bij laden profiles: {e}")
-    return {"profiles": [], "data": {}}
+    if not os.path.exists(DATA_FILE):
+        return {"profiles": [], "data": {}}
+    with open(DATA_FILE, "r") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError("profiles.json bevat geen object")
+    data.setdefault("profiles", [])
+    data.setdefault("data", {})
+    return data
 
 
 def _save_sync(data: dict):
-    try:
-        os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
-        with open(DATA_FILE, "w") as f:
-            json.dump(data, f, indent=2)
-    except Exception as e:
-        print(f"Fout bij opslaan profiles: {e}")
+    # Atomisch schrijven (tmp + rename i.p.v. in-place overschrijven): een
+    # afgebroken write (crash, container-kill) kan zo nooit een half
+    # geschreven/corrupt bestand achterlaten dat een latere read stil zou
+    # doen terugvallen op "geen profielen".
+    os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
+    tmp_path = f"{DATA_FILE}.tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp_path, DATA_FILE)
 
 
 async def load() -> dict:
-    return await asyncio.to_thread(_load_sync)
+    try:
+        return await asyncio.to_thread(_load_sync)
+    except Exception as e:
+        # Een kapot/onleesbaar bestand stil vervangen door "geen profielen"
+        # zou een volgende save() dat lege resultaat blijvend laten
+        # overschrijven - liever de request laten falen dan data verliezen.
+        print(f"Fout bij laden profiles: {e}")
+        raise HTTPException(status_code=503, detail="Profielgegevens tijdelijk niet leesbaar, probeer opnieuw.")
 
 
 async def save(data: dict):
@@ -46,10 +63,7 @@ async def save(data: dict):
 
 def _backup_sync():
     """Kopieert het huidige bestand weg vóór een wijziging aan de profielen-
-    lijst zelf (aanmaken/bewerken/verwijderen) - dit is de enige plek waar
-    ooit een bug of race iemands profielen (en dus watchlist/geschiedenis/
-    ratings, die in dezelfde blob zitten) stilzwijgend kan wissen, dus dat
-    moet altijd herstelbaar zijn."""
+    lijst zelf (aanmaken/bewerken/verwijderen)."""
     if not os.path.exists(DATA_FILE):
         return
     try:
@@ -142,116 +156,129 @@ class RatingItem(BaseModel):
 
 @router.get("/")
 async def get_profiles():
-    data = await load()
-    return data["profiles"]
+    async with _lock:
+        data = await load()
+        return data["profiles"]
 
 
 @router.post("/")
 async def create_profile(profile: ProfileCreate):
-    data = await load()
-    new_id = profile.id or str(int(time.time() * 1000))
-    entry = {"id": new_id, "name": profile.name, "pin": profile.pin,
-             "colorIndex": profile.colorIndex, "icon": profile.icon}
-    data["profiles"].append(entry)
-    await save_profiles_list(data)
-    return entry
+    async with _lock:
+        data = await load()
+        new_id = profile.id or str(int(time.time() * 1000))
+        entry = {"id": new_id, "name": profile.name, "pin": profile.pin,
+                 "colorIndex": profile.colorIndex, "icon": profile.icon}
+        data["profiles"].append(entry)
+        await save_profiles_list(data)
+        return entry
 
 
 @router.put("/{profile_id}")
 async def update_profile(profile_id: str, profile: ProfileUpdate):
-    data = await load()
-    for p in data["profiles"]:
-        if p["id"] == profile_id:
-            p.update({"name": profile.name, "pin": profile.pin,
-                      "colorIndex": profile.colorIndex, "icon": profile.icon})
-            await save_profiles_list(data)
-            return p
-    raise HTTPException(status_code=404, detail="Profiel niet gevonden")
+    async with _lock:
+        data = await load()
+        for p in data["profiles"]:
+            if p["id"] == profile_id:
+                p.update({"name": profile.name, "pin": profile.pin,
+                          "colorIndex": profile.colorIndex, "icon": profile.icon})
+                await save_profiles_list(data)
+                return p
+        raise HTTPException(status_code=404, detail="Profiel niet gevonden")
 
 
 @router.delete("/{profile_id}")
 async def delete_profile(profile_id: str):
-    data = await load()
-    data["profiles"] = [p for p in data["profiles"] if p["id"] != profile_id]
-    data["data"].pop(profile_id, None)
-    await save_profiles_list(data)
-    return {"ok": True}
+    async with _lock:
+        data = await load()
+        data["profiles"] = [p for p in data["profiles"] if p["id"] != profile_id]
+        data["data"].pop(profile_id, None)
+        await save_profiles_list(data)
+        return {"ok": True}
 
 
 # --- Watchlist ---
 
 @router.get("/{profile_id}/watchlist")
 async def get_watchlist(profile_id: str):
-    data = await load()
-    return _profile_data(data, profile_id)["watchlist"]
+    async with _lock:
+        data = await load()
+        return _profile_data(data, profile_id)["watchlist"]
 
 
 @router.post("/{profile_id}/watchlist")
 async def add_to_watchlist(profile_id: str, item: WatchlistItem):
-    data = await load()
-    pd = _profile_data(data, profile_id)
-    if not any(w["id"] == item.id for w in pd["watchlist"]):
-        pd["watchlist"].insert(0, item.dict())
-        await save(data)
-    return {"ok": True}
+    async with _lock:
+        data = await load()
+        pd = _profile_data(data, profile_id)
+        if not any(w["id"] == item.id for w in pd["watchlist"]):
+            pd["watchlist"].insert(0, item.dict())
+            await save(data)
+        return {"ok": True}
 
 
 @router.delete("/{profile_id}/watchlist/{item_id}")
 async def remove_from_watchlist(profile_id: str, item_id: int):
-    data = await load()
-    pd = _profile_data(data, profile_id)
-    pd["watchlist"] = [w for w in pd["watchlist"] if w["id"] != item_id]
-    await save(data)
-    return {"ok": True}
+    async with _lock:
+        data = await load()
+        pd = _profile_data(data, profile_id)
+        pd["watchlist"] = [w for w in pd["watchlist"] if w["id"] != item_id]
+        await save(data)
+        return {"ok": True}
 
 
 # --- Voortgang ---
 
 @router.get("/{profile_id}/progress")
 async def get_all_progress(profile_id: str):
-    data = await load()
-    return list(_profile_data(data, profile_id)["progress"].values())
+    async with _lock:
+        data = await load()
+        return list(_profile_data(data, profile_id)["progress"].values())
 
 
 @router.post("/{profile_id}/progress")
 async def save_progress(profile_id: str, item: ProgressItem):
-    data = await load()
-    pd = _profile_data(data, profile_id)
-    pd["progress"][str(item.id)] = item.dict()
-    await save(data)
-    return {"ok": True}
+    async with _lock:
+        data = await load()
+        pd = _profile_data(data, profile_id)
+        pd["progress"][str(item.id)] = item.dict()
+        await save(data)
+        return {"ok": True}
 
 
 @router.delete("/{profile_id}/progress/{item_id}")
 async def delete_progress(profile_id: str, item_id: str):
-    data = await load()
-    pd = _profile_data(data, profile_id)
-    pd["progress"].pop(str(item_id), None)
-    await save(data)
-    return {"ok": True}
+    async with _lock:
+        data = await load()
+        pd = _profile_data(data, profile_id)
+        pd["progress"].pop(str(item_id), None)
+        await save(data)
+        return {"ok": True}
 
 
 # --- Persoonlijke rangschikking (1-3 sterren) ---
 
 @router.get("/{profile_id}/ratings")
 async def get_ratings(profile_id: str):
-    data = await load()
-    return _profile_data(data, profile_id)["ratings"]
+    async with _lock:
+        data = await load()
+        return _profile_data(data, profile_id)["ratings"]
 
 
 @router.post("/{profile_id}/ratings")
 async def set_rating(profile_id: str, item: RatingItem):
-    data = await load()
-    pd = _profile_data(data, profile_id)
-    pd["ratings"][str(item.id)] = item.dict()
-    await save(data)
-    return {"ok": True}
+    async with _lock:
+        data = await load()
+        pd = _profile_data(data, profile_id)
+        pd["ratings"][str(item.id)] = item.dict()
+        await save(data)
+        return {"ok": True}
 
 
 @router.delete("/{profile_id}/ratings/{item_id}")
 async def clear_rating(profile_id: str, item_id: int):
-    data = await load()
-    pd = _profile_data(data, profile_id)
-    pd["ratings"].pop(str(item_id), None)
-    await save(data)
-    return {"ok": True}
+    async with _lock:
+        data = await load()
+        pd = _profile_data(data, profile_id)
+        pd["ratings"].pop(str(item_id), None)
+        await save(data)
+        return {"ok": True}
