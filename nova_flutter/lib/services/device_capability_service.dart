@@ -26,9 +26,11 @@ class DeviceCapabilityService {
         _maxAutoResolution = null;
         return null;
       }
-      // Ruime marge: 4K/HEVC-decodering vraagt zelf ook geheugen bovenop
-      // wat de TV-software/launcher/casting-diensten al bezet houden.
-      _maxAutoResolution = ram < 3000 ? 1080 : null;
+      // Ruime marge: decodering vraagt zelf ook geheugen bovenop wat de
+      // TV-software/launcher/casting-diensten al bezet houden. Een Nvidia
+      // Shield (~2GB) bleek zelfs op 1080p nog te crashen door de systeem-
+      // lowmemorykiller, dus die klasse toestellen krijgt een extra tier.
+      _maxAutoResolution = ram < 2200 ? 720 : (ram < 3000 ? 1080 : null);
       return _maxAutoResolution;
     } catch (_) {
       _maxAutoResolution = null;
