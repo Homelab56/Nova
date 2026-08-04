@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:window_manager/window_manager.dart';
 import '../widgets/nova_image.dart';
 import '../widgets/media_row.dart';
 import '../widgets/tv_focusable.dart';
@@ -15,6 +16,7 @@ import '../services/debrid_service.dart';
 import '../services/userdata_service.dart';
 import '../services/settings_service.dart';
 import '../services/device_capability_service.dart';
+import 'person_screen.dart';
 
 const tmdbPoster = 'https://image.tmdb.org/t/p/w342';
 const tmdbProfile = 'https://image.tmdb.org/t/p/w185';
@@ -69,6 +71,11 @@ class _WatchScreenState extends State<WatchScreen> {
   final FocusNode _playerSourceFocus = FocusNode();
   final FocusNode _playerAudioFocus = FocusNode();
   final FocusNode _playerSubtitleFocus = FocusNode();
+  final FocusNode _playerFullscreenFocus = FocusNode();
+  final FocusNode _playerPlayPauseFocus = FocusNode();
+  final FocusNode _skipSuggestionFocus = FocusNode();
+  bool _isFullScreen = false;
+  bool get _isDesktop => Platform.isWindows || Platform.isMacOS || Platform.isLinux;
   final List<FocusNode> _starFocusNodes = List.generate(3, (_) => FocusNode());
   bool _endRatingPromptShown = false;
   // Terug-knop en bron/audio/ondertitels-rij verdwijnen na een paar seconden
@@ -86,6 +93,9 @@ class _WatchScreenState extends State<WatchScreen> {
   }
   String? _seekIndicator;
   Timer? _seekIndicatorTimer;
+  Duration _position = Duration.zero;
+  bool _isPlaying = true;
+  Duration? _dragPosition; // niet-null zolang de balk met muis/aanraking gesleept wordt
 
   @override
   void initState() {
@@ -139,6 +149,7 @@ class _WatchScreenState extends State<WatchScreen> {
     // Luister naar player updates voor progress
     int lastSave = -1;
     _player.stream.position.listen((pos) {
+      if (mounted) setState(() => _position = pos);
       final dur = _player.state.duration;
       final sec = pos.inSeconds;
       if (dur.inSeconds > 0 && sec > 0 && sec % 10 == 0 && sec != lastSave) {
@@ -160,6 +171,11 @@ class _WatchScreenState extends State<WatchScreen> {
           });
         }
       }
+    });
+    // Zichtbare pauze-status: zonder dit was er geen enkel visueel verschil
+    // tussen afspelen en pauze buiten het stilvallen van het beeld zelf.
+    _player.stream.playing.listen((p) {
+      if (mounted) setState(() => _isPlaying = p);
     });
 
     // Bij het einde van een film (niet per aflevering, dat zou te opdringerig
@@ -561,6 +577,35 @@ class _WatchScreenState extends State<WatchScreen> {
     return d.length >= 4 ? d.substring(0, 4) : '';
   }
 
+  // Genres/duur/makers komen uit de volledige detail-fetch (_detail), niet
+  // uit widget.media (het zoekresultaat) - die heeft enkel genre_ids
+  // (nummers, geen namen) en geen runtime.
+  String? get _genresLabel {
+    final genres = (_detail?['genres'] as List?)?.cast<Map>() ?? const [];
+    if (genres.isEmpty) return null;
+    return genres.map((g) => g['name']).whereType<String>().join(' • ');
+  }
+
+  String? get _runtimeLabel {
+    if (isMovie) {
+      final rt = (_detail?['runtime'] as num?)?.toInt();
+      if (rt == null || rt <= 0) return null;
+      final h = rt ~/ 60, m = rt % 60;
+      return h > 0 ? '${h}u ${m}m' : '${m}m';
+    }
+    final list = (_detail?['episode_run_time'] as List?) ?? const [];
+    if (list.isEmpty) return null;
+    final rt = (list.first as num).toInt();
+    return '~${rt}m per aflevering';
+  }
+
+  String? get _creatorsLabel {
+    if (isMovie) return null;
+    final creators = (_detail?['created_by'] as List?)?.cast<Map>() ?? const [];
+    if (creators.isEmpty) return null;
+    return creators.map((c) => c['name']).whereType<String>().join(', ');
+  }
+
   Future<void> _checkAvailability() async {
     final q = '$title $year';
     final available = await DebridService.checkAvailability(q);
@@ -650,9 +695,24 @@ class _WatchScreenState extends State<WatchScreen> {
       Wrap(spacing: 10, children: [
         if (year.isNotEmpty) Text(year, style: const TextStyle(color: Colors.grey, fontSize: 14)),
         if (rating != null) Text('★ $rating', style: const TextStyle(color: Colors.amber, fontSize: 14)),
+        if (_runtimeLabel != null) Text(_runtimeLabel!, style: const TextStyle(color: Colors.grey, fontSize: 14)),
         if (seasons.isNotEmpty) Text('${seasons.length} seizoen${seasons.length > 1 ? "en" : ""}',
           style: const TextStyle(color: Colors.grey, fontSize: 14)),
       ]),
+      if (_genresLabel != null) ...[
+        const SizedBox(height: 6),
+        ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: overlay ? 560 : double.infinity),
+          child: Text(_genresLabel!, style: const TextStyle(color: Colors.white54, fontSize: 13)),
+        ),
+      ],
+      if (_creatorsLabel != null) ...[
+        const SizedBox(height: 6),
+        ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: overlay ? 560 : double.infinity),
+          child: Text('Van ${_creatorsLabel!}', style: const TextStyle(color: Colors.white54, fontSize: 13)),
+        ),
+      ],
       const SizedBox(height: 14),
       ConstrainedBox(
         constraints: BoxConstraints(maxWidth: overlay ? 560 : double.infinity),
@@ -866,6 +926,143 @@ class _WatchScreenState extends State<WatchScreen> {
     } else {
       Navigator.pop(context);
     }
+  }
+
+  // Zonder echte audio-detectie (vergelijking met een andere aflevering)
+  // is er geen betrouwbare manier om precies te weten waar de aftiteling
+  // begint - een vast tijdvenster zit er ofwel te vroeg ofwel te laat naast
+  // per episode. 100s resterend is een redelijk gemiddelde tussen wat te
+  // laat (45s) en te vroeg (180s) bleek in de praktijk.
+  static const _nextEpisodeWindow = Duration(seconds: 100);
+
+  // Enkel binnen het al geladen seizoen - een aflevering uit het volgende
+  // seizoen zou een aparte season-fetch vergen enkel voor deze knop.
+  Map? get _nextEpisodeInSeason {
+    if (isMovie || _currentEpisode == null) return null;
+    final episodes = (_seasonData?['episodes'] as List?) ?? [];
+    final nextNum = (_currentEpisode!['episode_number'] as int) + 1;
+    for (final e in episodes) {
+      if (e is Map && e['episode_number'] == nextNum) return e;
+    }
+    return null;
+  }
+
+  bool get _showNextEpisodeButton {
+    final dur = _player.state.duration;
+    if (dur <= Duration.zero || isMovie || _currentEpisode == null || _nextEpisodeInSeason == null) return false;
+    final remaining = dur - _position;
+    return remaining > Duration.zero && remaining < _nextEpisodeWindow;
+  }
+
+  Widget _buildSkipSuggestionButton({required IconData icon, required String label, required VoidCallback onTap}) {
+    return Focus(
+      autofocus: true,
+      focusNode: _skipSuggestionFocus,
+      onKeyEvent: (node, event) {
+        if (event is! KeyDownEvent) return KeyEventResult.ignored;
+        _showControlsBriefly();
+        if (event.logicalKey == LogicalKeyboardKey.arrowUp ||
+            event.logicalKey == LogicalKeyboardKey.arrowDown) {
+          _playerAreaFocus.requestFocus();
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.select ||
+            event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+            event.logicalKey == LogicalKeyboardKey.space) {
+          onTap();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Builder(builder: (context) {
+        final focused = Focus.of(context).hasFocus;
+        return InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.black87,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: focused ? const Color(0xFF00b4d8) : Colors.white24, width: focused ? 2 : 1),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(icon, color: Colors.white, size: 18),
+              const SizedBox(width: 8),
+              Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
+            ]),
+          ),
+        );
+      }),
+    );
+  }
+
+  String _formatDuration(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60);
+    final s = d.inSeconds.remainder(60);
+    final mm = m.toString().padLeft(2, '0');
+    final ss = s.toString().padLeft(2, '0');
+    return h > 0 ? '$h:$mm:$ss' : '$m:$ss';
+  }
+
+  Widget _buildPlaybackProgressBar() {
+    final dur = _player.state.duration;
+    final totalMs = dur.inMilliseconds > 0 ? dur.inMilliseconds : 1;
+    final shown = _dragPosition ?? _position;
+    final valueMs = shown.inMilliseconds.clamp(0, totalMs).toDouble();
+    return Row(children: [
+      Text(_formatDuration(shown),
+        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+      const SizedBox(width: 8),
+      Expanded(
+        // ExcludeFocus: een Slider doet standaard mee in toetsenbord-/D-pad-
+        // focustraversal, wat zou botsen met onze eigen links/rechts-spoel-
+        // afhandeling op de video zelf. Met muis/aanraking blijft slepen/
+        // klikken gewoon werken - enkel focus wordt uitgesloten.
+        child: ExcludeFocus(
+          child: SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 5,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+              activeTrackColor: const Color(0xFF00b4d8),
+              inactiveTrackColor: Colors.white24,
+              thumbColor: const Color(0xFF00b4d8),
+              overlayColor: const Color(0xFF00b4d8).withOpacity(0.2),
+            ),
+            child: Slider(
+              value: valueMs,
+              min: 0,
+              max: totalMs.toDouble(),
+              onChangeStart: (v) => setState(() => _dragPosition = Duration(milliseconds: v.round())),
+              onChanged: (v) => setState(() => _dragPosition = Duration(milliseconds: v.round())),
+              onChangeEnd: (v) {
+                final target = Duration(milliseconds: v.round());
+                _player.seek(target);
+                setState(() {
+                  _position = target;
+                  _dragPosition = null;
+                });
+                _showControlsBriefly();
+              },
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(width: 8),
+      Text(_formatDuration(dur),
+        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+    ]);
+  }
+
+  Future<void> _toggleFullScreen() async {
+    if (!_isDesktop) return;
+    final next = !_isFullScreen;
+    await windowManager.setFullScreen(next);
+    if (mounted) setState(() => _isFullScreen = next);
   }
 
   void _togglePlayPause() {
@@ -1246,6 +1443,9 @@ class _WatchScreenState extends State<WatchScreen> {
     _playerSourceFocus.dispose();
     _playerAudioFocus.dispose();
     _playerSubtitleFocus.dispose();
+    _playerFullscreenFocus.dispose();
+    _playerPlayPauseFocus.dispose();
+    _skipSuggestionFocus.dispose();
     for (final n in _starFocusNodes) { n.dispose(); }
     _seekIndicatorTimer?.cancel();
     _controlsHideTimer?.cancel();
@@ -1302,7 +1502,11 @@ class _WatchScreenState extends State<WatchScreen> {
                       ),
                     Center(
                       child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 1100),
+                        // In volledig scherm mag de video het hele venster
+                        // vullen - de max-breedte is er enkel om 'm in een
+                        // gewoon (niet-fullscreen) venster niet absurd breed
+                        // te laten worden op een ultrawide scherm.
+                        constraints: BoxConstraints(maxWidth: _isFullScreen ? double.infinity : 1100),
                         child: AspectRatio(
                           aspectRatio: 16/9,
                           child: Stack(children: [
@@ -1310,43 +1514,70 @@ class _WatchScreenState extends State<WatchScreen> {
                             // meer focus (het vorige focusbare element - bv.
                             // een episoderij - verdween uit de boom), dus
                             // een afstandsbediening had zonder dit nergens
-                            // naartoe te gaan. Links/rechts spoelt, omhoog
+                            // naartoe te gaan. Links/rechts spoelt, omlaag
                             // springt naar de bron/audio/ondertitels-rij
-                            // (die staat bovenaan rechts), omlaag naar de
-                            // rest van de pagina (rangschikking, seizoenen...).
-                            Focus(
-                              autofocus: true,
-                              focusNode: _playerAreaFocus,
-                              onKeyEvent: (node, event) {
-                                if (event is! KeyDownEvent) return KeyEventResult.ignored;
+                            // (die nu onderaan bij de voortgangsbalk staat),
+                            // vandaar verder omlaag naar de rest van de
+                            // pagina (rangschikking, seizoenen...).
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              // Klikken op het beeld zelf pauzeert/hervat -
+                              // zoals bij zowat elke andere videospeler.
+                              onTap: () {
+                                _togglePlayPause();
                                 _showControlsBriefly();
-                                if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-                                  _seek(-10);
-                                  return KeyEventResult.handled;
-                                }
-                                if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-                                  _seek(10);
-                                  return KeyEventResult.handled;
-                                }
-                                if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-                                  _playerSourceFocus.requestFocus();
-                                  return KeyEventResult.handled;
-                                }
-                                if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-                                  _playFocus.requestFocus();
-                                  return KeyEventResult.handled;
-                                }
-                                if (event.logicalKey == LogicalKeyboardKey.select ||
-                                    event.logicalKey == LogicalKeyboardKey.enter ||
-                                    event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                                    event.logicalKey == LogicalKeyboardKey.space) {
-                                  _togglePlayPause();
-                                  return KeyEventResult.handled;
-                                }
-                                return KeyEventResult.ignored;
                               },
-                              child: Video(controller: _controller),
+                              child: Focus(
+                                autofocus: true,
+                                focusNode: _playerAreaFocus,
+                                onKeyEvent: (node, event) {
+                                  if (event is! KeyDownEvent) return KeyEventResult.ignored;
+                                  _showControlsBriefly();
+                                  if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                                    _seek(-30);
+                                    return KeyEventResult.handled;
+                                  }
+                                  if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                                    _seek(30);
+                                    return KeyEventResult.handled;
+                                  }
+                                  if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                                    _playerPlayPauseFocus.requestFocus();
+                                    return KeyEventResult.handled;
+                                  }
+                                  if (event.logicalKey == LogicalKeyboardKey.arrowUp && _showNextEpisodeButton) {
+                                    _skipSuggestionFocus.requestFocus();
+                                    return KeyEventResult.handled;
+                                  }
+                                  if (event.logicalKey == LogicalKeyboardKey.select ||
+                                      event.logicalKey == LogicalKeyboardKey.enter ||
+                                      event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                                      event.logicalKey == LogicalKeyboardKey.space) {
+                                    _togglePlayPause();
+                                    return KeyEventResult.handled;
+                                  }
+                                  return KeyEventResult.ignored;
+                                },
+                                // NoVideoControls: we hebben al een volledig
+                                // eigen bedieningsbalk - media_kit's eigen
+                                // standaardbalk gaf anders een dubbele,
+                                // overlappende set knoppen.
+                                child: Video(controller: _controller, controls: NoVideoControls),
+                              ),
                             ),
+                            // Suggestie, geen automatische actie: blijft gewoon
+                            // staan zolang van toepassing, onafhankelijk van de
+                            // andere bedieningselementen (die na inactiviteit
+                            // vervagen) - je beslist zelf of en wanneer je klikt.
+                            if (_showNextEpisodeButton)
+                              Positioned(
+                                right: 16, bottom: 80,
+                                child: _buildSkipSuggestionButton(
+                                  icon: Icons.skip_next,
+                                  label: 'Volgende aflevering',
+                                  onTap: () => _play(episode: _nextEpisodeInSeason),
+                                ),
+                              ),
                             // Korte visuele bevestiging dat spoelen effectief
                             // iets deed - zonder aanraakbare voortgangsbalk is
                             // dit anders onzichtbaar feedback-loos.
@@ -1364,70 +1595,117 @@ class _WatchScreenState extends State<WatchScreen> {
                                   ),
                                 ),
                               ),
+                            // Zonder dit was pauze visueel niet te onderscheiden
+                            // van gewoon afspelen buiten het stilvallen van het
+                            // beeld - blijft staan zolang gepauzeerd, geen timer.
+                            if (!_isPlaying)
+                              Center(
+                                child: IgnorePointer(
+                                  child: Container(
+                                    padding: const EdgeInsets.all(18),
+                                    decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                                    child: const Icon(Icons.play_arrow, color: Colors.white, size: 52),
+                                  ),
+                                ),
+                              ),
+                            // Onderaan balk: voortgang + bron/audio/onder-
+                            // titels samen, net als bij de meeste spelers -
+                            // stond eerder apart bovenaan rechts.
                             Positioned(
-                              top: 8, right: 8,
-                              // Verdwijnt na een paar seconden inactiviteit
-                              // i.p.v. constant over de video te blijven
-                              // staan - net als bij elke andere speler.
-                              // Enkel de aanraakbaarheid met de muis wordt
-                              // genegeerd zolang onzichtbaar; D-pad-focus
-                              // blijft gewoon werken (IgnorePointer raakt
-                              // enkel pointer-hittesting, geen toetsenbord).
+                              left: 12, right: 12, bottom: 10,
                               child: AnimatedOpacity(
                                 opacity: _controlsVisible ? 1 : 0,
                                 duration: const Duration(milliseconds: 250),
-                                child: IgnorePointer(
-                                  ignoring: !_controlsVisible,
-                                  child: Builder(builder: (context) {
-                                    // Expliciete links/rechts-koppeling i.p.v. te
-                                    // vertrouwen op Flutter's automatische
-                                    // "dichtstbijzijnde widget"-navigatie tussen
-                                    // deze kleine, dicht opeengepakte knopjes -
-                                    // die bleek op deze TV's niet altijd
-                                    // betrouwbaar.
-                                    final order = <FocusNode>[
-                                      _playerSourceFocus,
-                                      if (_hasSelectableTracks(_tracks.audio)) _playerAudioFocus,
-                                      if (_hasSelectableTracks(_tracks.subtitle)) _playerSubtitleFocus,
-                                    ];
-                                    return Focus(
-                                      canRequestFocus: false,
-                                      skipTraversal: true,
-                                      onKeyEvent: (node, event) {
-                                        if (event is! KeyDownEvent) return KeyEventResult.ignored;
-                                        _showControlsBriefly();
-                                        if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-                                          _playerAreaFocus.requestFocus();
-                                          return KeyEventResult.handled;
-                                        }
-                                        if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
-                                            event.logicalKey == LogicalKeyboardKey.arrowRight) {
-                                          final current = order.indexWhere((n) => n.hasFocus);
-                                          if (current == -1) return KeyEventResult.ignored;
-                                          final delta = event.logicalKey == LogicalKeyboardKey.arrowRight ? 1 : -1;
-                                          final next = current + delta;
-                                          if (next >= 0 && next < order.length) {
-                                            order[next].requestFocus();
+                                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                                  // Met muis/aanraking sleepbaar/klikbaar om
+                                  // te spoelen (een afstandsbediening kan
+                                  // niet slepen, maar D-pad links/rechts op
+                                  // de video zelf blijft daarvoor werken).
+                                  // Alleen klikbaar terwijl zichtbaar - anders
+                                  // blijft hij onzichtbaar maar aanklikbaar.
+                                  IgnorePointer(
+                                    ignoring: !_controlsVisible,
+                                    child: _buildPlaybackProgressBar(),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  IgnorePointer(
+                                    ignoring: !_controlsVisible,
+                                    child: Builder(builder: (context) {
+                                      // Expliciete links/rechts-koppeling i.p.v. te
+                                      // vertrouwen op Flutter's automatische
+                                      // "dichtstbijzijnde widget"-navigatie tussen
+                                      // deze kleine, dicht opeengepakte knopjes -
+                                      // die bleek op deze TV's niet altijd
+                                      // betrouwbaar.
+                                      final order = <FocusNode>[
+                                        _playerPlayPauseFocus,
+                                        _playerSourceFocus,
+                                        if (_hasSelectableTracks(_tracks.audio)) _playerAudioFocus,
+                                        if (_hasSelectableTracks(_tracks.subtitle)) _playerSubtitleFocus,
+                                        if (_isDesktop) _playerFullscreenFocus,
+                                      ];
+                                      return Focus(
+                                        canRequestFocus: false,
+                                        skipTraversal: true,
+                                        onKeyEvent: (node, event) {
+                                          if (event is! KeyDownEvent) return KeyEventResult.ignored;
+                                          _showControlsBriefly();
+                                          if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+                                            _playerAreaFocus.requestFocus();
                                             return KeyEventResult.handled;
                                           }
-                                          return KeyEventResult.handled;
-                                        }
-                                        return KeyEventResult.ignored;
-                                      },
-                                      child: Row(children: [
-                                        _trackButton(Icons.dns_outlined, () => _pickSource(episode: _currentEpisode), 'Andere bron', focusNode: _playerSourceFocus),
-                                        if (_hasSelectableTracks(_tracks.audio)) ...[
-                                          const SizedBox(width: 8),
-                                          _trackButton(Icons.multitrack_audio, _pickAudioTrack, 'Audio', focusNode: _playerAudioFocus),
-                                        ],
-                                        if (_hasSelectableTracks(_tracks.subtitle)) ...[
-                                          const SizedBox(width: 8),
-                                          _trackButton(Icons.subtitles, _pickSubtitleTrack, 'Ondertitels', focusNode: _playerSubtitleFocus),
-                                        ],
-                                      ]),
-                                    );
-                                  }),
-                                ),
+                                          if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                                            _playFocus.requestFocus();
+                                            return KeyEventResult.handled;
+                                          }
+                                          if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+                                              event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                                            final current = order.indexWhere((n) => n.hasFocus);
+                                            if (current == -1) return KeyEventResult.ignored;
+                                            final delta = event.logicalKey == LogicalKeyboardKey.arrowRight ? 1 : -1;
+                                            final next = current + delta;
+                                            if (next >= 0 && next < order.length) {
+                                              order[next].requestFocus();
+                                              return KeyEventResult.handled;
+                                            }
+                                            return KeyEventResult.handled;
+                                          }
+                                          return KeyEventResult.ignored;
+                                        },
+                                        // Pauze/play weer terug links (zoals in de meeste
+                                        // spelers), bron/audio/ondertitels/fullscreen rechts.
+                                        child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                                          _trackButton(
+                                            _isPlaying ? Icons.pause : Icons.play_arrow,
+                                            _togglePlayPause,
+                                            _isPlaying ? 'Pauzeren' : 'Afspelen',
+                                            focusNode: _playerPlayPauseFocus,
+                                          ),
+                                          Row(mainAxisSize: MainAxisSize.min, children: [
+                                            _trackButton(Icons.dns_outlined, () => _pickSource(episode: _currentEpisode), 'Andere bron', focusNode: _playerSourceFocus),
+                                            if (_hasSelectableTracks(_tracks.audio)) ...[
+                                              const SizedBox(width: 8),
+                                              _trackButton(Icons.multitrack_audio, _pickAudioTrack, 'Audio', focusNode: _playerAudioFocus),
+                                            ],
+                                            if (_hasSelectableTracks(_tracks.subtitle)) ...[
+                                              const SizedBox(width: 8),
+                                              _trackButton(Icons.subtitles, _pickSubtitleTrack, 'Ondertitels', focusNode: _playerSubtitleFocus),
+                                            ],
+                                            if (_isDesktop) ...[
+                                              const SizedBox(width: 8),
+                                              _trackButton(
+                                                _isFullScreen ? Icons.fullscreen_exit : Icons.fullscreen,
+                                                _toggleFullScreen,
+                                                _isFullScreen ? 'Volledig scherm afsluiten' : 'Volledig scherm',
+                                                focusNode: _playerFullscreenFocus,
+                                              ),
+                                            ],
+                                          ]),
+                                        ]),
+                                      );
+                                    }),
+                                  ),
+                                ]),
                               ),
                             ),
                           ]),
@@ -1622,21 +1900,34 @@ class _WatchScreenState extends State<WatchScreen> {
                       const SizedBox(height: 28),
                       const Text('Cast', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: Colors.white)),
                       const SizedBox(height: 14),
-                      SizedBox(height: 140, child: ListView.builder(
+                      SizedBox(height: 172, child: ListView.builder(
                         scrollDirection: Axis.horizontal,
                         itemCount: _cast.length,
                         itemBuilder: (_, i) {
                           final p = _cast[i];
-                          final profile = p['profile_path'];
-                          return Container(width: 88, margin: const EdgeInsets.only(right: 14),
-                            child: Column(children: [
-                              CircleAvatar(radius: 40, backgroundColor: const Color(0xFF0f1520),
-                                backgroundImage: profile != null ? NetworkImage('$tmdbProfile$profile') : null,
-                                child: profile == null ? const Icon(Icons.person, color: Colors.grey, size: 28) : null),
-                              const SizedBox(height: 6),
-                              Text(p['name'] ?? '', maxLines: 2, textAlign: TextAlign.center,
-                                style: const TextStyle(fontSize: 12, color: Colors.white70)),
-                            ]));
+                          final profile = p['profile_path'] as String?;
+                          final character = p['character'] as String?;
+                          final personId = p['id'] as int?;
+                          return TvFocusable(
+                            borderRadius: BorderRadius.circular(12),
+                            onTap: personId == null ? null : () => Navigator.push(context, MaterialPageRoute(
+                              builder: (_) => PersonScreen(personId: personId, name: p['name'] as String?, profilePath: profile))),
+                            child: Container(width: 96, margin: const EdgeInsets.only(right: 14),
+                              child: Column(children: [
+                                CircleAvatar(radius: 44, backgroundColor: const Color(0xFF0f1520),
+                                  backgroundImage: profile != null ? NetworkImage('$tmdbProfile$profile') : null,
+                                  child: profile == null ? const Icon(Icons.person, color: Colors.grey, size: 32) : null),
+                                const SizedBox(height: 8),
+                                Text(p['name'] ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center,
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+                                if (character != null && character.isNotEmpty) ...[
+                                  const SizedBox(height: 2),
+                                  Text(character, maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center,
+                                    style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                ],
+                              ]),
+                            ),
+                          );
                         },
                       )),
                     ],

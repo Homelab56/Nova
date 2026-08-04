@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:window_manager/window_manager.dart';
 import 'screens/settings_screen.dart';
 import 'screens/profile_screen.dart';
 import 'services/settings_service.dart';
@@ -25,6 +27,11 @@ String _keyName(LogicalKeyboardKey k) {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
+  // Enkel op desktop: window_manager heeft geen Android/TV-implementatie
+  // (en is daar ook zinloos, de app vult toch al het hele scherm).
+  if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+    await windowManager.ensureInitialized();
+  }
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
   // Tijdelijke diagnose voor de TV-afstandsbediening: logt elke ontvangen
   // toets + wie op dat moment focus heeft, zodat navigatieproblemen via

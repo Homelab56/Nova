@@ -559,3 +559,40 @@ async def tv_similar(tmdb_id: int):
 @router.get("/tv/{tmdb_id}/season/{season_number}")
 async def tv_season(tmdb_id: int, season_number: int):
     return await tmdb_get(f"/tv/{tmdb_id}/season/{season_number}")
+
+
+# --- Personen (acteurs/actrices) ---
+
+@router.get("/person")
+async def search_person(q: str = Query(..., min_length=1), page: int = 1):
+    data = await tmdb_get("/search/person", {"query": q, "page": page})
+    return {
+        "items": data.get("results", []) or [],
+        "page": page,
+        "total_pages": data.get("total_pages", 1),
+        "total_results": data.get("total_results", 0),
+    }
+
+@router.get("/person/{person_id}")
+async def person_detail(person_id: int):
+    return await tmdb_get(f"/person/{person_id}")
+
+@router.get("/person/{person_id}/credits")
+async def person_credits(person_id: int):
+    data = await tmdb_get(f"/person/{person_id}/combined_credits")
+    # Enkel acteerrollen (cast, geen crew/regie) - iemand kan meerdere rollen
+    # in dezelfde titel hebben, dus dedupliceren op titel. Gesorteerd op
+    # populariteit zodat het bekendste werk eerst staat.
+    seen: set[tuple] = set()
+    items = []
+    for c in (data.get("cast", []) or []):
+        mt = c.get("media_type")
+        if mt not in ("movie", "tv"):
+            continue
+        key = (mt, c.get("id"))
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(c)
+    items.sort(key=lambda x: x.get("popularity") or 0, reverse=True)
+    return items

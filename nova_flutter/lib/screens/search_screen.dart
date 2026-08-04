@@ -3,6 +3,9 @@ import '../widgets/nova_image.dart';
 import '../widgets/tv_focusable.dart';
 import '../services/tmdb_service.dart';
 import 'watch_screen.dart';
+import 'person_screen.dart';
+
+const tmdbProfile = 'https://image.tmdb.org/t/p/w185';
 
 const tmdbPoster = 'https://image.tmdb.org/t/p/w342';
 
@@ -18,6 +21,7 @@ class _SearchScreenState extends State<SearchScreen> {
   final _ctrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   List _results = [];
+  List _people = [];
   bool _loading = false;
   int _page = 1, _totalPages = 1, _total = 0;
   String _lastQuery = '';
@@ -82,6 +86,10 @@ class _SearchScreenState extends State<SearchScreen> {
     setState(() => _loading = true);
     try {
       final data = await TmdbService.searchAll(q, page: append ? _page + 1 : 1);
+      // Personen enkel bij een nieuwe zoekopdracht ophalen (niet bij elke
+      // pagina bijladen) - er is geen paginering voor nodig, gewoon de
+      // beste treffers tonen.
+      if (!append) TmdbService.searchPeople(q).then((p) { if (mounted) setState(() => _people = p); });
       setState(() {
         _lastQuery = q;
         _results = append ? [..._results, ...(data['items'] as List)] : data['items'] as List;
@@ -124,6 +132,41 @@ class _SearchScreenState extends State<SearchScreen> {
       ),
       body: Column(
         children: [
+          if (_people.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Acteurs & actrices', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
+                  const SizedBox(height: 10),
+                  SizedBox(height: 132, child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _people.length,
+                    itemBuilder: (_, i) {
+                      final p = _people[i];
+                      final profile = p['profile_path'] as String?;
+                      final personId = p['id'] as int?;
+                      return TvFocusable(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: personId == null ? null : () => Navigator.push(context, MaterialPageRoute(
+                          builder: (_) => PersonScreen(personId: personId, name: p['name'] as String?, profilePath: profile))),
+                        child: Container(width: 88, margin: const EdgeInsets.only(right: 14),
+                          child: Column(children: [
+                            CircleAvatar(radius: 40, backgroundColor: const Color(0xFF0f1520),
+                              backgroundImage: profile != null ? NetworkImage('$tmdbProfile$profile') : null,
+                              child: profile == null ? const Icon(Icons.person, color: Colors.grey, size: 28) : null),
+                            const SizedBox(height: 6),
+                            Text(p['name'] ?? '', maxLines: 2, textAlign: TextAlign.center, overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 12, color: Colors.white70)),
+                          ]),
+                        ),
+                      );
+                    },
+                  )),
+                ],
+              ),
+            ),
           if (_total > 0)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),

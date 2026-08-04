@@ -124,9 +124,11 @@ class TmdbService {
   static Future<Map> getTvDetail(int id) async => await _backendGet('/api/search/tv/$id') as Map;
 
   static Future<List> getCredits(int id, String type) async {
+    // De backend geeft de cast-lijst al direct terug (niet gewrapt in
+    // {"cast": [...]}) - eerder werd hier altijd stilzwijgend een lege
+    // lijst teruggegeven omdat dit als Map i.p.v. List werd uitgepakt.
     final d = await _backendGet('/api/search/$type/$id/credits');
-    final cast = (d is Map ? (d['cast'] as List?) : null) ?? const [];
-    return cast.take(12).toList();
+    return _extractItems(d).take(12).toList();
   }
 
   static Future<List> getSimilar(int id, String type) async {
@@ -159,6 +161,18 @@ class TmdbService {
   static Future<List> getGenreItems(int genreId, String type) async {
     final data = await discoverGenre(genreId, type);
     return data['items'] as List;
+  }
+
+  static Future<List> searchPeople(String q, {int page = 1}) async {
+    final d = await _backendGet('/api/search/person', {'q': q, 'page': page});
+    return _extractItems(d);
+  }
+
+  static Future<Map> getPerson(int id) async => await _backendGet('/api/search/person/$id') as Map;
+
+  static Future<List> getPersonCredits(int id) async {
+    final d = await _backendGet('/api/search/person/$id/credits');
+    return _extractItems(d);
   }
 
   static Future<bool> testKey(String key) async {
