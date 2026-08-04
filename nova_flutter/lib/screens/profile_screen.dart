@@ -85,9 +85,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _load() async {
     setState(() { _loading = true; _error = null; });
     try {
-      // Eenmalige overzet van lokale profielen (van vóór profielen op de
-      // server leefden) - no-op zodra de server al profielen heeft.
-      await ProfileService.migrateLocalDataToServerIfNeeded();
       final profiles = await ProfileService.getProfiles();
       if (!mounted) return;
       setState(() { _profiles = profiles; _loading = false; });

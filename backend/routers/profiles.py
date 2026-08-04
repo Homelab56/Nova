@@ -1,12 +1,16 @@
 import os
 import json
 import asyncio
+import shutil
 import time
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict
 
 router = APIRouter()
 DATA_FILE = "/app/data/profiles.json"
+BACKUP_DIR = "/app/data/profiles_backups"
+MAX_BACKUPS = 20
 
 
 def _load_sync() -> dict:
@@ -38,6 +42,33 @@ async def load() -> dict:
 
 async def save(data: dict):
     await asyncio.to_thread(_save_sync, data)
+
+
+def _backup_sync():
+    """Kopieert het huidige bestand weg vóór een wijziging aan de profielen-
+    lijst zelf (aanmaken/bewerken/verwijderen) - dit is de enige plek waar
+    ooit een bug of race iemands profielen (en dus watchlist/geschiedenis/
+    ratings, die in dezelfde blob zitten) stilzwijgend kan wissen, dus dat
+    moet altijd herstelbaar zijn."""
+    if not os.path.exists(DATA_FILE):
+        return
+    try:
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+        shutil.copy2(DATA_FILE, os.path.join(BACKUP_DIR, f"profiles-{stamp}.json"))
+        backups = sorted(os.listdir(BACKUP_DIR))
+        for old in backups[:-MAX_BACKUPS]:
+            try:
+                os.remove(os.path.join(BACKUP_DIR, old))
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"Fout bij back-uppen profiles: {e}")
+
+
+async def save_profiles_list(data: dict):
+    await asyncio.to_thread(_backup_sync)
+    await save(data)
 
 
 def _profile_data(data: dict, profile_id: str) -> dict:
@@ -122,7 +153,7 @@ async def create_profile(profile: ProfileCreate):
     entry = {"id": new_id, "name": profile.name, "pin": profile.pin,
              "colorIndex": profile.colorIndex, "icon": profile.icon}
     data["profiles"].append(entry)
-    await save(data)
+    await save_profiles_list(data)
     return entry
 
 
@@ -133,7 +164,7 @@ async def update_profile(profile_id: str, profile: ProfileUpdate):
         if p["id"] == profile_id:
             p.update({"name": profile.name, "pin": profile.pin,
                       "colorIndex": profile.colorIndex, "icon": profile.icon})
-            await save(data)
+            await save_profiles_list(data)
             return p
     raise HTTPException(status_code=404, detail="Profiel niet gevonden")
 
@@ -143,7 +174,7 @@ async def delete_profile(profile_id: str):
     data = await load()
     data["profiles"] = [p for p in data["profiles"] if p["id"] != profile_id]
     data["data"].pop(profile_id, None)
-    await save(data)
+    await save_profiles_list(data)
     return {"ok": True}
 
 

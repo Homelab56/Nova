@@ -1,5 +1,3 @@
-import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'api_service.dart';
 
 class Profile {
@@ -65,62 +63,5 @@ class ProfileService {
 
   static Future<void> deleteProfile(String id) async {
     await ApiService.delete('/profiles/$id');
-  }
-
-  // Eenmalige overzet: dit toestel (typisch de PC waar profielen voor het
-  // eerst gemaakt zijn) had voorheen alles lokaal opgeslagen. Als de server
-  // nog leeg is maar dit toestel wel lokale profielen heeft, zetten we die
-  // eenmalig over zodat niemand zijn profielen/watchlist/geschiedenis kwijt-
-  // raakt door deze overstap naar gedeelde server-opslag.
-  static Future<void> migrateLocalDataToServerIfNeeded() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool('migrated_profiles_to_server') == true) return;
-
-    try {
-      final serverProfiles = await getProfiles();
-      if (serverProfiles.isNotEmpty) {
-        await prefs.setBool('migrated_profiles_to_server', true);
-        return;
-      }
-
-      final raw = prefs.getString('profiles');
-      if (raw == null) {
-        await prefs.setBool('migrated_profiles_to_server', true);
-        return;
-      }
-
-      final localProfiles = (jsonDecode(raw) as List).map((j) => Profile.fromJson(j as Map)).toList();
-      for (final p in localProfiles) {
-        await createProfile(p.name, pin: p.pin, colorIndex: p.colorIndex, icon: p.icon, id: p.id);
-
-        final wlRaw = prefs.getString('profile_${p.id}_watchlist');
-        if (wlRaw != null) {
-          final list = (jsonDecode(wlRaw) as List).cast<Map>().toList().reversed;
-          for (final item in list) {
-            await ApiService.post('/profiles/${p.id}/watchlist', Map<String, dynamic>.from(item));
-          }
-        }
-
-        final progRaw = prefs.getString('profile_${p.id}_progress');
-        if (progRaw != null) {
-          final map = jsonDecode(progRaw) as Map;
-          for (final v in map.values) {
-            await ApiService.post('/profiles/${p.id}/progress', Map<String, dynamic>.from(v as Map));
-          }
-        }
-
-        final ratRaw = prefs.getString('profile_${p.id}_ratings');
-        if (ratRaw != null) {
-          final map = jsonDecode(ratRaw) as Map;
-          for (final v in map.values) {
-            await ApiService.post('/profiles/${p.id}/ratings', Map<String, dynamic>.from(v as Map));
-          }
-        }
-      }
-      await prefs.setBool('migrated_profiles_to_server', true);
-    } catch (e) {
-      // Geen server bereikbaar bij opstarten: gewoon niets doen, we proberen
-      // het opnieuw bij de volgende keer dat het profielscherm opent.
-    }
   }
 }
