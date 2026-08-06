@@ -88,7 +88,13 @@ class _WatchScreenState extends State<WatchScreen> {
     setState(() => _controlsVisible = true);
     _controlsHideTimer?.cancel();
     _controlsHideTimer = Timer(const Duration(seconds: 4), () {
-      if (mounted) setState(() => _controlsVisible = false);
+      if (!mounted) return;
+      setState(() => _controlsVisible = false);
+      // Focus terug naar de video zelf zodra de knoppenbalk vervaagt -
+      // anders bleef select soms het laatst-gefocuste (nu onzichtbare)
+      // knopje activeren i.p.v. gewoon te pauzeren/hervatten, zoals bij
+      // elke andere videospeler waar "OK" altijd gewoon pauzeert.
+      if (_showPlayer) _playerAreaFocus.requestFocus();
     });
   }
   String? _seekIndicator;
@@ -195,6 +201,20 @@ class _WatchScreenState extends State<WatchScreen> {
     });
     _player.stream.track.listen((t) {
       if (mounted) setState(() => _currentTrack = t);
+    });
+
+    // Eén keer geregistreerd i.p.v. bij elke _playUrl() (elke keer opnieuw
+    // afspelen/aflevering wisselen) - dat stapelde anders bij elke wissel
+    // een extra listener op, die dan allemaal tegelijk op hetzelfde
+    // foutmoment vuurden.
+    _player.stream.error.listen((err) {
+      if (mounted) {
+        setState(() {
+          _status = 'Video fout: $err';
+          _showPlayer = false;
+          _loadingStream = false;
+        });
+      }
     });
   }
 
@@ -832,7 +852,7 @@ class _WatchScreenState extends State<WatchScreen> {
       results = await Future.wait([
         assumedIsMovie ? TmdbService.getMovieDetail(id) : TmdbService.getTvDetail(id),
         TmdbService.getCredits(id, assumedIsMovie ? 'movie' : 'tv'),
-        TmdbService.getSimilar(id, assumedIsMovie ? 'movie' : 'tv'),
+        TmdbService.getRecommendations(id, assumedIsMovie ? 'movie' : 'tv'),
       ]);
     } catch (_) {
       // Aangenomen type klopte niet - probeer het andere type i.p.v. hier
@@ -842,7 +862,7 @@ class _WatchScreenState extends State<WatchScreen> {
       results = await Future.wait([
         correctedIsMovie ? TmdbService.getMovieDetail(id) : TmdbService.getTvDetail(id),
         TmdbService.getCredits(id, correctedIsMovie ? 'movie' : 'tv'),
-        TmdbService.getSimilar(id, correctedIsMovie ? 'movie' : 'tv'),
+        TmdbService.getRecommendations(id, correctedIsMovie ? 'movie' : 'tv'),
       ]);
       if (mounted) setState(() => _mediaTypeOverride = correctedIsMovie);
       // Liep initState() al mis met het foute type, dan is de beschikbaar-
@@ -956,7 +976,11 @@ class _WatchScreenState extends State<WatchScreen> {
 
   Widget _buildSkipSuggestionButton({required IconData icon, required String label, required VoidCallback onTap}) {
     return Focus(
-      autofocus: true,
+      // GEEN autofocus: dit knopje verschijnt automatisch tijdens het kijken
+      // (laatste ~100s van een aflevering) - met autofocus zou het de
+      // afstandsbediening-focus stiekem wegkapen van waar de kijker net mee
+      // bezig was, zonder dat die zelf iets deed. Gewoon bereikbaar via
+      // omhoog vanaf de video (zie _playerAreaFocus), niet vanzelf gepakt.
       focusNode: _skipSuggestionFocus,
       onKeyEvent: (node, event) {
         if (event is! KeyDownEvent) return KeyEventResult.ignored;
@@ -1073,7 +1097,23 @@ class _WatchScreenState extends State<WatchScreen> {
     }
   }
 
+  // Voorkomt dat twee _play()-aanroepen tegelijk lopen (bv. dubbel tikken op
+  // "Volgende aflevering", of een verdwaalde herhaalde toets-event) - zonder
+  // dit konden twee _player.open()-aanroepen door elkaar racen, wat als
+  // overlappende audio/beeld en "verspringende" staat naar buiten kwam.
+  bool _playInFlight = false;
+
   Future<void> _play({Map? episode}) async {
+    if (_playInFlight) return;
+    _playInFlight = true;
+    try {
+      await _playInternal(episode: episode);
+    } finally {
+      _playInFlight = false;
+    }
+  }
+
+  Future<void> _playInternal({Map? episode}) async {
     _currentEpisode = episode;
     if (Platform.isAndroid) {
       // Op een TV-toestel met maar ~2GB RAM (logcat op een Shield bevestigde
@@ -1122,7 +1162,12 @@ class _WatchScreenState extends State<WatchScreen> {
           try {
             final apiUrl = '$baseUrl$path?q=${Uri.encodeComponent(q)}&tmdb_id=${widget.media['id']}&media_type=$mediaType&client=windows'
               '${maxRes != null ? '&max_resolution=$maxRes' : ''}';
-            final response = await http.get(Uri.parse(apiUrl)).timeout(const Duration(seconds: 25));
+            // 25s was te krap: een koude zoekopdracht (server probeert tot 30
+            // kandidaat-bronnen) haalt dat soms niet, waardoor je "geen
+            // streams gevonden" te zien kreeg terwijl de server gewoon nog
+            // bezig was - een 2de druk op Afspelen werkte dan wél, want de
+            // server had het resultaat intussen al gecachet.
+            final response = await http.get(Uri.parse(apiUrl)).timeout(const Duration(seconds: 75));
 
             if (response.statusCode == 200) {
               final data = jsonDecode(response.body);
@@ -1249,16 +1294,6 @@ class _WatchScreenState extends State<WatchScreen> {
       });
     }
 
-    _player.stream.error.listen((err) {
-      if (mounted) {
-        setState(() {
-          _status = 'Video fout: $err';
-          _showPlayer = false;
-          _loadingStream = false;
-        });
-      }
-    });
-
     UserDataService.saveProgress(_progressItem(), resumeSeconds, resumeSeconds > 0 ? resumeSeconds + 100 : 100);
 
     if (mounted) {
@@ -1376,7 +1411,7 @@ class _WatchScreenState extends State<WatchScreen> {
       for (final path in ['/api/debrid/sources', '/debrid/sources']) {
         try {
           final apiUrl = '$baseUrl$path?q=${Uri.encodeComponent(q)}&tmdb_id=${widget.media['id']}&media_type=${isMovie ? "movie" : "tv"}';
-          final response = await http.get(Uri.parse(apiUrl)).timeout(const Duration(seconds: 25));
+          final response = await http.get(Uri.parse(apiUrl)).timeout(const Duration(seconds: 75));
           if (response.statusCode == 200) {
             final data = jsonDecode(response.body);
             final sources = data['sources'] as List?;
@@ -1562,7 +1597,25 @@ class _WatchScreenState extends State<WatchScreen> {
                                 // eigen bedieningsbalk - media_kit's eigen
                                 // standaardbalk gaf anders een dubbele,
                                 // overlappende set knoppen.
-                                child: Video(controller: _controller, controls: NoVideoControls),
+                                child: Video(
+                                  controller: _controller,
+                                  controls: NoVideoControls,
+                                  // Standaardgrootte was aan de kleine kant om
+                                  // vanaf de zetel comfortabel te lezen.
+                                  subtitleViewConfiguration: const SubtitleViewConfiguration(
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 44,
+                                      fontWeight: FontWeight.w600,
+                                      height: 1.2,
+                                      shadows: [
+                                        Shadow(color: Colors.black, blurRadius: 6, offset: Offset(0, 0)),
+                                        Shadow(color: Colors.black, blurRadius: 2, offset: Offset(1, 1)),
+                                      ],
+                                    ),
+                                    padding: EdgeInsets.only(bottom: 24, left: 24, right: 24),
+                                  ),
+                                ),
                               ),
                             ),
                             // Suggestie, geen automatische actie: blijft gewoon
@@ -1655,7 +1708,10 @@ class _WatchScreenState extends State<WatchScreen> {
                                             return KeyEventResult.handled;
                                           }
                                           if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-                                            _playFocus.requestFocus();
+                                            // Bewust een muur: tijdens het afspelen mag D-pad-omlaag
+                                            // niet de speler uit naar de pagina eronder - enkel de
+                                            // terugknop (fysiek of het pijltje linksboven) verlaat de
+                                            // speler, zoals bij een echte fullscreen videospeler.
                                             return KeyEventResult.handled;
                                           }
                                           if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||

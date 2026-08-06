@@ -1457,7 +1457,7 @@ _OS_USER_AGENT = "Nova v1.0"
 # parameters, referentie-venster, kandidaat-selectie, ...), anders blijven
 # oude, met de vorige logica gesynchroniseerde resultaten hangen.
 _SUB_CACHE_DIR = "/app/data/subtitles_cache"
-_SUB_CACHE_VERSION = "v6"
+_SUB_CACHE_VERSION = "v7"
 
 
 def _subtitle_cache_path(cache_key: str) -> str:
@@ -1568,11 +1568,7 @@ async def _extract_reference_audio(video_url: str, out_path: str, duration_secs:
     lukt voor een URL - dus eerst audio naar een lokaal bestand extraheren.
     Mono/16kHz WAV, beperkt tot de eerste [duration_secs] (genoeg spraak om
     een betrouwbare sync te berekenen, zonder de hele - vaak 10+ GB - bron
-    te moeten downloaden). 15 minuten: naast dialoogloze intro's (openings-
-    crawl, muziek) hebben seizoenspremières vaak ook een lange recap die niet
-    in de ondertitel-bron zit, wat een verschuiving van enkele minuten geeft -
-    het venster moet ruim voorbij die verschuiving nog echte, matchende
-    dialoog bevatten om betrouwbaar te kunnen correleren.
+    te moeten downloaden).
     """
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
@@ -1607,14 +1603,23 @@ async def _extract_reference_audio(video_url: str, out_path: str, duration_secs:
         return False
 
 
-async def _run_ffsubsync(video_url: str, srt_text: str, timeout: float = 200.0) -> str | None:
+async def _run_ffsubsync(video_url: str, srt_text: str, is_tv: bool = False, timeout: float | None = None) -> str | None:
     """Lijnt een ondertitel automatisch uit op de audio van de echte stream
-    (spraakdetectie), ongeacht welke exacte release we binnenkregen. Ruime
-    max-offset: series-afleveringen hebben vaak een "previously on"-recap
-    en/of intro die wel/niet in de ondertitel-bron zit, wat een constante
-    verschuiving van enkele minuten kan geven - een te krappe grens laat
-    ffsubsync dan de verkeerde (dichtstbijzijnde binnen bereik) uitlijning
-    kiezen in plaats van de echte."""
+    (spraakdetectie), ongeacht welke exacte release we binnenkregen.
+
+    De toegestane max-offset is bewust NIET overal even ruim: series-
+    afleveringen (vooral seizoenspremières) hebben soms een "previously on"-
+    recap die een verschuiving van enkele minuten geeft, en daar hebben we
+    voor een specifiek geval (House of the Dragon S3E1, echte verschuiving
+    ~5-8 min) een ruim venster voor nodig. Maar diezelfde ruime grens bleek
+    voor een film (Jurassic World) een compleet verkeerde uitlijning te
+    laten "winnen" binnen dat bereik - 11 minuten fout vanaf de start, een
+    film heeft nooit een legitieme reden voor zo'n grote constante
+    verschuiving. Dus: ruim venster enkel voor series, krap voor films."""
+    max_offset = 480 if is_tv else 90
+    duration_secs = 900 if is_tv else 300
+    if timeout is None:
+        timeout = 420.0 if is_tv else 160.0
     with tempfile.TemporaryDirectory() as tmp:
         ref_path = os.path.join(tmp, "reference.wav")
         in_path = os.path.join(tmp, "in.srt")
@@ -1622,12 +1627,12 @@ async def _run_ffsubsync(video_url: str, srt_text: str, timeout: float = 200.0) 
         with open(in_path, "w", encoding="utf-8") as f:
             f.write(srt_text)
 
-        if not await _extract_reference_audio(video_url, ref_path):
+        if not await _extract_reference_audio(video_url, ref_path, duration_secs=duration_secs):
             return None
 
         cmd = [
             "ffsubsync", ref_path, "-i", in_path, "-o", out_path,
-            "--max-offset-seconds", "480",
+            "--max-offset-seconds", str(max_offset),
         ]
         proc = None
         try:
@@ -1721,7 +1726,7 @@ async def subtitle_external_vtt(
             continue
         if fallback_srt is None:
             fallback_srt = srt_text
-        synced_srt = await _run_ffsubsync(input_value, srt_text)
+        synced_srt = await _run_ffsubsync(input_value, srt_text, is_tv=media_type == "tv")
         if synced_srt:
             vtt = _srt_to_vtt(synced_srt)
             _subtitle_cache_set(cache_key, vtt)

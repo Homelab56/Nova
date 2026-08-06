@@ -176,6 +176,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         orElse: () => _profiles.length % _avatarBaseColors.length,
       );
     String? selectedIcon = existing?.icon;
+    String? pinError;
 
     final result = await showDialog<bool>(
       context: context,
@@ -269,9 +270,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 maxLength: 4,
                 keyboardType: TextInputType.number,
                 style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'Pincode (optioneel)', labelStyle: TextStyle(color: Colors.grey), counterText: '',
+                decoration: InputDecoration(
+                  labelText: 'Pincode (4 cijfers, verplicht)', labelStyle: const TextStyle(color: Colors.grey),
+                  counterText: '', errorText: pinError,
                 ),
+                onChanged: (_) { if (pinError != null) setDialogState(() => pinError = null); },
               ),
             ]),
           ),
@@ -303,7 +306,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuleren')),
             TextButton(
-              onPressed: () => Navigator.pop(context, true),
+              // Een pincode is nu verplicht voor elk profiel - zonder deze
+              // check kon je 'm hier gewoon leeg opslaan (of, bij bewerken,
+              // een bestaande stilzwijgend wissen).
+              onPressed: () {
+                final pin = pinCtrl.text.trim();
+                if (pin.length != 4 || int.tryParse(pin) == null) {
+                  setDialogState(() => pinError = 'Vul een pincode van 4 cijfers in');
+                  return;
+                }
+                Navigator.pop(context, true);
+              },
               child: const Text('Opslaan', style: TextStyle(color: Color(0xFF00b4d8))),
             ),
           ],
@@ -319,8 +332,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await ProfileService.createProfile(name, pin: pin, colorIndex: colorIndex, icon: selectedIcon);
     } else {
       await ProfileService.updateProfile(existing.copyWith(
-        name: name, pin: pin.isEmpty ? null : pin, clearPin: pin.isEmpty,
-        colorIndex: colorIndex, icon: selectedIcon, clearIcon: selectedIcon == null));
+        name: name, pin: pin, colorIndex: colorIndex, icon: selectedIcon, clearIcon: selectedIcon == null));
     }
     _load();
   }
@@ -473,7 +485,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return TvFocusable(
       autofocus: autofocus,
       borderRadius: BorderRadius.circular(60),
-      onTap: () => _editing ? _createOrEditProfile(existing: profile) : _selectProfile(profile),
+      onTap: () async {
+        if (!_editing) { await _selectProfile(profile); return; }
+        // Zonder dit kon je de pincode van een beveiligd profiel gewoon
+        // wissen (of de rest van het profiel wijzigen) zonder 'm ooit in te
+        // voeren - dezelfde controle als bij het kiezen van dit profiel.
+        if (profile.pin != null && profile.pin!.isNotEmpty) {
+          final ok = await _askPin(profile.pin!);
+          if (ok != true) return;
+        }
+        if (mounted) await _createOrEditProfile(existing: profile);
+      },
       child: SizedBox(
         width: 110,
         child: Column(children: [
