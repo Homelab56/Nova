@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse, FileResponse, RedirectResponse, Response
 from pydantic import BaseModel
-from .config_loader import get_rd_token, get_opensubtitles_key
+from .config_loader import get_rd_token, get_opensubtitles_key, get_opensubtitles_credentials
 
 router = APIRouter()
 
@@ -1487,12 +1487,65 @@ def _subtitle_cache_set(cache_key: str, vtt: str) -> None:
         print(f"Ondertitel-cache schrijven mislukt: {e}")
 
 
-def _os_headers() -> dict:
-    return {
+# VIP-quota (hogere daglimiet dan de kale API-key alleen geeft) is
+# gekoppeld aan het account, niet aan de API-key - dus enkel de key
+# meesturen volstaat niet, er moet ook ingelogd worden. Token 24u geldig
+# volgens OpenSubtitles' eigen documentatie; hier voor de zekerheid 20u
+# gecached en dan proactief vernieuwd.
+_OS_LOGIN_TOKEN: str | None = None
+_OS_LOGIN_EXPIRES_AT: float = 0
+_OS_LOGIN_LOCK = asyncio.Lock()
+
+
+async def _os_login() -> str | None:
+    global _OS_LOGIN_TOKEN, _OS_LOGIN_EXPIRES_AT
+    now = time.time()
+    if _OS_LOGIN_TOKEN and now < _OS_LOGIN_EXPIRES_AT:
+        return _OS_LOGIN_TOKEN
+    async with _OS_LOGIN_LOCK:
+        if _OS_LOGIN_TOKEN and time.time() < _OS_LOGIN_EXPIRES_AT:
+            return _OS_LOGIN_TOKEN
+        username, password = get_opensubtitles_credentials()
+        if not username or not password:
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.post(
+                    f"{_OS_BASE}/login",
+                    json={"username": username, "password": password},
+                    headers={
+                        "Api-Key": get_opensubtitles_key(),
+                        "User-Agent": _OS_USER_AGENT,
+                        "Content-Type": "application/json",
+                    },
+                )
+            if r.status_code != 200:
+                print(f"OpenSubtitles login mislukt: {r.status_code} {r.text[:300]}")
+                return None
+            token = r.json().get("token")
+            if not token:
+                return None
+            _OS_LOGIN_TOKEN = token
+            _OS_LOGIN_EXPIRES_AT = time.time() + 20 * 3600
+            return token
+        except Exception as e:
+            print(f"OpenSubtitles login fout: {e}")
+            return None
+
+
+async def _os_headers() -> dict:
+    headers = {
         "Api-Key": get_opensubtitles_key(),
         "User-Agent": _OS_USER_AGENT,
         "Content-Type": "application/json",
     }
+    # Als geen gebruiker/wachtwoord ingesteld is (of inloggen mislukt) valt
+    # dit gewoon terug op anonieme toegang i.p.v. helemaal te breken - VIP-
+    # quota is dan enkel niet van toepassing.
+    token = await _os_login()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
 
 async def _search_opensubtitles(
@@ -1509,7 +1562,7 @@ async def _search_opensubtitles(
         params["episode_number"] = episode
     try:
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-            r = await client.get(f"{_OS_BASE}/subtitles", params=params, headers=_os_headers())
+            r = await client.get(f"{_OS_BASE}/subtitles", params=params, headers=await _os_headers())
         if r.status_code != 200:
             print(f"OpenSubtitles zoekfout: {r.status_code} {r.text[:300]}")
             return []
@@ -1534,7 +1587,7 @@ async def _search_opensubtitles(
 async def _download_opensubtitles(file_id: int) -> str | None:
     try:
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-            r = await client.post(f"{_OS_BASE}/download", json={"file_id": file_id}, headers=_os_headers())
+            r = await client.post(f"{_OS_BASE}/download", json={"file_id": file_id}, headers=await _os_headers())
         if r.status_code != 200:
             print(f"OpenSubtitles downloadfout: {r.status_code} {r.text[:300]}")
             if r.status_code == 406:

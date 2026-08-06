@@ -34,6 +34,23 @@ def get_opensubtitles_key() -> str:
     return os.getenv("OPENSUBTITLES_API_KEY", "").strip().replace("`", "")
 
 
+def get_opensubtitles_credentials() -> tuple[str, str]:
+    """VIP-quota (hogere daglimiet dan de anonieme API-key alleen geeft) is
+    gekoppeld aan het account, niet aan de API-key - hiervoor moet dus
+    ingelogd worden."""
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE) as f:
+            data = json.load(f)
+        user = data.get("opensubtitles_username", "")
+        pw = data.get("opensubtitles_password", "")
+        if user and pw:
+            return user, pw
+    return (
+        os.getenv("OPENSUBTITLES_USERNAME", "").strip(),
+        os.getenv("OPENSUBTITLES_PASSWORD", "").strip(),
+    )
+
+
 def get_jackett_config() -> dict:
     """Haalt Jackett of Prowlarr URL en API key op uit config of env."""
     if os.path.exists(CONFIG_FILE):
