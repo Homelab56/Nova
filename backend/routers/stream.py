@@ -1495,16 +1495,26 @@ def _subtitle_cache_set(cache_key: str, vtt: str) -> None:
 _OS_LOGIN_TOKEN: str | None = None
 _OS_LOGIN_EXPIRES_AT: float = 0
 _OS_LOGIN_LOCK = asyncio.Lock()
+# Bij een mislukte login (verkeerde inloggegevens, rate limit, ...) een tijdje
+# niet opnieuw proberen - anders vuurt elke aparte subtitle-aanroep binnen
+# hetzelfde verzoek (zoeken + downloaden, x meerdere kandidaten) meteen een
+# nieuwe poging af, wat zelf al tegen OpenSubtitles' eigen loginlimiet
+# ("1 req/sec per IP") aanloopt.
+_OS_LOGIN_RETRY_AFTER: float = 0
 
 
 async def _os_login() -> str | None:
-    global _OS_LOGIN_TOKEN, _OS_LOGIN_EXPIRES_AT
+    global _OS_LOGIN_TOKEN, _OS_LOGIN_EXPIRES_AT, _OS_LOGIN_RETRY_AFTER
     now = time.time()
     if _OS_LOGIN_TOKEN and now < _OS_LOGIN_EXPIRES_AT:
         return _OS_LOGIN_TOKEN
+    if now < _OS_LOGIN_RETRY_AFTER:
+        return None
     async with _OS_LOGIN_LOCK:
         if _OS_LOGIN_TOKEN and time.time() < _OS_LOGIN_EXPIRES_AT:
             return _OS_LOGIN_TOKEN
+        if time.time() < _OS_LOGIN_RETRY_AFTER:
+            return None
         username, password = get_opensubtitles_credentials()
         if not username or not password:
             return None
@@ -1521,15 +1531,20 @@ async def _os_login() -> str | None:
                 )
             if r.status_code != 200:
                 print(f"OpenSubtitles login mislukt: {r.status_code} {r.text[:300]}")
+                # 5 min wachten bij een fout wachtwoord/gebruikersnaam, 30s bij
+                # een rate limit (die is snel weer voorbij).
+                _OS_LOGIN_RETRY_AFTER = time.time() + (30 if r.status_code == 429 else 300)
                 return None
             token = r.json().get("token")
             if not token:
+                _OS_LOGIN_RETRY_AFTER = time.time() + 300
                 return None
             _OS_LOGIN_TOKEN = token
             _OS_LOGIN_EXPIRES_AT = time.time() + 20 * 3600
             return token
         except Exception as e:
             print(f"OpenSubtitles login fout: {e}")
+            _OS_LOGIN_RETRY_AFTER = time.time() + 60
             return None
 
 
