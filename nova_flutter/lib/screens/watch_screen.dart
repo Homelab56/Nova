@@ -589,8 +589,15 @@ class _WatchScreenState extends State<WatchScreen> {
   // aanroep met het aangenomen type mislukt, zodat de Afspelen-knop niet
   // stilletjes verdwijnt.
   bool? _mediaTypeOverride;
+  // TMDB-responses (vooral /recommendations en /similar) laten soms zowel
+  // "title" als "first_air_date" in het item zitten, met de niet-van-
+  // toepassing-zijnde velden als lege string "" i.p.v. helemaal afwezig
+  // (null) - een strikte "== null"-check trapte daar dus in en gokte
+  // stelselmatig het verkeerde type voor films die via zo'n rij geopend
+  // werden, wat Afspelen elke keer eerst nodeloos als serie liet zoeken.
   bool get isMovie => _mediaTypeOverride ??
-    (widget.media['title'] != null && widget.media['first_air_date'] == null);
+    (widget.media['title'] != null &&
+     (widget.media['first_air_date'] as String? ?? '').isEmpty);
   String get title => widget.media['title'] ?? widget.media['name'] ?? '';
   String get year {
     final d = (widget.media['release_date'] ?? widget.media['first_air_date'] ?? '') as String;
@@ -1189,6 +1196,17 @@ class _WatchScreenState extends State<WatchScreen> {
 
       await attempt(isMovie ? 'movie' : 'tv');
       if (url == null) await attempt(isMovie ? 'tv' : 'movie');
+
+      // Soms faalt de zoekopdracht tijdelijk (een kortstondig RD/AIOStreams-
+      // hikje) terwijl een volgende identieke poging wél lukt - automatisch
+      // één keer herproberen i.p.v. de gebruiker zelf meermaals op Afspelen
+      // te laten drukken voor hetzelfde resultaat.
+      if (url == null && mounted) {
+        setState(() => _status = 'Nog eens proberen...');
+        await Future.delayed(const Duration(seconds: 2));
+        await attempt(isMovie ? 'movie' : 'tv');
+        if (url == null) await attempt(isMovie ? 'tv' : 'movie');
+      }
 
       if (url == null) {
         setState(() {
