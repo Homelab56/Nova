@@ -140,7 +140,12 @@ class _SearchScreenState extends State<SearchScreen> {
                 children: [
                   const Text('Acteurs & actrices', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
                   const SizedBox(height: 10),
-                  SizedBox(height: 132, child: ListView.builder(
+                  // +50 kopruimte - anders sneed de standaard clip van
+                  // ListView de focus-vergroting/gloed van de avatar af
+                  // (zie MediaRow voor dezelfde reden/berekening).
+                  SizedBox(height: 132 + 50, child: Padding(
+                    padding: const EdgeInsets.only(top: 50),
+                    child: ListView.builder(
                     scrollDirection: Axis.horizontal,
                     itemCount: _people.length,
                     itemBuilder: (_, i) {
@@ -163,7 +168,7 @@ class _SearchScreenState extends State<SearchScreen> {
                         ]),
                       );
                     },
-                  )),
+                  ))),
                 ],
               ),
             ),
@@ -192,7 +197,7 @@ class _SearchScreenState extends State<SearchScreen> {
                       // Extra ruimte bovenaan - anders sneed de standaard
                       // clip van GridView de focus-vergroting/gloed van de
                       // bovenste rij tegels af (net als bij MediaRow).
-                      padding: const EdgeInsets.fromLTRB(12, 40, 12, 12),
+                      padding: const EdgeInsets.fromLTRB(12, 70, 12, 12),
                       cacheExtent: 2000,
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: crossAxisCount,

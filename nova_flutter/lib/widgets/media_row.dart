@@ -58,7 +58,7 @@ class _MediaRowState extends State<MediaRow> {
     return Positioned(
       left: alignment == Alignment.centerLeft ? 0 : null,
       right: alignment == Alignment.centerRight ? 0 : null,
-      top: 40, bottom: 30,
+      top: 70, bottom: 30,
       child: AnimatedOpacity(
         opacity: _hovering ? 1 : 0,
         duration: const Duration(milliseconds: 150),
@@ -106,18 +106,19 @@ class _MediaRowState extends State<MediaRow> {
         ]),
       ),
       SizedBox(
-        // +40 kopruimte boven de rij zelf - widget.height past exact rond de
+        // +70 kopruimte boven de rij zelf - widget.height past exact rond de
         // tegel op normale grootte, dus zonder dit sneed de standaard clip
         // van ListView de focus-vergroting/gloed van de bovenste rij zo
         // meteen af zodra een tegel focus kreeg (de bovenste rand van de
-        // highlight "viel weg").
-        height: widget.height + 40,
+        // highlight "viel weg"). 70px geeft ruim de rekenkundige ~52px
+        // overlap bij scale 1.16 + gloed marge, i.p.v. precies erop mikken.
+        height: widget.height + 70,
         child: MouseRegion(
           onEnter: (_) => setState(() => _hovering = true),
           onExit: (_) => setState(() => _hovering = false),
           child: Stack(children: [
             Padding(
-              padding: const EdgeInsets.only(top: 40),
+              padding: const EdgeInsets.only(top: 70),
               child: ListView.builder(
                 controller: _scrollCtrl,
                 scrollDirection: Axis.horizontal,

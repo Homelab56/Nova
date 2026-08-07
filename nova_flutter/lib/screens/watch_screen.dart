@@ -1931,6 +1931,7 @@ class _WatchScreenState extends State<WatchScreen> {
                             final sn = s['season_number'] as int;
                             final active = sn == _selectedSeason;
                             return TvFocusable(
+                              muted: true,
                               borderRadius: BorderRadius.circular(22),
                               onTap: () => _loadSeason(sn),
                               child: AnimatedContainer(
@@ -1979,7 +1980,12 @@ class _WatchScreenState extends State<WatchScreen> {
                       const SizedBox(height: 28),
                       const Text('Cast', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: Colors.white)),
                       const SizedBox(height: 14),
-                      SizedBox(height: 172, child: ListView.builder(
+                      // +50 kopruimte - anders sneed de standaard clip van
+                      // ListView de focus-vergroting/gloed van de avatar af
+                      // (zie MediaRow voor dezelfde reden/berekening).
+                      SizedBox(height: 172 + 50, child: Padding(
+                        padding: const EdgeInsets.only(top: 50),
+                        child: ListView.builder(
                         scrollDirection: Axis.horizontal,
                         itemCount: _cast.length,
                         itemBuilder: (_, i) {
@@ -2008,7 +2014,7 @@ class _WatchScreenState extends State<WatchScreen> {
                             ]),
                           );
                         },
-                      )),
+                      ))),
                     ],
 
                   ],

@@ -97,6 +97,7 @@ class _PersonScreenState extends State<PersonScreen> {
   Widget _sortToggleButton(String label, _SortMode mode) {
     final active = _sortMode == mode;
     return TvFocusable(
+      muted: true,
       borderRadius: BorderRadius.circular(20),
       onTap: () => setState(() => _sortMode = mode),
       child: Container(
@@ -200,6 +201,7 @@ class _PersonScreenState extends State<PersonScreen> {
                         children: [
                           TvFocusable(
                             autofocus: true,
+                            muted: true,
                             borderRadius: BorderRadius.circular(24),
                             onTap: () => Navigator.pop(context),
                             child: Container(
@@ -249,6 +251,7 @@ class _PersonScreenState extends State<PersonScreen> {
                                     style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.5)),
                                   if (bio.length > 300)
                                     TvFocusable(
+                                      muted: true,
                                       onTap: () => setState(() => _bioExpanded = !_bioExpanded),
                                       child: Padding(
                                         padding: const EdgeInsets.only(top: 6),

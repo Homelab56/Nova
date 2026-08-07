@@ -28,7 +28,12 @@ class TvHighlightBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedScale(
-      scale: focused && !muted ? 1.1 : 1.0,
+      // Was 1.1 - een zwarte "optil"-schaduw (bedoeld om het gevoel van
+      // naar-voren-poppen te versterken) bleek onzichtbaar tegen deze
+      // donkere thema-achtergrond en is geschrapt; de vergroting zelf is
+      // hier het enige dat echt "dichterbij/naar voren" leest, dus die staat
+      // nu duidelijker groter.
+      scale: focused && !muted ? 1.16 : 1.0,
       duration: const Duration(milliseconds: 120),
       curve: Curves.easeOut,
       child: AnimatedContainer(
@@ -51,9 +56,8 @@ class TvHighlightBox extends StatelessWidget {
             : (muted
                 ? [BoxShadow(color: const Color(0xFF00b4d8).withOpacity(0.55), blurRadius: 10, spreadRadius: 0.5)]
                 : [
-                    BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.9), blurRadius: 10, spreadRadius: 1),
-                    BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.55), blurRadius: 28, spreadRadius: 4),
-                    BoxShadow(color: Colors.black.withOpacity(0.55), blurRadius: 24, offset: const Offset(0, 10)),
+                    BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.95), blurRadius: 10, spreadRadius: 1),
+                    BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.6), blurRadius: 26, spreadRadius: 3),
                   ]),
         ),
         foregroundDecoration: BoxDecoration(

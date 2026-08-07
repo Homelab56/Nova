@@ -413,6 +413,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           for (final e in _genreNames.entries)
                             TvFocusable(
                               autofocus: e.key == firstGenreId,
+                              muted: true,
                               borderRadius: BorderRadius.circular(8),
                               onTap: () {
                                 Navigator.of(dialogContext).pop();
@@ -435,6 +436,7 @@ class _HomeScreenState extends State<HomeScreen> {
             );
           }
           return TvFocusable(
+            muted: true,
             borderRadius: BorderRadius.circular(8),
             onTap: openGenreMenu,
             child: Container(
@@ -457,6 +459,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
         const Spacer(),
         TvFocusable(
+          muted: true,
           borderRadius: BorderRadius.circular(20),
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SearchScreen())),
           child: const Padding(
@@ -467,6 +470,7 @@ class _HomeScreenState extends State<HomeScreen> {
         Tooltip(
           message: 'Profiel wisselen (${ProfileService.activeProfileName ?? ""})',
           child: TvFocusable(
+            muted: true,
             borderRadius: BorderRadius.circular(20),
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileScreen())),
             child: Padding(
@@ -483,6 +487,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         TvFocusable(
+          muted: true,
           borderRadius: BorderRadius.circular(20),
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
           child: const Padding(

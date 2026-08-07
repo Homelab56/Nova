@@ -200,6 +200,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Builder(builder: (context) {
                     final taken = usedIndices.contains(i);
                     return TvFocusable(
+                      muted: true,
                       borderRadius: BorderRadius.circular(17),
                       onTap: taken ? null : () => setDialogState(() => colorIndex = i),
                       child: Opacity(
@@ -232,6 +233,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 Builder(builder: (context) {
                   final selected = selectedIcon == null;
                   return TvFocusable(
+                    muted: true,
                     borderRadius: BorderRadius.circular(17),
                     onTap: () => setDialogState(() => selectedIcon = null),
                     child: Container(
@@ -249,6 +251,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Builder(builder: (context) {
                     final selected = selectedIcon == entry.key;
                     return TvFocusable(
+                      muted: true,
                       borderRadius: BorderRadius.circular(17),
                       onTap: () => setDialogState(() => selectedIcon = entry.key),
                       child: Container(
