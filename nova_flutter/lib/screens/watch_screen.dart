@@ -1017,6 +1017,13 @@ class _WatchScreenState extends State<WatchScreen> {
             decoration: BoxDecoration(
               color: Colors.black87,
               borderRadius: BorderRadius.circular(8),
+            ),
+            // De rand apart in foregroundDecoration (i.p.v. mee in
+            // decoration) - anders telt de rand mee als extra padding rond
+            // het kind, en groeit deze knop bij focus (breedte 1→2) buiten
+            // zijn toegewezen ruimte.
+            foregroundDecoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
               border: Border.all(color: focused ? const Color(0xFF00b4d8) : Colors.white24, width: focused ? 2 : 1),
             ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [

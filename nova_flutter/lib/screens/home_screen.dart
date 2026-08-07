@@ -502,8 +502,11 @@ class _HomeScreenState extends State<HomeScreen> {
       animation: focusNode,
       builder: (context, c) {
         final focused = focusNode.hasFocus;
+        // foregroundDecoration i.p.v. decoration - anders telt de border
+        // impliciet als extra padding rond het kind en kan de knop bij
+        // focus buiten zijn toegewezen ruimte groeien (zie TvFocusable).
         return Container(
-          decoration: BoxDecoration(
+          foregroundDecoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: focused ? const Color(0xFF00e5ff) : Colors.transparent, width: 4),
             boxShadow: focused
@@ -536,7 +539,10 @@ class _HomeScreenState extends State<HomeScreen> {
         // juist onleesbaar i.p.v. duidelijker.
         return AnimatedContainer(
           duration: const Duration(milliseconds: 120),
-          decoration: BoxDecoration(
+          // foregroundDecoration i.p.v. decoration - zie de toelichting in
+          // TvFocusable: anders telt de border als extra padding en kan de
+          // knop bij focus buiten zijn toegewezen ruimte groeien.
+          foregroundDecoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: focused ? const Color(0xFF00b4d8) : Colors.transparent, width: 2),
             boxShadow: focused

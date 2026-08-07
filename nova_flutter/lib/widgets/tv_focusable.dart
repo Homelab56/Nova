@@ -118,7 +118,14 @@ class _TvFocusableState extends State<TvFocusable> {
           curve: Curves.easeOut,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
-            decoration: BoxDecoration(
+            // foregroundDecoration i.p.v. decoration: een border in
+            // "decoration" telt in Flutter impliciet mee als extra padding
+            // rond het kind (zodat de rand niet over de inhoud heen valt),
+            // wat het kind bij focus effectief groter maakte dan zijn
+            // toegewezen ruimte - gaf een echte RenderFlex-overflow/crash in
+            // rijen met een krap vastgezette hoogte. foregroundDecoration
+            // tekent bovenop zonder de layout-grootte te beïnvloeden.
+            foregroundDecoration: BoxDecoration(
               borderRadius: widget.borderRadius,
               // Een dunne, scherpe rand leest ondubbelzinnig als "dit is
               // geselecteerd" - ook van op de bank en ook voor wie de vorige,
