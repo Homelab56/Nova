@@ -157,6 +157,40 @@ def _tag_media_type(items: list[dict], media_type: str | None) -> list[dict]:
         out.append(it)
     return out
 
+def _norm_title(it: dict) -> str:
+    t = (it.get("title") or it.get("name") or "").strip().lower()
+    return re.sub(r"\s+", " ", t)
+
+
+def _dedupe_title_duplicates(items: list[dict]) -> list[dict]:
+    """TMDB bevat soms dubbele entries voor dezelfde (vaak nog niet
+    uitgebrachte, veelbesproken) titel: één met de echte, volledige data en
+    één quasi-leeg exemplaar (geen synopsis, amper stemmen) dat door de hype
+    rond de titel toch hoog kan scoren. Een stream die aan zo'n leeg
+    duplicaat gekoppeld wordt krijgt volledig onsamenhangende metadata (bv.
+    ondertitels van de echte film op een compleet andere/verkeerde release).
+    Enkel weggooien bij een overduidelijk verschil (10x zoveel stemmen) -
+    twijfelgevallen (twee echt verschillende films met dezelfde titel)
+    blijven allebei gewoon staan."""
+    groups: dict[tuple, list[dict]] = {}
+    for it in items:
+        groups.setdefault((_norm_title(it), it.get("media_type")), []).append(it)
+
+    drop: set[tuple] = set()
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        group.sort(key=lambda x: x.get("vote_count") or 0, reverse=True)
+        top_votes = group[0].get("vote_count") or 0
+        if top_votes < 50:
+            continue
+        for other in group[1:]:
+            if top_votes > (other.get("vote_count") or 0) * 10:
+                drop.add((other.get("media_type"), other.get("id")))
+
+    return [it for it in items if (it.get("media_type"), it.get("id")) not in drop]
+
+
 def _filter_items(
     items: list[dict],
     media_type: str | None,
@@ -183,6 +217,8 @@ def _filter_items(
         if suggestion_mode and _is_too_new_release(it, inferred):
             continue
         out.append(it)
+    if suggestion_mode:
+        out = _dedupe_title_duplicates(out)
     return out
 
 async def tmdb_list(
