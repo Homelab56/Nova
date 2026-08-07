@@ -2031,7 +2031,7 @@ class _WatchScreenState extends State<WatchScreen> {
                   itemBuilder: (_, i) {
                     final item = _similar[i];
                     final p = item['poster_path'];
-                    return Container(width: 150, margin: const EdgeInsets.symmetric(horizontal: 16),
+                    return Container(width: 150, margin: const EdgeInsets.symmetric(horizontal: 24),
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                         TvFocusable(
                           onTap: () => Navigator.pushReplacement(context, MaterialPageRoute(

@@ -28,12 +28,11 @@ class TvHighlightBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedScale(
-      // Was 1.1 - een zwarte "optil"-schaduw (bedoeld om het gevoel van
-      // naar-voren-poppen te versterken) bleek onzichtbaar tegen deze
-      // donkere thema-achtergrond en is geschrapt; de vergroting zelf is
-      // hier het enige dat echt "dichterbij/naar voren" leest, dus die staat
-      // nu duidelijker groter.
-      scale: focused && !muted ? 1.16 : 1.0,
+      // Was 1.1, toen 1.16 - in rijen (i.t.t. de rasters, waar tegels dichter
+      // opeen staan) bleek dat verschil met genoeg tussenruimte om clipping
+      // te voorkomen te subtiel om als "naar voren poppen" te lezen. Groter
+      // hier, met marges/kopruimte elders aangepast aan dit percentage.
+      scale: focused && !muted ? 1.25 : 1.0,
       duration: const Duration(milliseconds: 120),
       curve: Curves.easeOut,
       child: AnimatedContainer(

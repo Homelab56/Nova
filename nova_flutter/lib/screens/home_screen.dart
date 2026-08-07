@@ -715,13 +715,13 @@ class _HomeScreenState extends State<HomeScreen> {
     final double cardWidth = numVisible + posterWidth;
     return Container(
       width: cardWidth,
-      // Was horizontal: 3, toen 10 - nog steeds te weinig zodra de focus-
-      // vergroting naar 1.16 ging: bij 168px breed heeft die ~13,4px ruimte
-      // nodig per kant om niet tegen de buur aan te lopen. Te weinig ruimte
-      // liet zowel het cijfer van de vólgende kaart over déze rand heen
-      // tekenen als de vólgende poster zelf de rechterkant van dít kaartje
-      // verbergen (latere items in de rij tekenen later, dus bovenop).
-      margin: const EdgeInsets.symmetric(horizontal: 16),
+      // Was horizontal: 3, toen 10, toen 16 - schaal ging ondertussen naar
+      // 1.25, heeft nu ~21px per kant nodig om niet tegen de buur aan te
+      // lopen. Te weinig ruimte liet zowel het cijfer van de vólgende kaart
+      // over déze rand heen tekenen als de vólgende poster zelf de
+      // rechterkant van dít kaartje verbergen (latere items in de rij
+      // tekenen later, dus bovenop).
+      margin: const EdgeInsets.symmetric(horizontal: 26),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         SizedBox(
           height: posterHeight,
@@ -847,11 +847,11 @@ class _HomeScreenState extends State<HomeScreen> {
       final double progress = (item['current_time'] ?? 0) / (item['duration'] ?? 1);
 
       return Container(
-        // Was horizontal: 5 - te weinig ruimte om de focus-vergroting
-        // (schaal 1.16) volledig te laten uitklappen zonder tegen de
-        // volgende kaart aan te lopen (die er dan gedeeltelijk overheen
-        // tekent, want later in de rij = later getekend = bovenop).
-        width: 230, margin: const EdgeInsets.symmetric(horizontal: 16),
+        // Was horizontal: 5, toen 16 - schaal ging ondertussen naar 1.25,
+        // heeft nu ~29px per kant nodig om niet tegen de volgende kaart aan
+        // te lopen (die er dan gedeeltelijk overheen tekent, want later in
+        // de rij = later getekend = bovenop).
+        width: 230, margin: const EdgeInsets.symmetric(horizontal: 32),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           TvFocusable(
             escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
@@ -886,11 +886,11 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return Container(
-      // Was horizontal: 6 - te weinig ruimte om de focus-vergroting (schaal
-      // 1.16) volledig te laten uitklappen zonder tegen de volgende kaart
-      // aan te lopen (die er dan gedeeltelijk overheen tekent, want later
-      // in de rij = later getekend = bovenop).
-      width: 168, margin: const EdgeInsets.symmetric(horizontal: 16),
+      // Was horizontal: 6, toen 16 - schaal ging ondertussen naar 1.25,
+      // heeft nu ~21px per kant nodig om niet tegen de volgende kaart aan
+      // te lopen (die er dan gedeeltelijk overheen tekent, want later in de
+      // rij = later getekend = bovenop).
+      width: 168, margin: const EdgeInsets.symmetric(horizontal: 26),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         TvFocusable(
           escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
