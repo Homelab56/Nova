@@ -1011,26 +1011,24 @@ class _WatchScreenState extends State<WatchScreen> {
         return InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(8),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.black87,
-              borderRadius: BorderRadius.circular(8),
+          // Dezelfde gedeelde TvHighlightBox als de rest van de app i.p.v.
+          // een eigen kopie van de rand/gloed-decoratie.
+          child: TvHighlightBox(
+            focused: focused,
+            muted: true,
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.black87,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(icon, color: Colors.white, size: 18),
+                const SizedBox(width: 8),
+                Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
+              ]),
             ),
-            // De rand apart in foregroundDecoration (i.p.v. mee in
-            // decoration) - anders telt de rand mee als extra padding rond
-            // het kind, en groeit deze knop bij focus (breedte 1→2) buiten
-            // zijn toegewezen ruimte.
-            foregroundDecoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: focused ? const Color(0xFF00b4d8) : Colors.white24, width: focused ? 2 : 1),
-            ),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(icon, color: Colors.white, size: 18),
-              const SizedBox(width: 8),
-              Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
-            ]),
           ),
         );
       }),

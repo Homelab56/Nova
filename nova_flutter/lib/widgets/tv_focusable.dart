@@ -1,12 +1,80 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+// De ENIGE plek waar de focus-highlight (rand + gloed + optionele lift)
+// getekend wordt - zowel TvFocusable (die zelf de tik/focus afhandelt) als
+// knoppen die hun focus al ergens anders beheren (Material-knoppen met een
+// eigen FocusNode, zoals de hero-knoppen en de navigatietabs) gaan hier
+// doorheen. Vroeger had elk van die plekken zijn eigen kopie van dezelfde
+// decoratie, en een fix op de ene plek (bv. de RenderFlex-overflow door een
+// border in "decoration", of een boxShadow die per ongeluk een effen vlak
+// tekende in foregroundDecoration) loste de andere kopieën niet mee op.
+class TvHighlightBox extends StatelessWidget {
+  final bool focused;
+  final Widget child;
+  final BorderRadius borderRadius;
+  // Kleine, tekst-gevulde knoppen (navigatietabs, hero-knoppen) krijgen
+  // bewust een lichtere highlight zonder vergroting - dezelfde zware gloed
+  // als op een poster maakte tekst daar onleesbaar i.p.v. duidelijker.
+  final bool muted;
+  const TvHighlightBox({
+    super.key,
+    required this.focused,
+    required this.child,
+    this.borderRadius = const BorderRadius.all(Radius.circular(10)),
+    this.muted = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedScale(
+      scale: focused && !muted ? 1.1 : 1.0,
+      duration: const Duration(milliseconds: 120),
+      curve: Curves.easeOut,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        // De gloed/schaduw blijft in "decoration" (achter het kind, zoals
+        // een schaduw hoort te renderen - in foregroundDecoration tekent een
+        // boxShadow een vólledig gevulde, wazige vorm BOVENOP het kind, geen
+        // rand eromheen: leek dan een effen gekleurd vlak i.p.v. de poster
+        // erachter). Enkel de rand staat in foregroundDecoration, want een
+        // border in "decoration" telt in Flutter impliciet mee als extra
+        // padding rond het kind (zodat de rand niet over de inhoud heen
+        // valt) - dat liet het kind bij focus buiten zijn toegewezen ruimte
+        // groeien en gaf een echte RenderFlex-overflow/crash in rijen met
+        // een krap vastgezette hoogte. Een boxShadow telt daar niet in mee,
+        // dus die blijft veilig in "decoration".
+        decoration: BoxDecoration(
+          borderRadius: borderRadius,
+          boxShadow: !focused
+            ? const []
+            : (muted
+                ? [BoxShadow(color: const Color(0xFF00b4d8).withOpacity(0.55), blurRadius: 10, spreadRadius: 0.5)]
+                : [
+                    BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.9), blurRadius: 10, spreadRadius: 1),
+                    BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.55), blurRadius: 28, spreadRadius: 4),
+                    BoxShadow(color: Colors.black.withOpacity(0.55), blurRadius: 24, offset: const Offset(0, 10)),
+                  ]),
+        ),
+        foregroundDecoration: BoxDecoration(
+          borderRadius: borderRadius,
+          border: Border.all(
+            color: !focused ? Colors.transparent : (muted ? const Color(0xFF00b4d8) : const Color(0xFF00e5ff)),
+            width: muted ? 2 : 4,
+          ),
+        ),
+        child: child,
+      ),
+    );
+  }
+}
+
 // Maakt een willekeurige tegel/kaart bedienbaar met een afstandsbediening
-// (D-pad + "OK"/Enter/Space activeert de tap) met een subtiele focus-gloed
-// + lichte vergroting, en scrollt zichzelf in beeld zodra hij focus krijgt.
-// Gewone GestureDetectors hebben geen toetsenbord-/D-pad-ondersteuning, dus
-// zonder dit heeft een afstandsbediening niets om naartoe te bewegen in
-// rijen zoals de posterlijsten.
+// (D-pad + "OK"/Enter/Space activeert de tap) met de highlight hierboven,
+// en scrollt zichzelf in beeld zodra hij focus krijgt. Gewone
+// GestureDetectors hebben geen toetsenbord-/D-pad-ondersteuning, dus zonder
+// dit heeft een afstandsbediening niets om naartoe te bewegen in rijen
+// zoals de posterlijsten.
 class TvFocusable extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
@@ -17,6 +85,11 @@ class TvFocusable extends StatefulWidget {
   final VoidCallback? onLongPress;
   final BorderRadius borderRadius;
   final bool autofocus;
+  final bool muted;
+  // Optioneel: gebruik een extern beheerde FocusNode i.p.v. er zelf een aan
+  // te maken - nodig zodra ander code (zoals "omhoog"-navigatie vanuit een
+  // andere rij) expliciet naar déze specifieke knop moet kunnen springen.
+  final FocusNode? focusNode;
   // Sommige schermdelen overlappen elkaar visueel (bv. de doorschijnende
   // koptekst bovenop de hero-banner), waardoor Flutter's automatische
   // "dichtstbijzijnde focusbare widget in deze richting"-logica soms niet
@@ -31,6 +104,8 @@ class TvFocusable extends StatefulWidget {
     this.onLongPress,
     this.borderRadius = const BorderRadius.all(Radius.circular(10)),
     this.autofocus = false,
+    this.muted = false,
+    this.focusNode,
     this.escapeUp,
   });
 
@@ -54,6 +129,7 @@ class _TvFocusableState extends State<TvFocusable> {
   @override
   Widget build(BuildContext context) {
     return Focus(
+      focusNode: widget.focusNode,
       autofocus: widget.autofocus,
       onFocusChange: (has) {
         setState(() => _focused = has);
@@ -108,47 +184,11 @@ class _TvFocusableState extends State<TvFocusable> {
       child: GestureDetector(
         onTap: widget.onTap,
         onLongPress: widget.onLongPress,
-        child: AnimatedScale(
-          // Iets groter dan voorheen (was 1.08) plus een donkere schaduw
-          // eronder (i.p.v. enkel de cyaan gloed rondom) - dat geeft samen
-          // echt het gevoel dat de tegel naar voren optilt, niet enkel dat
-          // hij een gekleurde rand krijgt.
-          scale: _focused ? 1.1 : 1.0,
-          duration: const Duration(milliseconds: 120),
-          curve: Curves.easeOut,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
-            // foregroundDecoration i.p.v. decoration: een border in
-            // "decoration" telt in Flutter impliciet mee als extra padding
-            // rond het kind (zodat de rand niet over de inhoud heen valt),
-            // wat het kind bij focus effectief groter maakte dan zijn
-            // toegewezen ruimte - gaf een echte RenderFlex-overflow/crash in
-            // rijen met een krap vastgezette hoogte. foregroundDecoration
-            // tekent bovenop zonder de layout-grootte te beïnvloeden.
-            foregroundDecoration: BoxDecoration(
-              borderRadius: widget.borderRadius,
-              // Een dunne, scherpe rand leest ondubbelzinnig als "dit is
-              // geselecteerd" - ook van op de bank en ook voor wie de vorige,
-              // zachtere gloed-only versie niet duidelijk genoeg vond. De
-              // gloed blijft erbij voor wat diepte, maar is niet meer de
-              // enige aanwijzing. Twee gestapelde schaduwen (een strakke
-              // dichtbij, een ruimere errond) lezen van op afstand feller
-              // dan één enkele - dat bleek zelfs met de eerste (sterkere)
-              // versie nog te subtiel.
-              border: Border.all(
-                color: _focused ? const Color(0xFF00e5ff) : Colors.transparent,
-                width: 4,
-              ),
-              boxShadow: _focused
-                ? [
-                    BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.9), blurRadius: 10, spreadRadius: 1),
-                    BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.55), blurRadius: 28, spreadRadius: 4),
-                    BoxShadow(color: Colors.black.withOpacity(0.55), blurRadius: 24, offset: const Offset(0, 10)),
-                  ]
-                : const [],
-            ),
-            child: widget.child,
-          ),
+        child: TvHighlightBox(
+          focused: _focused,
+          muted: widget.muted,
+          borderRadius: widget.borderRadius,
+          child: widget.child,
         ),
       ),
     );

@@ -494,108 +494,78 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Zichtbare focus-ring rond knoppen met een eigen (soms witte) achtergrond,
-  // waar een gekleurde overlay niet zou opvallen - Material's ingebouwde
-  // focus-highlight bleek op de TV amper zichtbaar, net als bij de navigatie.
-  Widget _focusRing({required FocusNode focusNode, required Widget child}) {
+  // Zichtbare focus-ring rond knoppen die hun focus al zelf beheren (zoals
+  // ElevatedButton/OutlinedButton met een eigen FocusNode) - die knoppen
+  // handelen hun eigen tik/toetsenbord-gedrag al af, dus ze gaan niet in een
+  // TvFocusable (die zou een tweede, concurrerende Focus-node toevoegen).
+  // Gebruikt wel dezelfde TvHighlightBox als de rest van de app, i.p.v. een
+  // eigen kopie van de decoratie.
+  Widget _focusRing({required FocusNode focusNode, required Widget child, bool muted = true}) {
     return AnimatedBuilder(
       animation: focusNode,
-      builder: (context, c) {
-        final focused = focusNode.hasFocus;
-        // foregroundDecoration i.p.v. decoration - anders telt de border
-        // impliciet als extra padding rond het kind en kan de knop bij
-        // focus buiten zijn toegewezen ruimte groeien (zie TvFocusable).
-        return Container(
-          foregroundDecoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: focused ? const Color(0xFF00e5ff) : Colors.transparent, width: 4),
-            boxShadow: focused
-              ? [
-                  BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.9), blurRadius: 10, spreadRadius: 1),
-                  BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.55), blurRadius: 28, spreadRadius: 4),
-                ]
-              : const [],
-          ),
-          child: c,
-        );
-      },
+      builder: (context, c) => TvHighlightBox(
+        focused: focusNode.hasFocus,
+        muted: muted,
+        borderRadius: BorderRadius.circular(12),
+        child: c!,
+      ),
       child: child,
     );
   }
 
   Widget _buildNavBtn(String label, int index) {
     final bool active = _tab == index;
-    // InkWell's ingebouwde focusColor-overlay bleek in de praktijk op de TV
-    // amper zichtbaar - FocusNode is zelf een ChangeNotifier, dus een
-    // AnimatedBuilder erop geeft een veel duidelijker eigen highlight zodra
-    // deze specifieke knop echt focus heeft.
-    return AnimatedBuilder(
-      animation: _navFocusNodes[index],
-      builder: (context, child) {
-        final focused = _navFocusNodes[index].hasFocus;
-        // Bewust minder fel dan TvFocusable's versie: dit is een kleine,
-        // tekst-gevulde knop (en de actieve tab-tekst is zelf al cyaan) -
-        // dezelfde zware gloed als op een grote poster maakte de tekst hier
-        // juist onleesbaar i.p.v. duidelijker.
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          // foregroundDecoration i.p.v. decoration - zie de toelichting in
-          // TvFocusable: anders telt de border als extra padding en kan de
-          // knop bij focus buiten zijn toegewezen ruimte groeien.
-          foregroundDecoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: focused ? const Color(0xFF00b4d8) : Colors.transparent, width: 2),
-            boxShadow: focused
-              ? [BoxShadow(color: const Color(0xFF00b4d8).withOpacity(0.55), blurRadius: 10, spreadRadius: 0.5)]
-              : const [],
-          ),
-          child: child,
-        );
+    // TvFocusable i.p.v. een eigen InkWell+highlight-kopie - zelfde bewezen
+    // D-pad-gedrag en dezelfde highlight-styling (via TvHighlightBox) als de
+    // rest van de app, één plek om te onderhouden i.p.v. losse kopieën die
+    // uit elkaar konden groeien. `muted` want dit is een kleine, tekst-
+    // gevulde knop (de actieve tab-tekst is zelf al cyaan) - de zware gloed
+    // van een poster maakte tekst hier onleesbaar i.p.v. duidelijker.
+    return TvFocusable(
+      // Focus start bewust op de eerste navigatieknop, zodat een afstands-
+      // bediening meteen iets heeft om vanaf te vertrekken i.p.v. dat er
+      // nergens focus staat bij het openen van het scherm.
+      autofocus: index == 0,
+      focusNode: _navFocusNodes[index],
+      muted: true,
+      borderRadius: BorderRadius.circular(8),
+      onTap: () {
+        if (index == 5) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const WatchlistScreen(),
+              settings: const RouteSettings(name: 'watchlist'),
+            ),
+          ).then((_) => _load());
+        } else {
+          setState(() {
+            _tab = index;
+            _heroIndex = 0;
+          });
+        }
       },
-      child: InkWell(
-        // Focus start bewust op de eerste navigatieknop, zodat een afstands-
-        // bediening meteen iets heeft om vanaf te vertrekken i.p.v. dat er
-        // nergens focus staat bij het openen van het scherm.
-        autofocus: index == 0,
-        focusNode: _navFocusNodes[index],
-        onTap: () {
-          if (index == 5) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => const WatchlistScreen(),
-                settings: const RouteSettings(name: 'watchlist'),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                color: active ? const Color(0xFF00b4d8) : Colors.grey,
+                fontWeight: active ? FontWeight.bold : FontWeight.normal,
+                fontSize: 15,
               ),
-            ).then((_) => _load());
-          } else {
-            setState(() {
-              _tab = index;
-              _heroIndex = 0;
-            });
-          }
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  color: active ? const Color(0xFF00b4d8) : Colors.grey,
-                  fontWeight: active ? FontWeight.bold : FontWeight.normal,
-                  fontSize: 15,
-                ),
-              ),
-              const SizedBox(height: 4),
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                height: 2,
-                width: active ? 20 : 0,
-                color: const Color(0xFF00b4d8),
-              ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 4),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              height: 2,
+              width: active ? 20 : 0,
+              color: const Color(0xFF00b4d8),
+            ),
+          ],
         ),
       ),
     );
