@@ -58,7 +58,7 @@ class _MediaRowState extends State<MediaRow> {
     return Positioned(
       left: alignment == Alignment.centerLeft ? 0 : null,
       right: alignment == Alignment.centerRight ? 0 : null,
-      top: 0, bottom: 30,
+      top: 85, bottom: 30,
       child: AnimatedOpacity(
         opacity: _hovering ? 1 : 0,
         duration: const Duration(milliseconds: 150),
@@ -106,25 +106,30 @@ class _MediaRowState extends State<MediaRow> {
         ]),
       ),
       SizedBox(
-        // De focus-highlight tekent nu via TvFocusable's eigen Overlay-laag
-        // (zie tv_focusable.dart), volledig los van deze rij se eigen
-        // afmetingen - geen extra kopruimte hier meer nodig om clipping te
-        // vermijden.
-        height: widget.height,
+        // +85 kopruimte boven de rij zelf - widget.height past exact rond de
+        // tegel op normale grootte, dus zonder dit sneed de standaard clip
+        // van ListView de focus-vergroting/gloed van de bovenste rij zo
+        // meteen af zodra een tegel focus kreeg (de bovenste rand van de
+        // highlight "viel weg"). Ruim boven de rekenkundige ~67px overlap
+        // bij scale 1.25 + gloed marge, i.p.v. precies erop mikken.
+        height: widget.height + 85,
         child: MouseRegion(
           onEnter: (_) => setState(() => _hovering = true),
           onExit: (_) => setState(() => _hovering = false),
           child: Stack(children: [
-            ListView.builder(
-              controller: _scrollCtrl,
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              // Een stuk groter dan de standaard (~250px) zodat een D-pad
-              // meerdere kaarten voorbij het scherm al kan focussen i.p.v.
-              // vast te lopen zodra hij een nog niet opgebouwde kaart nadert.
-              cacheExtent: 2000,
-              itemCount: widget.itemCount,
-              itemBuilder: widget.itemBuilder,
+            Padding(
+              padding: const EdgeInsets.only(top: 85),
+              child: ListView.builder(
+                controller: _scrollCtrl,
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                // Een stuk groter dan de standaard (~250px) zodat een D-pad
+                // meerdere kaarten voorbij het scherm al kan focussen i.p.v.
+                // vast te lopen zodra hij een nog niet opgebouwde kaart nadert.
+                cacheExtent: 2000,
+                itemCount: widget.itemCount,
+                itemBuilder: widget.itemBuilder,
+              ),
             ),
             _arrow(Icons.chevron_left, () => _scrollBy(-800), alignment: Alignment.centerLeft),
             _arrow(Icons.chevron_right, () => _scrollBy(800), alignment: Alignment.centerRight),

@@ -164,8 +164,10 @@ class _PersonScreenState extends State<PersonScreen> {
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: crossAxisCount,
           childAspectRatio: 0.6,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 16,
+          // Was 12/16 - te weinig voor de focus-vergroting (schaal 1.25),
+          // zie category_screen.dart voor de volledige toelichting.
+          crossAxisSpacing: 32,
+          mainAxisSpacing: 52,
         ),
         delegate: SliverChildBuilderDelegate(
           (context, i) => _buildCreditTile(items[i]),

@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-// De ENIGE plek waar de focus-highlight (rand + gloed + vergroting)
+// De ENIGE plek waar de focus-highlight (rand + gloed + optionele lift)
 // getekend wordt - zowel TvFocusable (die zelf de tik/focus afhandelt) als
 // knoppen die hun focus al ergens anders beheren (Material-knoppen met een
 // eigen FocusNode, zoals de hero-knoppen en de navigatietabs) gaan hier
 // doorheen. Vroeger had elk van die plekken zijn eigen kopie van dezelfde
-// decoratie, en een fix op de ene plek loste de andere kopieën niet mee op.
+// decoratie, en een fix op de ene plek (bv. de RenderFlex-overflow door een
+// border in "decoration", of een boxShadow die per ongeluk een effen vlak
+// tekende in foregroundDecoration) loste de andere kopieën niet mee op.
 class TvHighlightBox extends StatelessWidget {
   final bool focused;
   final Widget child;
@@ -26,6 +28,10 @@ class TvHighlightBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedScale(
+      // Was 1.1, toen 1.16 - in rijen (i.t.t. de rasters, waar tegels dichter
+      // opeen staan) bleek dat verschil met genoeg tussenruimte om clipping
+      // te voorkomen te subtiel om als "naar voren poppen" te lezen. Groter
+      // hier, met marges/kopruimte elders aangepast aan dit percentage.
       scale: focused && !muted ? 1.25 : 1.0,
       duration: const Duration(milliseconds: 120),
       curve: Curves.easeOut,
@@ -34,10 +40,14 @@ class TvHighlightBox extends StatelessWidget {
         // De gloed/schaduw blijft in "decoration" (achter het kind, zoals
         // een schaduw hoort te renderen - in foregroundDecoration tekent een
         // boxShadow een vólledig gevulde, wazige vorm BOVENOP het kind, geen
-        // rand eromheen). Enkel de rand staat in foregroundDecoration, want
-        // een border in "decoration" telt in Flutter impliciet mee als extra
-        // padding rond het kind - dat liet het kind bij focus buiten zijn
-        // toegewezen ruimte groeien en gaf een echte RenderFlex-overflow.
+        // rand eromheen: leek dan een effen gekleurd vlak i.p.v. de poster
+        // erachter). Enkel de rand staat in foregroundDecoration, want een
+        // border in "decoration" telt in Flutter impliciet mee als extra
+        // padding rond het kind (zodat de rand niet over de inhoud heen
+        // valt) - dat liet het kind bij focus buiten zijn toegewezen ruimte
+        // groeien en gaf een echte RenderFlex-overflow/crash in rijen met
+        // een krap vastgezette hoogte. Een boxShadow telt daar niet in mee,
+        // dus die blijft veilig in "decoration".
         decoration: BoxDecoration(
           borderRadius: borderRadius,
           boxShadow: !focused
@@ -63,24 +73,11 @@ class TvHighlightBox extends StatelessWidget {
 }
 
 // Maakt een willekeurige tegel/kaart bedienbaar met een afstandsbediening
-// (D-pad + "OK"/Enter/Space activeert de tap), met de highlight hierboven.
-// Gewone GestureDetectors hebben geen toetsenbord-/D-pad-ondersteuning, dus
-// zonder dit heeft een afstandsbediening niets om naartoe te bewegen in
-// rijen zoals de posterlijsten.
-//
-// Niet-gemute (dus vergrote) tegels tekenen hun highlight via de Overlay
-// i.p.v. gewoon inline in de rij/raster zelf. Reden: in een ListView/GridView
-// tekenen latere items ALTIJD bovenop eerdere items, ongeacht welk item
-// focus heeft - een vergrote, gefocuste tegel die in de ruimte van zijn
-// buurman groeit, kon dus voor een stuk verborgen raken áchter die buurman
-// (als die later in de lijst staat), wat leek alsof "een stuk van de
-// highlight wegviel". Genoeg permanente marge geven om dat te vermijden
-// maakte de hele rij gelijkmatig ruimer (ook de niet-gefocuste tegels),
-// wat het contrast van "deze ene tegel is groter" juist wegneemt. Via de
-// Overlay tekent de gefocuste tegel altijd op de allerbovenste laag, boven
-// alle rij-/rasterinhoud, dus kan hij vrij groeien zonder ooit door een
-// buur verborgen te raken én zonder dat de rest van de rij extra ruimte
-// nodig heeft.
+// (D-pad + "OK"/Enter/Space activeert de tap) met de highlight hierboven,
+// en scrollt zichzelf in beeld zodra hij focus krijgt. Gewone
+// GestureDetectors hebben geen toetsenbord-/D-pad-ondersteuning, dus zonder
+// dit heeft een afstandsbediening niets om naartoe te bewegen in rijen
+// zoals de posterlijsten.
 class TvFocusable extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
@@ -132,71 +129,12 @@ class _TvFocusableState extends State<TvFocusable> {
   // een lange druk ook nog eens als gewone tik telt.
   bool _longPressFired = false;
 
-  // LayerLink + CompositedTransformFollower is Flutter's eigen mechanisme
-  // voor "een zwevende laag die een widget blijft volgen, ook terwijl die
-  // beweegt" (hetzelfde dat tooltips/dropdowns gebruiken) - nodig omdat
-  // Scrollable.ensureVisible de rij laat scrollen zodra dit item focus
-  // krijgt: een eenmalig berekende positie zou dan meteen weer verouderd
-  // zijn.
-  final LayerLink _layerLink = LayerLink();
-  final GlobalKey _anchorKey = GlobalKey();
-  OverlayEntry? _overlayEntry;
-
-  @override
-  void dispose() {
-    _removeOverlay();
-    super.dispose();
-  }
-
-  void _removeOverlay() {
-    _overlayEntry?.remove();
-    _overlayEntry = null;
-  }
-
-  void _showOverlay() {
-    if (widget.muted) return;
-    final box = _anchorKey.currentContext?.findRenderObject();
-    if (box is! RenderBox || !box.hasSize) return;
-    final overlayState = Overlay.maybeOf(context);
-    if (overlayState == null) return;
-    final size = box.size;
-    _removeOverlay();
-    _overlayEntry = OverlayEntry(builder: (_) {
-      return CompositedTransformFollower(
-        link: _layerLink,
-        showWhenUnlinked: false,
-        child: SizedBox(
-          width: size.width,
-          height: size.height,
-          child: GestureDetector(
-            onTap: widget.onTap,
-            onLongPress: widget.onLongPress,
-            child: TvHighlightBox(
-              focused: true,
-              borderRadius: widget.borderRadius,
-              child: widget.child,
-            ),
-          ),
-        ),
-      );
-    });
-    overlayState.insert(_overlayEntry!);
-  }
-
   @override
   Widget build(BuildContext context) {
     return Focus(
       focusNode: widget.focusNode,
       autofocus: widget.autofocus,
       onFocusChange: (has) {
-        // Vóór setState, zodat de highlight al klaarstaat in dezelfde frame
-        // waarin de originele (dan onzichtbare) tegel verdwijnt - anders
-        // een korte flikkering (leeg gat) voor de highlight verschijnt.
-        if (has) {
-          _showOverlay();
-        } else {
-          _removeOverlay();
-        }
         setState(() => _focused = has);
         final skipScroll = widget.autofocus && !_hadFocusChange;
         _hadFocusChange = true;
@@ -249,26 +187,11 @@ class _TvFocusableState extends State<TvFocusable> {
       child: GestureDetector(
         onTap: widget.onTap,
         onLongPress: widget.onLongPress,
-        child: CompositedTransformTarget(
-          link: _layerLink,
-          child: KeyedSubtree(
-            key: _anchorKey,
-            // Terwijl de vergrote highlight via de Overlay boven alles
-            // getekend wordt, blijft dit de "echte" plek in de rij/raster -
-            // nodig voor lay-out, scroll-naar-focus en D-pad-navigatie, maar
-            // onzichtbaar zodat hij niet dubbel getekend wordt. Gemute
-            // knoppen (die niet vergroten) tekenen gewoon hier, geen Overlay
-            // nodig.
-            child: Opacity(
-              opacity: (_focused && !widget.muted) ? 0.0 : 1.0,
-              child: TvHighlightBox(
-                focused: _focused && widget.muted,
-                muted: widget.muted,
-                borderRadius: widget.borderRadius,
-                child: widget.child,
-              ),
-            ),
-          ),
+        child: TvHighlightBox(
+          focused: _focused,
+          muted: widget.muted,
+          borderRadius: widget.borderRadius,
+          child: widget.child,
         ),
       ),
     );

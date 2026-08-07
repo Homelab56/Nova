@@ -140,14 +140,19 @@ class _SearchScreenState extends State<SearchScreen> {
                 children: [
                   const Text('Acteurs & actrices', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
                   const SizedBox(height: 10),
-                  SizedBox(height: 132, child: ListView.builder(
+                  // +50 kopruimte - anders sneed de standaard clip van
+                  // ListView de focus-vergroting/gloed van de avatar af
+                  // (zie MediaRow voor dezelfde reden/berekening).
+                  SizedBox(height: 132 + 50, child: Padding(
+                    padding: const EdgeInsets.only(top: 50),
+                    child: ListView.builder(
                     scrollDirection: Axis.horizontal,
                     itemCount: _people.length,
                     itemBuilder: (_, i) {
                       final p = _people[i];
                       final profile = p['profile_path'] as String?;
                       final personId = p['id'] as int?;
-                      return Container(width: 88, margin: const EdgeInsets.only(right: 14),
+                      return Container(width: 88, margin: const EdgeInsets.only(right: 20),
                         child: Column(children: [
                           TvFocusable(
                             borderRadius: BorderRadius.circular(40),
@@ -163,7 +168,7 @@ class _SearchScreenState extends State<SearchScreen> {
                         ]),
                       );
                     },
-                  )),
+                  ))),
                 ],
               ),
             ),
@@ -189,13 +194,19 @@ class _SearchScreenState extends State<SearchScreen> {
 
                     return GridView.builder(
                       controller: _scrollCtrl,
-                      padding: const EdgeInsets.all(12),
+                      // Extra ruimte bovenaan - anders sneed de standaard
+                      // clip van GridView de focus-vergroting/gloed van de
+                      // bovenste rij tegels af (net als bij MediaRow).
+                      padding: const EdgeInsets.fromLTRB(12, 90, 12, 12),
                       cacheExtent: 2000,
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: crossAxisCount,
                         childAspectRatio: 0.62,
-                        crossAxisSpacing: 14,
-                        mainAxisSpacing: 18,
+                        // Was 14/18 - te weinig voor de focus-vergroting
+                        // (schaal 1.25), zie category_screen.dart voor de
+                        // volledige toelichting.
+                        crossAxisSpacing: 32,
+                        mainAxisSpacing: 52,
                       ),
                       // Volgende pagina laadt automatisch via _onScroll; deze
                       // laatste tegel is enkel nog een laad-indicator, geen

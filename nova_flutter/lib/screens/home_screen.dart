@@ -715,10 +715,13 @@ class _HomeScreenState extends State<HomeScreen> {
     final double cardWidth = numVisible + posterWidth;
     return Container(
       width: cardWidth,
-      // Terug naar normale, krappe marge - de focus-highlight tekent nu via
-      // TvFocusable's eigen Overlay-laag, boven de hele rij, dus heeft geen
-      // extra ruimte hier meer nodig om buren niet te overlappen.
-      margin: const EdgeInsets.symmetric(horizontal: 3),
+      // Was horizontal: 3, toen 10, toen 16 - schaal ging ondertussen naar
+      // 1.25, heeft nu ~21px per kant nodig om niet tegen de buur aan te
+      // lopen. Te weinig ruimte liet zowel het cijfer van de vólgende kaart
+      // over déze rand heen tekenen als de vólgende poster zelf de
+      // rechterkant van dít kaartje verbergen (latere items in de rij
+      // tekenen later, dus bovenop).
+      margin: const EdgeInsets.symmetric(horizontal: 26),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         SizedBox(
           height: posterHeight,
@@ -844,9 +847,11 @@ class _HomeScreenState extends State<HomeScreen> {
       final double progress = (item['current_time'] ?? 0) / (item['duration'] ?? 1);
 
       return Container(
-        // Terug naar normale, krappe marge - zie toelichting bij de
-        // ranked-kaart hierboven.
-        width: 230, margin: const EdgeInsets.symmetric(horizontal: 5),
+        // Was horizontal: 5, toen 16 - schaal ging ondertussen naar 1.25,
+        // heeft nu ~29px per kant nodig om niet tegen de volgende kaart aan
+        // te lopen (die er dan gedeeltelijk overheen tekent, want later in
+        // de rij = later getekend = bovenop).
+        width: 230, margin: const EdgeInsets.symmetric(horizontal: 32),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           TvFocusable(
             escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
@@ -881,9 +886,11 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return Container(
-      // Terug naar normale, krappe marge - zie toelichting bij de
-      // ranked-kaart hierboven.
-      width: 168, margin: const EdgeInsets.symmetric(horizontal: 6),
+      // Was horizontal: 6, toen 16 - schaal ging ondertussen naar 1.25,
+      // heeft nu ~21px per kant nodig om niet tegen de volgende kaart aan
+      // te lopen (die er dan gedeeltelijk overheen tekent, want later in de
+      // rij = later getekend = bovenop).
+      width: 168, margin: const EdgeInsets.symmetric(horizontal: 26),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         TvFocusable(
           escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
