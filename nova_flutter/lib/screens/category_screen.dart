@@ -106,7 +106,10 @@ class _CategoryScreenState extends State<CategoryScreen> {
                     if (crossAxisCount < 2) crossAxisCount = 2;
                     return GridView.builder(
                       controller: _scrollCtrl,
-                      padding: const EdgeInsets.all(12),
+                      // Extra ruimte bovenaan - anders sneed de standaard
+                      // clip van GridView de focus-vergroting/gloed van de
+                      // bovenste rij tegels af (net als bij MediaRow).
+                      padding: const EdgeInsets.fromLTRB(12, 40, 12, 12),
                       // Groter dan standaard zodat een D-pad meerdere rijen
                       // voorbij het scherm al kan focussen i.p.v. vast te
                       // lopen bij een nog niet opgebouwde tegel.

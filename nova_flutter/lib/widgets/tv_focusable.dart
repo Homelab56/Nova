@@ -109,7 +109,11 @@ class _TvFocusableState extends State<TvFocusable> {
         onTap: widget.onTap,
         onLongPress: widget.onLongPress,
         child: AnimatedScale(
-          scale: _focused ? 1.08 : 1.0,
+          // Iets groter dan voorheen (was 1.08) plus een donkere schaduw
+          // eronder (i.p.v. enkel de cyaan gloed rondom) - dat geeft samen
+          // echt het gevoel dat de tegel naar voren optilt, niet enkel dat
+          // hij een gekleurde rand krijgt.
+          scale: _focused ? 1.1 : 1.0,
           duration: const Duration(milliseconds: 120),
           curve: Curves.easeOut,
           child: AnimatedContainer(
@@ -132,6 +136,7 @@ class _TvFocusableState extends State<TvFocusable> {
                 ? [
                     BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.9), blurRadius: 10, spreadRadius: 1),
                     BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.55), blurRadius: 28, spreadRadius: 4),
+                    BoxShadow(color: Colors.black.withOpacity(0.55), blurRadius: 24, offset: const Offset(0, 10)),
                   ]
                 : const [],
             ),

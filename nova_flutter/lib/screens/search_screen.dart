@@ -189,7 +189,10 @@ class _SearchScreenState extends State<SearchScreen> {
 
                     return GridView.builder(
                       controller: _scrollCtrl,
-                      padding: const EdgeInsets.all(12),
+                      // Extra ruimte bovenaan - anders sneed de standaard
+                      // clip van GridView de focus-vergroting/gloed van de
+                      // bovenste rij tegels af (net als bij MediaRow).
+                      padding: const EdgeInsets.fromLTRB(12, 40, 12, 12),
                       cacheExtent: 2000,
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: crossAxisCount,

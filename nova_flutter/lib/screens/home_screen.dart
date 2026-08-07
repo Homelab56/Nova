@@ -530,16 +530,17 @@ class _HomeScreenState extends State<HomeScreen> {
       animation: _navFocusNodes[index],
       builder: (context, child) {
         final focused = _navFocusNodes[index].hasFocus;
+        // Bewust minder fel dan TvFocusable's versie: dit is een kleine,
+        // tekst-gevulde knop (en de actieve tab-tekst is zelf al cyaan) -
+        // dezelfde zware gloed als op een grote poster maakte de tekst hier
+        // juist onleesbaar i.p.v. duidelijker.
         return AnimatedContainer(
           duration: const Duration(milliseconds: 120),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: focused ? const Color(0xFF00e5ff) : Colors.transparent, width: 4),
+            border: Border.all(color: focused ? const Color(0xFF00b4d8) : Colors.transparent, width: 2),
             boxShadow: focused
-              ? [
-                  BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.9), blurRadius: 10, spreadRadius: 1),
-                  BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.55), blurRadius: 28, spreadRadius: 4),
-                ]
+              ? [BoxShadow(color: const Color(0xFF00b4d8).withOpacity(0.55), blurRadius: 10, spreadRadius: 0.5)]
               : const [],
           ),
           child: child,
