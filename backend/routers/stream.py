@@ -201,20 +201,23 @@ def _parse_range_header(value: str, size: int) -> tuple[int, int] | None:
         return None
     return start, end
 
-async def _ffprobe_duration_only(input_value: str, timeout_secs: float = 10.0) -> float:
+async def _ffprobe_duration_only(input_value: str, timeout_secs: float = 10.0) -> tuple[float, list[str]]:
     """
-    Snelle ffprobe-check die enkel de duur opvraagt, met een klein
-    probesize/analyzeduration. De containerduur staat doorgaans al in de
-    eerste paar KB-MB van een geldig MKV/MP4-bestand, dus dit hoeft niet
-    - in tegenstelling tot _ffprobe_probe_health, dat ook ondertitelsporen
-    diep in het bestand moet vinden - het hele bestand te scannen. Daardoor
-    blijft dit ook voor grote 4K-bronnen ruim binnen een korte timeout,
-    i.p.v. onterecht als "kapot" behandeld te worden omdat de zware probe
-    niet op tijd klaar is. Geeft 0.0 terug als de duur niet bepaald kon
-    worden.
+    Snelle ffprobe-check die de duur (en, gratis in dezelfde probe, de audio-
+    codec(s)) opvraagt, met een klein probesize/analyzeduration. Zowel de
+    containerduur als de streaminfo staan doorgaans al in de eerste paar
+    KB-MB van een geldig MKV/MP4-bestand, dus dit hoeft niet - in
+    tegenstelling tot _ffprobe_probe_health, dat ook ondertitelsporen diep
+    in het bestand moet vinden - het hele bestand te scannen. Daardoor
+    blijft dit ook voor grote 4K-bronnen ruim binnen een korte timeout.
+    De audio-codec is de betrouwbare manier om bv. TrueHD uit te sluiten:
+    op naam filteren (_looks_like_junk_release) mist releases die het
+    (vaak bij BDRemuxes) simpelweg niet in de bestandsnaam vermelden.
+    Geeft (0.0, []) terug als er niets bepaald kon worden.
     """
     http = _is_http_url(input_value)
-    args = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json"]
+    args = ["ffprobe", "-v", "error", "-show_entries",
+            "format=duration:stream=codec_name,codec_type", "-of", "json"]
     if http:
         args.extend([
             "-rw_timeout", "8000000",
@@ -235,15 +238,21 @@ async def _ffprobe_duration_only(input_value: str, timeout_secs: float = 10.0) -
         if proc.returncode != 0:
             msg = (err or b"").decode("utf-8", errors="ignore").strip() or "geen stderr"
             print(f"ffprobe duration failed for {input_value[:120]}: returncode {proc.returncode}: {msg[:400]}")
-            return 0.0
+            return 0.0, []
         data = json.loads(out.decode("utf-8", errors="ignore") or "{}")
         try:
-            return float((data.get("format") or {}).get("duration") or 0.0)
+            duration = float((data.get("format") or {}).get("duration") or 0.0)
         except (TypeError, ValueError):
-            return 0.0
+            duration = 0.0
+        streams = data.get("streams") or []
+        audio_codecs = [
+            (s.get("codec_name") or "").lower()
+            for s in streams if isinstance(s, dict) and s.get("codec_type") == "audio"
+        ]
+        return duration, audio_codecs
     except Exception as e:
         print(f"FFProbe duration fout voor {input_value[:120]}: {e}")
-        return 0.0
+        return 0.0, []
 
 
 async def _ffprobe_probe_health(input_value: str, is_path: bool) -> tuple[float, list[dict]]:

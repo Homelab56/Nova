@@ -271,12 +271,19 @@ async def _probe_playable(url: str, timeout: float = 10.0) -> bool:
     bronnen (waar de zware ondertitel-probe soms niet op tijd klaar was en
     de kandidaat daardoor onterecht als "kapot" werd behandeld, met een
     ongecheckte placeholder-clip als resultaat via de fallback).
+
+    Checkt ook meteen de echte audiocodec (gratis binnen dezelfde probe) en
+    wijst TrueHD-bronnen af, zelfs als de bestandsnaam dat niet vermeldt
+    (_looks_like_junk_release ving dat al af op naam, maar BDRemuxes noemen
+    hun exacte audiocodec regelmatig niet in de titel).
     """
     if not url or url.startswith("magnet:"):
         return False
     try:
-        duration = await asyncio.wait_for(_ffprobe_duration_only(url, timeout_secs=timeout), timeout=timeout + 1)
+        duration, audio_codecs = await asyncio.wait_for(_ffprobe_duration_only(url, timeout_secs=timeout), timeout=timeout + 1)
     except Exception:
+        return False
+    if any(marker in codec for codec in audio_codecs for marker in _UNSUPPORTED_CODEC_MARKERS):
         return False
     return duration >= _MIN_PLAYABLE_DURATION_SECS
 
