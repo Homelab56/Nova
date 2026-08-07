@@ -1680,32 +1680,27 @@ async def _extract_reference_audio(video_url: str, out_path: str, duration_secs:
         return False
 
 
-async def _run_ffsubsync(video_url: str, srt_text: str, is_tv: bool = False, timeout: float | None = None) -> str | None:
-    """Lijnt een ondertitel automatisch uit op de audio van de echte stream
-    (spraakdetectie), ongeacht welke exacte release we binnenkregen.
+def _ffsubsync_params(is_tv: bool) -> tuple[int, int, float]:
+    """max_offset, duration_secs, timeout - zie _run_ffsubsync_with_ref voor
+    waarom deze verschillen tussen films en series."""
+    if is_tv:
+        return 480, 900, 420.0
+    return 90, 300, 160.0
 
-    De toegestane max-offset is bewust NIET overal even ruim: series-
-    afleveringen (vooral seizoenspremières) hebben soms een "previously on"-
-    recap die een verschuiving van enkele minuten geeft, en daar hebben we
-    voor een specifiek geval (House of the Dragon S3E1, echte verschuiving
-    ~5-8 min) een ruim venster voor nodig. Maar diezelfde ruime grens bleek
-    voor een film (Jurassic World) een compleet verkeerde uitlijning te
-    laten "winnen" binnen dat bereik - 11 minuten fout vanaf de start, een
-    film heeft nooit een legitieme reden voor zo'n grote constante
-    verschuiving. Dus: ruim venster enkel voor series, krap voor films."""
-    max_offset = 480 if is_tv else 90
-    duration_secs = 900 if is_tv else 300
+
+async def _run_ffsubsync_with_ref(ref_path: str, srt_text: str, is_tv: bool, timeout: float | None = None) -> str | None:
+    """Zoals _run_ffsubsync, maar met een al-geëxtraheerd referentiebestand -
+    zodat meerdere ondertitel-kandidaten voor dezelfde bron dat bestand
+    kunnen hergebruiken i.p.v. elk apart dezelfde audio opnieuw te
+    downloaden/extraheren."""
+    max_offset, _, default_timeout = _ffsubsync_params(is_tv)
     if timeout is None:
-        timeout = 420.0 if is_tv else 160.0
+        timeout = default_timeout
     with tempfile.TemporaryDirectory() as tmp:
-        ref_path = os.path.join(tmp, "reference.wav")
         in_path = os.path.join(tmp, "in.srt")
         out_path = os.path.join(tmp, "out.srt")
         with open(in_path, "w", encoding="utf-8") as f:
             f.write(srt_text)
-
-        if not await _extract_reference_audio(video_url, ref_path, duration_secs=duration_secs):
-            return None
 
         cmd = [
             "ffsubsync", ref_path, "-i", in_path, "-o", out_path,
@@ -1796,24 +1791,35 @@ async def subtitle_external_vtt(
     if not candidates:
         raise HTTPException(status_code=404, detail=f"Geen {lang}-ondertitels gevonden op OpenSubtitles.")
 
+    is_tv = media_type == "tv"
     fallback_srt = None  # eerste succesvolle download, voor als geen enkele kandidaat wil synchroniseren
-    for candidate in candidates:
-        srt_text = await _download_opensubtitles(candidate["file_id"])
-        if not srt_text:
-            continue
-        if fallback_srt is None:
-            fallback_srt = srt_text
-        synced_srt = await _run_ffsubsync(input_value, srt_text, is_tv=media_type == "tv")
-        if synced_srt:
-            vtt = _srt_to_vtt(synced_srt)
-            _subtitle_cache_set(cache_key, vtt)
-            return Response(content=vtt, media_type="text/vtt", headers={"Cache-Control": "no-cache"})
+
+    # Referentie-audio hoort bij de video, niet bij de ondertitel-kandidaat -
+    # één keer extraheren en hergebruiken voor elke kandidaat i.p.v. dezelfde
+    # audio tot 3x na elkaar opnieuw te downloaden/extraheren.
+    with tempfile.TemporaryDirectory() as tmp:
+        ref_path = os.path.join(tmp, "reference.wav")
+        _, duration_secs, _ = _ffsubsync_params(is_tv)
+        ref_ok = await _extract_reference_audio(input_value, ref_path, duration_secs=duration_secs)
+
+        for candidate in candidates:
+            srt_text = await _download_opensubtitles(candidate["file_id"])
+            if not srt_text:
+                continue
+            if fallback_srt is None:
+                fallback_srt = srt_text
+            synced_srt = await _run_ffsubsync_with_ref(ref_path, srt_text, is_tv) if ref_ok else None
+            if synced_srt:
+                vtt = _srt_to_vtt(synced_srt)
+                _subtitle_cache_set(cache_key, vtt)
+                return Response(content=vtt, media_type="text/vtt", headers={"Cache-Control": "no-cache"})
 
     if fallback_srt is None:
         raise HTTPException(status_code=502, detail="Kon ondertitel niet downloaden van OpenSubtitles.")
 
-    # Geen enkele kandidaat kon betrouwbaar gesynchroniseerd worden: val terug
-    # op de ongesynchroniseerde beste match in plaats van niets te tonen.
+    # Geen enkele kandidaat kon betrouwbaar gesynchroniseerd worden (of de
+    # referentie-audio zelf kon niet geëxtraheerd worden): val terug op de
+    # ongesynchroniseerde beste match in plaats van niets te tonen.
     vtt = _srt_to_vtt(fallback_srt)
     _subtitle_cache_set(cache_key, vtt)
     return Response(content=vtt, media_type="text/vtt", headers={"Cache-Control": "no-cache"})

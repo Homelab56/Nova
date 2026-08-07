@@ -174,7 +174,13 @@ def _dedupe_title_duplicates(items: list[dict]) -> list[dict]:
     blijven allebei gewoon staan."""
     groups: dict[tuple, list[dict]] = {}
     for it in items:
-        groups.setdefault((_norm_title(it), it.get("media_type")), []).append(it)
+        title = _norm_title(it)
+        # Lege titel (ontbrekende data) niet groeperen - anders belanden
+        # willekeurige, onverwante items met allemaal ontbrekende titel/id
+        # samen in "dezelfde" groep en kan de een de ander wegduwen.
+        if not title or it.get("id") is None:
+            continue
+        groups.setdefault((title, it.get("media_type")), []).append(it)
 
     drop: set[tuple] = set()
     for group in groups.values():
