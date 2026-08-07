@@ -482,28 +482,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _profileTile(Profile profile, {bool autofocus = false}) {
-    return TvFocusable(
-      autofocus: autofocus,
-      // Was circular(60) - een cirkel-radius op deze rechthoekige kaart
-      // (avatar + naam eronder). Viel niet op met de oude zachte gloed, maar
-      // gaf een lelijke vorm zodra er een scherpe rand bijkwam. Een kleinere
-      // radius omkadert nu netjes de hele kaart (avatar + naam) als kaart.
-      borderRadius: BorderRadius.circular(16),
-      onTap: () async {
-        if (!_editing) { await _selectProfile(profile); return; }
-        // Zonder dit kon je de pincode van een beveiligd profiel gewoon
-        // wissen (of de rest van het profiel wijzigen) zonder 'm ooit in te
-        // voeren - dezelfde controle als bij het kiezen van dit profiel.
-        if (profile.pin != null && profile.pin!.isNotEmpty) {
-          final ok = await _askPin(profile.pin!);
-          if (ok != true) return;
-        }
-        if (mounted) await _createOrEditProfile(existing: profile);
-      },
-      child: SizedBox(
-        width: 110,
-        child: Column(children: [
-          Stack(children: [
+    // De highlight hoort enkel rond de ronde avatar, niet rond de naam
+    // eronder - anders krijg je een vierkant(ig) kader om een cirkel +
+    // tekst, wat er niet als "rond" leest. borderRadius(46) = de helft van
+    // de 92px avatar, dus een perfecte cirkel.
+    return SizedBox(
+      width: 110,
+      child: Column(children: [
+        TvFocusable(
+          autofocus: autofocus,
+          borderRadius: BorderRadius.circular(46),
+          onTap: () async {
+            if (!_editing) { await _selectProfile(profile); return; }
+            // Zonder dit kon je de pincode van een beveiligd profiel gewoon
+            // wissen (of de rest van het profiel wijzigen) zonder 'm ooit in te
+            // voeren - dezelfde controle als bij het kiezen van dit profiel.
+            if (profile.pin != null && profile.pin!.isNotEmpty) {
+              final ok = await _askPin(profile.pin!);
+              if (ok != true) return;
+            }
+            if (mounted) await _createOrEditProfile(existing: profile);
+          },
+          child: Stack(children: [
             _avatarBadge(profile),
             if (profile.pin != null)
               Positioned(bottom: 2, right: 6,
@@ -518,23 +518,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: const Center(child: Icon(Icons.edit, color: Colors.white, size: 28)),
               )),
           ]),
-          const SizedBox(height: 10),
-          Text(profile.name, maxLines: 1, overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
-        ]),
-      ),
+        ),
+        const SizedBox(height: 10),
+        Text(profile.name, maxLines: 1, overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+      ]),
     );
   }
 
   Widget _addTile({bool autofocus = false}) {
-    return TvFocusable(
-      autofocus: autofocus,
-      borderRadius: BorderRadius.circular(16),
-      onTap: () => _createOrEditProfile(),
-      child: SizedBox(
-        width: 110,
-        child: Column(children: [
-          Container(
+    return SizedBox(
+      width: 110,
+      child: Column(children: [
+        TvFocusable(
+          autofocus: autofocus,
+          borderRadius: BorderRadius.circular(46),
+          onTap: () => _createOrEditProfile(),
+          child: Container(
             width: 92, height: 92,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
@@ -543,10 +543,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             child: const Icon(Icons.add, color: Colors.grey, size: 36),
           ),
-          const SizedBox(height: 10),
-          const Text('Nieuw profiel', style: TextStyle(color: Colors.grey, fontSize: 14)),
-        ]),
-      ),
+        ),
+        const SizedBox(height: 10),
+        const Text('Nieuw profiel', style: TextStyle(color: Colors.grey, fontSize: 14)),
+      ]),
     );
   }
 }

@@ -128,13 +128,14 @@ class _CategoryScreenState extends State<CategoryScreen> {
                         final item = _results[i];
                         final poster = item['poster_path'];
                         final title = item['title'] ?? item['name'] ?? '';
-                        return TvFocusable(
-                          onTap: () => Navigator.push(context, MaterialPageRoute(
-                            builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: TvFocusable(
+                                onTap: () => Navigator.push(context, MaterialPageRoute(
+                                  builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
+                                borderRadius: BorderRadius.circular(10),
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(10),
                                   child: poster != null
@@ -142,11 +143,11 @@ class _CategoryScreenState extends State<CategoryScreen> {
                                     : Container(color: const Color(0xFF0f1520), child: const Icon(Icons.movie, color: Colors.grey)),
                                 ),
                               ),
-                              const SizedBox(height: 6),
-                              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 13, color: Colors.white70)),
-                            ],
-                          ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 13, color: Colors.white70)),
+                          ],
                         );
                       },
                     );

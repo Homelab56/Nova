@@ -147,20 +147,20 @@ class _SearchScreenState extends State<SearchScreen> {
                       final p = _people[i];
                       final profile = p['profile_path'] as String?;
                       final personId = p['id'] as int?;
-                      return TvFocusable(
-                        borderRadius: BorderRadius.circular(12),
-                        onTap: personId == null ? null : () => Navigator.push(context, MaterialPageRoute(
-                          builder: (_) => PersonScreen(personId: personId, name: p['name'] as String?, profilePath: profile))),
-                        child: Container(width: 88, margin: const EdgeInsets.only(right: 14),
-                          child: Column(children: [
-                            CircleAvatar(radius: 40, backgroundColor: const Color(0xFF0f1520),
+                      return Container(width: 88, margin: const EdgeInsets.only(right: 14),
+                        child: Column(children: [
+                          TvFocusable(
+                            borderRadius: BorderRadius.circular(40),
+                            onTap: personId == null ? null : () => Navigator.push(context, MaterialPageRoute(
+                              builder: (_) => PersonScreen(personId: personId, name: p['name'] as String?, profilePath: profile))),
+                            child: CircleAvatar(radius: 40, backgroundColor: const Color(0xFF0f1520),
                               backgroundImage: profile != null ? NetworkImage('$tmdbProfile$profile') : null,
                               child: profile == null ? const Icon(Icons.person, color: Colors.grey, size: 28) : null),
-                            const SizedBox(height: 6),
-                            Text(p['name'] ?? '', maxLines: 2, textAlign: TextAlign.center, overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 12, color: Colors.white70)),
-                          ]),
-                        ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(p['name'] ?? '', maxLines: 2, textAlign: TextAlign.center, overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12, color: Colors.white70)),
+                        ]),
                       );
                     },
                   )),
@@ -208,13 +208,14 @@ class _SearchScreenState extends State<SearchScreen> {
                         final item = _results[i];
                         final poster = item['poster_path'];
                         final title = item['title'] ?? item['name'] ?? '';
-                        return TvFocusable(
-                          onTap: () => Navigator.push(context, MaterialPageRoute(
-                            builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: TvFocusable(
+                                onTap: () => Navigator.push(context, MaterialPageRoute(
+                                  builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
+                                borderRadius: BorderRadius.circular(10),
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(10),
                                   child: poster != null
@@ -222,11 +223,11 @@ class _SearchScreenState extends State<SearchScreen> {
                                     : Container(color: const Color(0xFF0f1520), child: const Icon(Icons.movie, color: Colors.grey)),
                                 ),
                               ),
-                              const SizedBox(height: 6),
-                              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 13, color: Colors.white70)),
-                            ],
-                          ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 13, color: Colors.white70)),
+                          ],
                         );
                       },
                     );

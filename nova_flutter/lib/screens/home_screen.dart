@@ -376,31 +376,63 @@ class _HomeScreenState extends State<HomeScreen> {
         // focusbaar/highlightbaar te krijgen (geen focusNode-parameter),
         // terwijl TvFocusable dat overal elders in de app al wel goed doet.
         Builder(builder: (context) {
+          // Was showMenu()+PopupMenuItem: die geven op de TV enkel Flutter's
+          // eigen (amper zichtbare) focus-highlight per item, inconsistent
+          // met de TvFocusable-stijl van de rest van de app. showDialog met
+          // een handmatig gepositioneerd paneel geeft dezelfde highlight per
+          // item terug, en blijft (net als showMenu) een echte route - de
+          // afstandsbediening se terug-knop sluit het gewoon.
           void openGenreMenu() {
             final button = context.findRenderObject() as RenderBox;
-            final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
-            final position = RelativeRect.fromRect(
-              Rect.fromPoints(
-                button.localToGlobal(Offset(0, button.size.height), ancestor: overlay),
-                button.localToGlobal(button.size.bottomRight(Offset.zero), ancestor: overlay),
-              ),
-              Offset.zero & overlay.size,
-            );
-            showMenu<int>(
+            final overlayBox = Overlay.of(context).context.findRenderObject() as RenderBox;
+            final topLeft = button.localToGlobal(Offset(0, button.size.height + 6), ancestor: overlayBox);
+            final firstGenreId = _genreNames.keys.first;
+            showGeneralDialog(
               context: context,
-              position: position,
-              color: const Color(0xFF0f1520),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.white12)),
-              items: _genreNames.entries.map((e) => PopupMenuItem(
-                value: e.key,
-                child: Text(e.value, style: const TextStyle(color: Colors.white, fontSize: 13)),
-              )).toList(),
-            ).then((id) {
-              if (id == null) return;
-              Navigator.push(context, MaterialPageRoute(
-                builder: (_) => SearchScreen(genreId: id, genreName: _genreNames[id] ?? 'Genre'),
-              ));
-            });
+              barrierLabel: 'Genres',
+              barrierDismissible: true,
+              barrierColor: Colors.black26,
+              transitionDuration: const Duration(milliseconds: 140),
+              transitionBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+              pageBuilder: (dialogContext, _, __) {
+                return Stack(children: [
+                  Positioned(
+                    left: topLeft.dx,
+                    top: topLeft.dy,
+                    child: Container(
+                      width: 200,
+                      constraints: BoxConstraints(maxHeight: overlayBox.size.height - topLeft.dy - 24),
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0f1520),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.white12),
+                      ),
+                      child: SingleChildScrollView(
+                        child: Column(mainAxisSize: MainAxisSize.min, children: [
+                          for (final e in _genreNames.entries)
+                            TvFocusable(
+                              autofocus: e.key == firstGenreId,
+                              borderRadius: BorderRadius.circular(8),
+                              onTap: () {
+                                Navigator.of(dialogContext).pop();
+                                Navigator.push(context, MaterialPageRoute(
+                                  builder: (_) => SearchScreen(genreId: e.key, genreName: e.value),
+                                ));
+                              },
+                              child: Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                child: Text(e.value, style: const TextStyle(color: Colors.white, fontSize: 13)),
+                              ),
+                            ),
+                        ]),
+                      ),
+                    ),
+                  ),
+                ]);
+              },
+            );
           }
           return TvFocusable(
             borderRadius: BorderRadius.circular(8),
@@ -474,6 +506,9 @@ class _HomeScreenState extends State<HomeScreen> {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: focused ? const Color(0xFF00b4d8) : Colors.transparent, width: 3),
+            boxShadow: focused
+              ? [BoxShadow(color: const Color(0xFF00b4d8).withOpacity(0.75), blurRadius: 18, spreadRadius: 1.5)]
+              : const [],
           ),
           child: c,
         );
@@ -492,10 +527,14 @@ class _HomeScreenState extends State<HomeScreen> {
       animation: _navFocusNodes[index],
       builder: (context, child) {
         final focused = _navFocusNodes[index].hasFocus;
-        return Container(
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
           decoration: BoxDecoration(
-            color: focused ? const Color(0xFF00b4d8).withOpacity(0.25) : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: focused ? const Color(0xFF00b4d8) : Colors.transparent, width: 3),
+            boxShadow: focused
+              ? [BoxShadow(color: const Color(0xFF00b4d8).withOpacity(0.75), blurRadius: 18, spreadRadius: 1.5)]
+              : const [],
           ),
           child: child,
         );
@@ -686,42 +725,46 @@ class _HomeScreenState extends State<HomeScreen> {
     // wordt als de poster zelf.
     final double numBoxWidth = rank >= 10 ? 250 : 170;
     final double cardWidth = numVisible + posterWidth;
-    return TvFocusable(
-      escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
-      onTap: () => _openWatch(item),
-      onLongPress: () => _showPosterActionMenu(item),
-      child: Container(
-        width: cardWidth,
-        margin: const EdgeInsets.symmetric(horizontal: 3),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          SizedBox(
-            height: posterHeight,
-            child: Stack(clipBehavior: Clip.none, children: [
-              Positioned(
-                left: 0, top: 0, bottom: 0, width: numBoxWidth,
-                child: FittedBox(
-                  fit: BoxFit.contain,
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    '$rank',
-                    // fontSize is enkel de basis-maat vóór FittedBox schaalt -
-                    // zonder expliciete fontSize viel dit terug op de kleine
-                    // standaard tekstgrootte, waardoor strokeWidth verhoudingsgewijs
-                    // enorm werd na het opschalen (vulde de cijfers helemaal dicht).
-                    style: TextStyle(
-                      fontSize: 100,
-                      fontWeight: FontWeight.w900,
-                      fontStyle: FontStyle.italic,
-                      foreground: Paint()
-                        ..style = PaintingStyle.stroke
-                        ..strokeWidth = 2.5
-                        ..color = Colors.grey.shade300,
-                    ),
+    return Container(
+      width: cardWidth,
+      margin: const EdgeInsets.symmetric(horizontal: 3),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        SizedBox(
+          height: posterHeight,
+          child: Stack(clipBehavior: Clip.none, children: [
+            Positioned(
+              left: 0, top: 0, bottom: 0, width: numBoxWidth,
+              child: FittedBox(
+                fit: BoxFit.contain,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '$rank',
+                  // fontSize is enkel de basis-maat vóór FittedBox schaalt -
+                  // zonder expliciete fontSize viel dit terug op de kleine
+                  // standaard tekstgrootte, waardoor strokeWidth verhoudingsgewijs
+                  // enorm werd na het opschalen (vulde de cijfers helemaal dicht).
+                  style: TextStyle(
+                    fontSize: 100,
+                    fontWeight: FontWeight.w900,
+                    fontStyle: FontStyle.italic,
+                    foreground: Paint()
+                      ..style = PaintingStyle.stroke
+                      ..strokeWidth = 2.5
+                      ..color = Colors.grey.shade300,
                   ),
                 ),
               ),
-              Positioned(
-                right: 0, bottom: 0,
+            ),
+            // De highlight-rand hoort enkel om de poster zelf, niet om het
+            // cijfer ernaast of de titel eronder - anders lijkt het net of
+            // de poster de gemarkeerde ruimte niet volledig vult.
+            Positioned(
+              right: 0, bottom: 0,
+              child: TvFocusable(
+                escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
+                onTap: () => _openWatch(item),
+                onLongPress: () => _showPosterActionMenu(item),
+                borderRadius: BorderRadius.circular(10),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(10),
                   child: Stack(children: [
@@ -730,16 +773,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   ]),
                 ),
               ),
-            ]),
-          ),
-          const SizedBox(height: 8),
-          Padding(
-            padding: EdgeInsets.only(left: numVisible),
-            child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
-          ),
-        ]),
-      ),
+            ),
+          ]),
+        ),
+        const SizedBox(height: 8),
+        Padding(
+          padding: EdgeInsets.only(left: numVisible),
+          child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
+        ),
+      ]),
     );
   }
 
@@ -809,48 +852,50 @@ class _HomeScreenState extends State<HomeScreen> {
     if (isProgress) {
       final double progress = (item['current_time'] ?? 0) / (item['duration'] ?? 1);
 
-      return TvFocusable(
-        escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
-        onTap: () => _openWatch(item, autoResume: true),
-        onLongPress: () => _showPosterActionMenu(item,
-          onRemove: () => _removeFromProgress(item), removeLabel: 'Verwijderen uit Verder kijken'),
-        child: Container(
-          width: 230, margin: const EdgeInsets.symmetric(horizontal: 5),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Stack(children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: NovaImage(path: backdrop, width: 230, height: 130, baseUrl: 'https://image.tmdb.org/t/p/w300'),
-              ),
-              Positioned(bottom: 0, left: 0, right: 0,
-                child: Container(
-                  height: 3, color: Colors.white24,
-                  child: FractionallySizedBox(
-                    alignment: Alignment.centerLeft,
-                    widthFactor: progress.clamp(0.0, 1.0),
-                    child: Container(color: const Color(0xFF00b4d8)),
+      return Container(
+        width: 230, margin: const EdgeInsets.symmetric(horizontal: 5),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          TvFocusable(
+            escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
+            onTap: () => _openWatch(item, autoResume: true),
+            onLongPress: () => _showPosterActionMenu(item,
+              onRemove: () => _removeFromProgress(item), removeLabel: 'Verwijderen uit Verder kijken'),
+            borderRadius: BorderRadius.circular(8),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Stack(children: [
+                NovaImage(path: backdrop, width: 230, height: 130, baseUrl: 'https://image.tmdb.org/t/p/w300'),
+                Positioned(bottom: 0, left: 0, right: 0,
+                  child: Container(
+                    height: 3, color: Colors.white24,
+                    child: FractionallySizedBox(
+                      alignment: Alignment.centerLeft,
+                      widthFactor: progress.clamp(0.0, 1.0),
+                      child: Container(color: const Color(0xFF00b4d8)),
+                    ),
                   ),
                 ),
-              ),
-              const Positioned.fill(child: Center(child: Icon(Icons.play_circle_outline, color: Colors.white70, size: 34))),
-              _cornerIcon(Icons.close, () => _removeFromProgress(item)),
-            ]),
-            const SizedBox(height: 8),
-            Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
-          ]),
-        ),
+                const Positioned.fill(child: Center(child: Icon(Icons.play_circle_outline, color: Colors.white70, size: 34))),
+                _cornerIcon(Icons.close, () => _removeFromProgress(item)),
+              ]),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
+        ]),
       );
     }
 
-    return TvFocusable(
-      escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
-      onTap: () => _openWatch(item),
-      onLongPress: isRd ? null : () => _showPosterActionMenu(item),
-      child: Container(
-        width: 168, margin: const EdgeInsets.symmetric(horizontal: 6),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Container(
+    return Container(
+      width: 168, margin: const EdgeInsets.symmetric(horizontal: 6),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        TvFocusable(
+          escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
+          onTap: () => _openWatch(item),
+          onLongPress: isRd ? null : () => _showPosterActionMenu(item),
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
               boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 10, offset: const Offset(0, 4))],
@@ -866,13 +911,13 @@ class _HomeScreenState extends State<HomeScreen> {
               ]),
             ),
           ),
-          const SizedBox(height: 8),
-          Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
-          if (!isRd && yearStr.isNotEmpty)
-            Text(yearStr, style: const TextStyle(fontSize: 11, color: Colors.grey)),
-        ]),
-      ),
+        ),
+        const SizedBox(height: 8),
+        Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
+        if (!isRd && yearStr.isNotEmpty)
+          Text(yearStr, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+      ]),
     );
   }
 

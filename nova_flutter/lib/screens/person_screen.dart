@@ -116,13 +116,14 @@ class _PersonScreenState extends State<PersonScreen> {
     final poster = item['poster_path'];
     final title = _titleOf(item);
     final character = item['character'] as String?;
-    return TvFocusable(
-      onTap: () => Navigator.push(context, MaterialPageRoute(
-        builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: TvFocusable(
+            onTap: () => Navigator.push(context, MaterialPageRoute(
+              builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
+            borderRadius: BorderRadius.circular(10),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(10),
               child: poster != null
@@ -135,14 +136,14 @@ class _PersonScreenState extends State<PersonScreen> {
                     child: const Icon(Icons.movie, color: Colors.grey)),
             ),
           ),
-          const SizedBox(height: 6),
-          Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 13, color: Colors.white)),
-          if (character != null && character.isNotEmpty)
-            Text(character, maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, color: Colors.grey)),
-        ],
-      ),
+        ),
+        const SizedBox(height: 6),
+        Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 13, color: Colors.white)),
+        if (character != null && character.isNotEmpty)
+          Text(character, maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 11, color: Colors.grey)),
+      ],
     );
   }
 
