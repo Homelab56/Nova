@@ -202,8 +202,11 @@ class _SearchScreenState extends State<SearchScreen> {
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: crossAxisCount,
                         childAspectRatio: 0.62,
-                        crossAxisSpacing: 14,
-                        mainAxisSpacing: 18
+                        // Was 14/18 - te weinig voor de focus-vergroting
+                        // (schaal 1.25), zie category_screen.dart voor de
+                        // volledige toelichting.
+                        crossAxisSpacing: 32,
+                        mainAxisSpacing: 52,
                       ),
                       // Volgende pagina laadt automatisch via _onScroll; deze
                       // laatste tegel is enkel nog een laad-indicator, geen

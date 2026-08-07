@@ -117,8 +117,14 @@ class _CategoryScreenState extends State<CategoryScreen> {
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: crossAxisCount,
                         childAspectRatio: 0.62,
-                        crossAxisSpacing: 14,
-                        mainAxisSpacing: 18,
+                        // Was 14/18 - te weinig voor de focus-vergroting
+                        // (schaal 1.25): een tegel kon zo tegen zijn buur
+                        // aanlopen, en omdat latere tegels in de grid later
+                        // getekend worden (dus bovenop), verborg de buur dan
+                        // een stuk van de gefocuste tegel - leek dan of de
+                        // poster niet volledig zichtbaar was.
+                        crossAxisSpacing: 32,
+                        mainAxisSpacing: 52,
                       ),
                       itemCount: _results.length + (_page < _totalPages ? 1 : 0),
                       itemBuilder: (_, i) {
