@@ -505,9 +505,12 @@ class _HomeScreenState extends State<HomeScreen> {
         return Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: focused ? const Color(0xFF00b4d8) : Colors.transparent, width: 3),
+            border: Border.all(color: focused ? const Color(0xFF00e5ff) : Colors.transparent, width: 4),
             boxShadow: focused
-              ? [BoxShadow(color: const Color(0xFF00b4d8).withOpacity(0.75), blurRadius: 18, spreadRadius: 1.5)]
+              ? [
+                  BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.9), blurRadius: 10, spreadRadius: 1),
+                  BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.55), blurRadius: 28, spreadRadius: 4),
+                ]
               : const [],
           ),
           child: c,
@@ -531,9 +534,12 @@ class _HomeScreenState extends State<HomeScreen> {
           duration: const Duration(milliseconds: 120),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: focused ? const Color(0xFF00b4d8) : Colors.transparent, width: 3),
+            border: Border.all(color: focused ? const Color(0xFF00e5ff) : Colors.transparent, width: 4),
             boxShadow: focused
-              ? [BoxShadow(color: const Color(0xFF00b4d8).withOpacity(0.75), blurRadius: 18, spreadRadius: 1.5)]
+              ? [
+                  BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.9), blurRadius: 10, spreadRadius: 1),
+                  BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.55), blurRadius: 28, spreadRadius: 4),
+                ]
               : const [],
           ),
           child: child,
@@ -727,7 +733,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final double cardWidth = numVisible + posterWidth;
     return Container(
       width: cardWidth,
-      margin: const EdgeInsets.symmetric(horizontal: 3),
+      // Was horizontal: 3 - te weinig ruimte tussen kaarten in deze rij,
+      // waardoor het cijfer van de vólgende kaart (die bewust een stuk naar
+      // links "bleedt" voor het cijfer-achter-de-poster effect) over de
+      // rand van déze poster heen kon tekenen zodra die een duidelijke
+      // focus-rand kreeg - leek dan of de rand niet helemaal rondliep.
+      margin: const EdgeInsets.symmetric(horizontal: 10),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         SizedBox(
           height: posterHeight,

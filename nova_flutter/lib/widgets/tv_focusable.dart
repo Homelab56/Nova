@@ -109,7 +109,7 @@ class _TvFocusableState extends State<TvFocusable> {
         onTap: widget.onTap,
         onLongPress: widget.onLongPress,
         child: AnimatedScale(
-          scale: _focused ? 1.06 : 1.0,
+          scale: _focused ? 1.08 : 1.0,
           duration: const Duration(milliseconds: 120),
           curve: Curves.easeOut,
           child: AnimatedContainer(
@@ -120,13 +120,19 @@ class _TvFocusableState extends State<TvFocusable> {
               // geselecteerd" - ook van op de bank en ook voor wie de vorige,
               // zachtere gloed-only versie niet duidelijk genoeg vond. De
               // gloed blijft erbij voor wat diepte, maar is niet meer de
-              // enige aanwijzing.
+              // enige aanwijzing. Twee gestapelde schaduwen (een strakke
+              // dichtbij, een ruimere errond) lezen van op afstand feller
+              // dan één enkele - dat bleek zelfs met de eerste (sterkere)
+              // versie nog te subtiel.
               border: Border.all(
-                color: _focused ? const Color(0xFF00b4d8) : Colors.transparent,
-                width: 3,
+                color: _focused ? const Color(0xFF00e5ff) : Colors.transparent,
+                width: 4,
               ),
               boxShadow: _focused
-                ? [BoxShadow(color: const Color(0xFF00b4d8).withOpacity(0.75), blurRadius: 18, spreadRadius: 1.5)]
+                ? [
+                    BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.9), blurRadius: 10, spreadRadius: 1),
+                    BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.55), blurRadius: 28, spreadRadius: 4),
+                  ]
                 : const [],
             ),
             child: widget.child,
