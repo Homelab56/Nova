@@ -484,7 +484,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _profileTile(Profile profile, {bool autofocus = false}) {
     return TvFocusable(
       autofocus: autofocus,
-      borderRadius: BorderRadius.circular(60),
+      // Was circular(60) - een cirkel-radius op deze rechthoekige kaart
+      // (avatar + naam eronder). Viel niet op met de oude zachte gloed, maar
+      // gaf een lelijke vorm zodra er een scherpe rand bijkwam. Een kleinere
+      // radius omkadert nu netjes de hele kaart (avatar + naam) als kaart.
+      borderRadius: BorderRadius.circular(16),
       onTap: () async {
         if (!_editing) { await _selectProfile(profile); return; }
         // Zonder dit kon je de pincode van een beveiligd profiel gewoon
@@ -525,7 +529,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _addTile({bool autofocus = false}) {
     return TvFocusable(
       autofocus: autofocus,
-      borderRadius: BorderRadius.circular(60),
+      borderRadius: BorderRadius.circular(16),
       onTap: () => _createOrEditProfile(),
       child: SizedBox(
         width: 110,

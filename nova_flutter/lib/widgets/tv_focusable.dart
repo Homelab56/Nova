@@ -10,6 +10,11 @@ import 'package:flutter/services.dart';
 class TvFocusable extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
+  // Optioneel: wordt long-press ondersteund (muis/aanraking via
+  // GestureDetector, D-pad via de "herhaal"-toets-gebeurtenis die Android
+  // al zelf stuurt zodra een toets lang genoeg ingedrukt blijft). Zonder dit
+  // blijft het bestaande gedrag exact ongewijzigd (tikt meteen op KeyDown).
+  final VoidCallback? onLongPress;
   final BorderRadius borderRadius;
   final bool autofocus;
   // Sommige schermdelen overlappen elkaar visueel (bv. de doorschijnende
@@ -23,6 +28,7 @@ class TvFocusable extends StatefulWidget {
     super.key,
     required this.child,
     this.onTap,
+    this.onLongPress,
     this.borderRadius = const BorderRadius.all(Radius.circular(10)),
     this.autofocus = false,
     this.escapeUp,
@@ -41,6 +47,9 @@ class _TvFocusableState extends State<TvFocusable> {
   // stuk op een kleiner TV-scherm. Latere, echte D-pad-navigatie scrollt
   // gewoon normaal mee.
   bool _hadFocusChange = false;
+  // Enkel relevant als onLongPress is opgegeven: voorkomt dat de KeyUp na
+  // een lange druk ook nog eens als gewone tik telt.
+  bool _longPressFired = false;
 
   @override
   Widget build(BuildContext context) {
@@ -56,36 +65,68 @@ class _TvFocusableState extends State<TvFocusable> {
         }
       },
       onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
-          if (widget.escapeUp != null && event.logicalKey == LogicalKeyboardKey.arrowUp) {
-            widget.escapeUp!.requestFocus();
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.select ||
-              event.logicalKey == LogicalKeyboardKey.enter ||
-              event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-              event.logicalKey == LogicalKeyboardKey.space ||
-              event.logicalKey == LogicalKeyboardKey.gameButtonA) {
+        if (event is KeyDownEvent &&
+            widget.escapeUp != null && event.logicalKey == LogicalKeyboardKey.arrowUp) {
+          widget.escapeUp!.requestFocus();
+          return KeyEventResult.handled;
+        }
+        final isSelectKey = event.logicalKey == LogicalKeyboardKey.select ||
+            event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+            event.logicalKey == LogicalKeyboardKey.space ||
+            event.logicalKey == LogicalKeyboardKey.gameButtonA;
+        if (!isSelectKey) return KeyEventResult.ignored;
+
+        if (widget.onLongPress == null) {
+          if (event is KeyDownEvent) {
             widget.onTap?.call();
             return KeyEventResult.handled;
           }
+          return KeyEventResult.ignored;
+        }
+        // Met long-press: pas op KeyUp een gewone tik doen (niet meteen op
+        // KeyDown), zodat we eerst kunnen zien of de toets lang genoeg
+        // ingedrukt blijft om als long-press te tellen.
+        if (event is KeyDownEvent) {
+          _longPressFired = false;
+          return KeyEventResult.handled;
+        }
+        if (event is KeyRepeatEvent) {
+          if (!_longPressFired) {
+            _longPressFired = true;
+            widget.onLongPress!();
+          }
+          return KeyEventResult.handled;
+        }
+        if (event is KeyUpEvent) {
+          if (!_longPressFired) widget.onTap?.call();
+          _longPressFired = false;
+          return KeyEventResult.handled;
         }
         return KeyEventResult.ignored;
       },
       child: GestureDetector(
         onTap: widget.onTap,
+        onLongPress: widget.onLongPress,
         child: AnimatedScale(
-          scale: _focused ? 1.035 : 1.0,
+          scale: _focused ? 1.06 : 1.0,
           duration: const Duration(milliseconds: 120),
           curve: Curves.easeOut,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
             decoration: BoxDecoration(
               borderRadius: widget.borderRadius,
-              // Zachte gekleurde gloed i.p.v. een hard wit kader - leest als
-              // een subtiele markering, niet als een opvallende doos errond.
+              // Een dunne, scherpe rand leest ondubbelzinnig als "dit is
+              // geselecteerd" - ook van op de bank en ook voor wie de vorige,
+              // zachtere gloed-only versie niet duidelijk genoeg vond. De
+              // gloed blijft erbij voor wat diepte, maar is niet meer de
+              // enige aanwijzing.
+              border: Border.all(
+                color: _focused ? const Color(0xFF00b4d8) : Colors.transparent,
+                width: 3,
+              ),
               boxShadow: _focused
-                ? [BoxShadow(color: const Color(0xFF00b4d8).withOpacity(0.65), blurRadius: 12, spreadRadius: 0.5)]
+                ? [BoxShadow(color: const Color(0xFF00b4d8).withOpacity(0.75), blurRadius: 18, spreadRadius: 1.5)]
                 : const [],
             ),
             child: widget.child,

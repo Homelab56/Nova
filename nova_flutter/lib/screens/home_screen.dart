@@ -43,6 +43,14 @@ const _tvGenreRows = [
   {'title': 'Misdaad series', 'id': 80},
 ];
 
+// Voor de "Genres"-knop in de koptekst.
+const _genreNames = {
+  28: 'Actie', 12: 'Avontuur', 16: 'Animatie', 35: 'Komedie', 80: 'Misdaad',
+  99: 'Documentaire', 18: 'Drama', 10751: 'Familie', 14: 'Fantasy',
+  27: 'Horror', 9648: 'Mystery', 10749: 'Romantiek', 878: 'Sci-Fi',
+  53: 'Thriller', 10752: 'Oorlog',
+};
+
 class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0;
   List _trending = [], _popularMovies = [], _popularTv = [];
@@ -363,65 +371,74 @@ class _HomeScreenState extends State<HomeScreen> {
         _buildNavBtn('Watchlist', 5),
         
         const SizedBox(width: 12),
-        // Genres knop
-        PopupMenuButton<int>(
-          offset: const Offset(0, 40),
-          color: const Color(0xFF0f1520),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.white12)),
-          onSelected: (id) async {
-            final names = {
-              28: 'Actie', 12: 'Avontuur', 16: 'Animatie', 35: 'Komedie', 80: 'Misdaad',
-              99: 'Documentaire', 18: 'Drama', 10751: 'Familie', 14: 'Fantasy',
-              27: 'Horror', 9648: 'Mystery', 10749: 'Romantiek', 878: 'Sci-Fi',
-              53: 'Thriller', 10752: 'Oorlog'
-            };
-            final name = names[id] ?? 'Genre';
-            // Open search screen met genre filter
-            Navigator.push(context, MaterialPageRoute(
-              builder: (_) => SearchScreen(genreId: id, genreName: name)
-            ));
-          },
-          itemBuilder: (context) => [
-            28, 12, 16, 35, 80, 99, 18, 10751, 14, 27, 9648, 10749, 878, 53, 10752
-          ].map((id) {
-            final names = {
-              28: 'Actie', 12: 'Avontuur', 16: 'Animatie', 35: 'Komedie', 80: 'Misdaad',
-              99: 'Documentaire', 18: 'Drama', 10751: 'Familie', 14: 'Fantasy',
-              27: 'Horror', 9648: 'Mystery', 10749: 'Romantiek', 878: 'Sci-Fi',
-              53: 'Thriller', 10752: 'Oorlog'
-            };
-            return PopupMenuItem(
-              value: id,
-              child: Text(names[id] ?? '', style: const TextStyle(color: Colors.white, fontSize: 13)),
+        // Genres knop - TvFocusable + showMenu i.p.v. PopupMenuButton: dat
+        // laatste bleek met een afstandsbediening niet betrouwbaar
+        // focusbaar/highlightbaar te krijgen (geen focusNode-parameter),
+        // terwijl TvFocusable dat overal elders in de app al wel goed doet.
+        Builder(builder: (context) {
+          void openGenreMenu() {
+            final button = context.findRenderObject() as RenderBox;
+            final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+            final position = RelativeRect.fromRect(
+              Rect.fromPoints(
+                button.localToGlobal(Offset(0, button.size.height), ancestor: overlay),
+                button.localToGlobal(button.size.bottomRight(Offset.zero), ancestor: overlay),
+              ),
+              Offset.zero & overlay.size,
             );
-          }).toList(),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.white24),
-              borderRadius: BorderRadius.circular(8),
+            showMenu<int>(
+              context: context,
+              position: position,
+              color: const Color(0xFF0f1520),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.white12)),
+              items: _genreNames.entries.map((e) => PopupMenuItem(
+                value: e.key,
+                child: Text(e.value, style: const TextStyle(color: Colors.white, fontSize: 13)),
+              )).toList(),
+            ).then((id) {
+              if (id == null) return;
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => SearchScreen(genreId: id, genreName: _genreNames[id] ?? 'Genre'),
+              ));
+            });
+          }
+          return TvFocusable(
+            borderRadius: BorderRadius.circular(8),
+            onTap: openGenreMenu,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.white24),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.menu, size: 16, color: Colors.grey),
+                  SizedBox(width: 8),
+                  Text('Genres', style: TextStyle(color: Colors.grey, fontSize: 13)),
+                ],
+              ),
             ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.menu, size: 16, color: Colors.grey),
-                SizedBox(width: 8),
-                Text('Genres', style: TextStyle(color: Colors.grey, fontSize: 13)),
-              ],
-            ),
+          );
+        }),
+
+        const Spacer(),
+        TvFocusable(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SearchScreen())),
+          child: const Padding(
+            padding: EdgeInsets.all(8),
+            child: Icon(Icons.search, color: Colors.white, size: 22),
           ),
         ),
-        
-        const Spacer(),
-        IconButton(icon: const Icon(Icons.search, color: Colors.white, size: 22),
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SearchScreen()))),
         Tooltip(
           message: 'Profiel wisselen (${ProfileService.activeProfileName ?? ""})',
-          child: InkWell(
-            borderRadius: BorderRadius.circular(16),
+          child: TvFocusable(
+            borderRadius: BorderRadius.circular(20),
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileScreen())),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
               child: CircleAvatar(
                 radius: 14,
                 backgroundColor: const Color(0xFF00b4d8),
@@ -433,8 +450,14 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
-        IconButton(icon: const Icon(Icons.settings_outlined, color: Colors.grey, size: 22),
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()))),
+        TvFocusable(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
+          child: const Padding(
+            padding: EdgeInsets.all(8),
+            child: Icon(Icons.settings_outlined, color: Colors.grey, size: 22),
+          ),
+        ),
       ]),
     );
   }
@@ -666,6 +689,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return TvFocusable(
       escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
       onTap: () => _openWatch(item),
+      onLongPress: () => _showPosterActionMenu(item),
       child: Container(
         width: cardWidth,
         margin: const EdgeInsets.symmetric(horizontal: 3),
@@ -746,6 +770,34 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _progress.removeWhere((p) => p['id'] == item['id']));
   }
 
+  // De hoekknopjes (+ toevoegen, X verwijderen) zijn losse GestureDetectors,
+  // niet los focusbaar - onbereikbaar met een afstandsbediening. Lang
+  // indrukken van de tegel zelf (die al focus heeft) opent dit menu als
+  // bereikbaar alternatief.
+  void _showPosterActionMenu(Map item, {VoidCallback? onRemove, String removeLabel = 'Verwijderen'}) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF0f1520),
+      builder: (_) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (onRemove != null)
+            ListTile(
+              autofocus: true,
+              leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+              title: Text(removeLabel, style: const TextStyle(color: Colors.white)),
+              onTap: () { Navigator.pop(context); onRemove(); },
+            ),
+          ListTile(
+            autofocus: onRemove == null,
+            leading: const Icon(Icons.bookmark_add_outlined, color: Color(0xFF00b4d8)),
+            title: const Text('Watchlist', style: TextStyle(color: Colors.white)),
+            onTap: () { Navigator.pop(context); _addToWatchlistWithFeedback(item); },
+          ),
+        ]),
+      ),
+    );
+  }
+
   Widget _buildCard(Map item, {bool isRd = false, bool isProgress = false, bool isFirstRow = false}) {
     final poster = item['poster_path'] as String?;
     final backdrop = item['backdrop_path'] as String?;
@@ -760,6 +812,8 @@ class _HomeScreenState extends State<HomeScreen> {
       return TvFocusable(
         escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
         onTap: () => _openWatch(item, autoResume: true),
+        onLongPress: () => _showPosterActionMenu(item,
+          onRemove: () => _removeFromProgress(item), removeLabel: 'Verwijderen uit Verder kijken'),
         child: Container(
           width: 230, margin: const EdgeInsets.symmetric(horizontal: 5),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -792,6 +846,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return TvFocusable(
       escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
       onTap: () => _openWatch(item),
+      onLongPress: isRd ? null : () => _showPosterActionMenu(item),
       child: Container(
         width: 168, margin: const EdgeInsets.symmetric(horizontal: 6),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
