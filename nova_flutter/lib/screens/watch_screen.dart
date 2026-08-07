@@ -1993,7 +1993,7 @@ class _WatchScreenState extends State<WatchScreen> {
                           final profile = p['profile_path'] as String?;
                           final character = p['character'] as String?;
                           final personId = p['id'] as int?;
-                          return Container(width: 96, margin: const EdgeInsets.only(right: 14),
+                          return Container(width: 96, margin: const EdgeInsets.only(right: 20),
                             child: Column(children: [
                               TvFocusable(
                                 borderRadius: BorderRadius.circular(44),
@@ -2031,7 +2031,7 @@ class _WatchScreenState extends State<WatchScreen> {
                   itemBuilder: (_, i) {
                     final item = _similar[i];
                     final p = item['poster_path'];
-                    return Container(width: 150, margin: const EdgeInsets.symmetric(horizontal: 6),
+                    return Container(width: 150, margin: const EdgeInsets.symmetric(horizontal: 16),
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                         TvFocusable(
                           onTap: () => Navigator.pushReplacement(context, MaterialPageRoute(

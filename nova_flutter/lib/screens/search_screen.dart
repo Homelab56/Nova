@@ -152,7 +152,7 @@ class _SearchScreenState extends State<SearchScreen> {
                       final p = _people[i];
                       final profile = p['profile_path'] as String?;
                       final personId = p['id'] as int?;
-                      return Container(width: 88, margin: const EdgeInsets.only(right: 14),
+                      return Container(width: 88, margin: const EdgeInsets.only(right: 20),
                         child: Column(children: [
                           TvFocusable(
                             borderRadius: BorderRadius.circular(40),
