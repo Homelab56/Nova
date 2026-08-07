@@ -106,10 +106,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
                     if (crossAxisCount < 2) crossAxisCount = 2;
                     return GridView.builder(
                       controller: _scrollCtrl,
-                      // Extra ruimte bovenaan - anders sneed de standaard
-                      // clip van GridView de focus-vergroting/gloed van de
-                      // bovenste rij tegels af (net als bij MediaRow).
-                      padding: const EdgeInsets.fromLTRB(12, 90, 12, 12),
+                      padding: const EdgeInsets.all(12),
                       // Groter dan standaard zodat een D-pad meerdere rijen
                       // voorbij het scherm al kan focussen i.p.v. vast te
                       // lopen bij een nog niet opgebouwde tegel.
@@ -117,14 +114,8 @@ class _CategoryScreenState extends State<CategoryScreen> {
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: crossAxisCount,
                         childAspectRatio: 0.62,
-                        // Was 14/18 - te weinig voor de focus-vergroting
-                        // (schaal 1.25): een tegel kon zo tegen zijn buur
-                        // aanlopen, en omdat latere tegels in de grid later
-                        // getekend worden (dus bovenop), verborg de buur dan
-                        // een stuk van de gefocuste tegel - leek dan of de
-                        // poster niet volledig zichtbaar was.
-                        crossAxisSpacing: 32,
-                        mainAxisSpacing: 52,
+                        crossAxisSpacing: 14,
+                        mainAxisSpacing: 18,
                       ),
                       itemCount: _results.length + (_page < _totalPages ? 1 : 0),
                       itemBuilder: (_, i) {
