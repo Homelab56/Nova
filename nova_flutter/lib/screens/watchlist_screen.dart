@@ -30,6 +30,19 @@ class _WatchlistScreenState extends State<WatchlistScreen> {
       backgroundColor: const Color(0xFF080c14),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0f1520), foregroundColor: Colors.white,
+        // Zie category_screen.dart - standaard terugknop van AppBar is
+        // amper zichtbaar bij focus op de TV.
+        leading: Center(
+          child: TvFocusable(
+            muted: true,
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => Navigator.pop(context),
+            child: const Padding(
+              padding: EdgeInsets.all(8),
+              child: Icon(Icons.arrow_back),
+            ),
+          ),
+        ),
         title: Text('Mijn Watchlist${_list.isNotEmpty ? " (${_list.length})" : ""}'),
       ),
       body: _list.isEmpty

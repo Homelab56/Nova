@@ -138,7 +138,12 @@ class _PersonScreenState extends State<PersonScreen> {
             ),
           ),
         ),
-        const SizedBox(height: 6),
+        // Was 6 - de poster groeit bij focus (schaal) ook náár beneden
+        // (vertrekt vanuit het midden), en met maar 6px ertussen tekende de
+        // rand/poster dan dwars over de titel eronder i.p.v. netjes rond
+        // enkel de poster te sluiten - zelfde patroon als de kaarten in
+        // home_screen.dart.
+        const SizedBox(height: 45),
         Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 13, color: Colors.white)),
         if (character != null && character.isNotEmpty)

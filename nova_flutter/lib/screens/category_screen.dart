@@ -85,6 +85,20 @@ class _CategoryScreenState extends State<CategoryScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF0f1520),
         foregroundColor: Colors.white,
+        // Standaard (automatische) terugknop van AppBar heeft amper
+        // zichtbare focus op de TV - net als overal elders in de app,
+        // TvFocusable geeft hier dezelfde duidelijke, consistente highlight.
+        leading: Center(
+          child: TvFocusable(
+            muted: true,
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => Navigator.pop(context),
+            child: const Padding(
+              padding: EdgeInsets.all(8),
+              child: Icon(Icons.arrow_back),
+            ),
+          ),
+        ),
         title: Text(widget.title),
       ),
       body: Column(
@@ -157,7 +171,10 @@ class _CategoryScreenState extends State<CategoryScreen> {
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 6),
+                            // Was 6 - de poster groeit bij focus ook náár
+                            // beneden, zie de toelichting in
+                            // person_screen.dart's _buildCreditTile.
+                            const SizedBox(height: 45),
                             Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
                               style: const TextStyle(fontSize: 13, color: Colors.white70)),
                           ],

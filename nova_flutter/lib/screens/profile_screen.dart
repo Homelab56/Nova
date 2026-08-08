@@ -436,9 +436,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
           if (Navigator.canPop(context))
             Positioned(
               top: 8, left: 8,
-              child: IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.white),
-                onPressed: () => Navigator.pop(context),
+              // Zie category_screen.dart - standaard IconButton geeft amper
+              // zichtbare focus op de TV.
+              child: TvFocusable(
+                muted: true,
+                borderRadius: BorderRadius.circular(20),
+                onTap: () => Navigator.pop(context),
+                child: const Padding(
+                  padding: EdgeInsets.all(8),
+                  child: Icon(Icons.arrow_back, color: Colors.white),
+                ),
               ),
             ),
         ]),

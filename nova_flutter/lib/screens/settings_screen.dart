@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../services/settings_service.dart';
+import '../widgets/tv_focusable.dart';
 import 'profile_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -143,7 +144,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Text(widget.isFirstRun ? 'Welkom bij Nova' : 'Instellingen',
             style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         ]),
-        automaticallyImplyLeading: !widget.isFirstRun,
+        automaticallyImplyLeading: false,
+        // Zie category_screen.dart - standaard terugknop van AppBar is
+        // amper zichtbaar bij focus op de TV. Bij de allereerste opstart
+        // (isFirstRun) is er bewust geen terugknop - je kan daar nog niet
+        // vandaan (nog geen server ingesteld).
+        leading: widget.isFirstRun ? null : Center(
+          child: TvFocusable(
+            muted: true,
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => Navigator.pop(context),
+            child: const Padding(
+              padding: EdgeInsets.all(8),
+              child: Icon(Icons.arrow_back),
+            ),
+          ),
+        ),
         foregroundColor: Colors.white,
       ),
       body: ListView(
