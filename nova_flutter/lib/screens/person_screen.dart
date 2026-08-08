@@ -117,18 +117,18 @@ class _PersonScreenState extends State<PersonScreen> {
     final poster = item['poster_path'];
     final title = _titleOf(item);
     final character = item['character'] as String?;
-    // De hele kaart (poster + titel) als één highlight, geen scale
-    // (noGrow) - zie category_screen.dart.
-    return TvFocusable(
-      onTap: () => Navigator.push(context, MaterialPageRoute(
-        builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
-      borderRadius: BorderRadius.circular(10),
-      noGrow: true,
-      child: Column(
+    // Highlight enkel rond de poster, titel blijft duidelijk erbuiten/
+    // eronder - zie category_screen.dart.
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Expanded(
-          child: ClipRRect(
+          child: TvFocusable(
+            onTap: () => Navigator.push(context, MaterialPageRoute(
+              builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
+            borderRadius: BorderRadius.circular(10),
+            noGrow: true,
+            child: ClipRRect(
               borderRadius: BorderRadius.circular(10),
               child: poster != null
                 ? NovaImage(path: poster, baseUrl: tmdbPersonPoster, fit: BoxFit.cover, width: double.infinity)
@@ -138,6 +138,7 @@ class _PersonScreenState extends State<PersonScreen> {
                 : Container(width: double.infinity, height: double.infinity,
                     color: const Color(0xFF0f1520),
                     child: const Icon(Icons.movie, color: Colors.grey)),
+            ),
           ),
         ),
         const SizedBox(height: 6),
@@ -147,7 +148,6 @@ class _PersonScreenState extends State<PersonScreen> {
           Text(character, maxLines: 1, overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 11, color: Colors.grey)),
       ],
-      ),
     );
   }
 

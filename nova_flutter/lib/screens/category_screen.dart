@@ -143,18 +143,19 @@ class _CategoryScreenState extends State<CategoryScreen> {
                         final poster = item['poster_path'];
                         final title = item['title'] ?? item['name'] ?? '';
                         // De hele kaart (poster + titel) als één highlight,
-                        // geen scale (noGrow) - geen overloop mogelijk, dus
-                        // altijd een nette, volledige rand, ongeacht
-                        // titellengte of cel-afmetingen.
-                        return TvFocusable(
-                          onTap: () => Navigator.push(context, MaterialPageRoute(
-                            builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
-                          borderRadius: BorderRadius.circular(10),
-                          noGrow: true,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
+                        // Highlight enkel rond de poster, titel blijft
+                        // duidelijk erbuiten/eronder (zoals de posterrijen
+                        // op Home) - niet de hele kaart, anders leest de
+                        // gloed rond de tekst als onduidelijk/rommelig.
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: TvFocusable(
+                                onTap: () => Navigator.push(context, MaterialPageRoute(
+                                  builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
+                                borderRadius: BorderRadius.circular(10),
+                                noGrow: true,
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(10),
                                   child: poster != null
@@ -162,11 +163,11 @@ class _CategoryScreenState extends State<CategoryScreen> {
                                     : Container(color: const Color(0xFF0f1520), child: const Icon(Icons.movie, color: Colors.grey)),
                                 ),
                               ),
-                              const SizedBox(height: 6),
-                              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 13, color: Colors.white70)),
-                            ],
-                          ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 13, color: Colors.white70)),
+                          ],
                         );
                       },
                     );

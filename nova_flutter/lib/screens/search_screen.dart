@@ -222,17 +222,17 @@ class _SearchScreenState extends State<SearchScreen> {
                         final item = _results[i];
                         final poster = item['poster_path'];
                         final title = item['title'] ?? item['name'] ?? '';
-                        // De hele kaart (poster + titel) als één highlight,
-                        // geen scale (noGrow) - zie category_screen.dart.
-                        return TvFocusable(
-                          onTap: () => Navigator.push(context, MaterialPageRoute(
-                            builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
-                          borderRadius: BorderRadius.circular(10),
-                          noGrow: true,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
+                        // Highlight enkel rond de poster, titel blijft
+                        // duidelijk erbuiten/eronder - zie category_screen.dart.
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: TvFocusable(
+                                onTap: () => Navigator.push(context, MaterialPageRoute(
+                                  builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
+                                borderRadius: BorderRadius.circular(10),
+                                noGrow: true,
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(10),
                                   child: poster != null
@@ -240,11 +240,11 @@ class _SearchScreenState extends State<SearchScreen> {
                                     : Container(color: const Color(0xFF0f1520), child: const Icon(Icons.movie, color: Colors.grey)),
                                 ),
                               ),
-                              const SizedBox(height: 6),
-                              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 13, color: Colors.white70)),
-                            ],
-                          ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 13, color: Colors.white70)),
+                          ],
                         );
                       },
                     );
