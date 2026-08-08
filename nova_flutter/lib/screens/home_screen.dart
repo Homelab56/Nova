@@ -685,8 +685,11 @@ class _HomeScreenState extends State<HomeScreen> {
       // ook groter, zodat de focus-vergroting evenveel absolute pixels
       // wint als in het "Meer bekijken"-raster (waar dat overduidelijk las
       // als "naar voren poppen") i.p.v. de kleinere/subtielere groei die
-      // dezelfde 25% op een kleinere kaart hier opleverde.
-      height: isProgress ? 200 : (isRanked ? 330 : 325),
+      // dezelfde 25% op een kleinere kaart hier opleverde. Ruim boven de
+      // precies-berekende hoogte van poster+titel (was 325/330, gaf een
+      // echte RenderFlex-overflow van een paar pixels op de gewone
+      // posterrij - tekst-regelhoogte is lastig exact te voorspellen).
+      height: isProgress ? 200 : (isRanked ? 345 : 345),
       itemCount: isRanked ? (items.length < 10 ? items.length : 10) : items.length,
       path: path,
       onSeeAll: path != null
