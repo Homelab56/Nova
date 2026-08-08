@@ -330,7 +330,12 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF080c14),
-      body: Stack(children: [
+      // clipBehavior: Clip.none - Stack's eigen standaard is Clip.hardEdge
+      // (niet none). Dit is de buitenste Stack van de hele pagina (scroll-
+      // inhoud + de zwevende navigatiebalk erboven) - had deze over het
+      // hoofd gezien terwijl alle focus-groei-fixes tot nu toe enkel op
+      // Stacks binnenin MediaRow/de kaarten zaten.
+      body: Stack(clipBehavior: Clip.none, children: [
         _loading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF00b4d8)))
           : RefreshIndicator(
