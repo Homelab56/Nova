@@ -676,12 +676,25 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: OutlinedButton.icon(
                     focusNode: _heroWatchlistFocus,
                     onPressed: () => UserDataService.addToWatchlist(Map<String, dynamic>.from(item)),
-                    icon: const Icon(Icons.add, size: 18, color: Colors.white),
-                    label: const Text('Watchlist', style: TextStyle(color: Colors.white, fontSize: 15)),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Colors.white54),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14)),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Watchlist', style: TextStyle(fontSize: 15)),
+                    // Zelfde volledige kleurwissel bij focus als "Afspelen"
+                    // hierboven, i.p.v. enkel een randkleur - anders zou dit
+                    // knopje-paar bij focus inconsistent ogen (het ene
+                    // wisselt volledig van kleur, het andere niet).
+                    style: ButtonStyle(
+                      backgroundColor: WidgetStateProperty.resolveWith((states) =>
+                        states.contains(WidgetState.focused) ? const Color(0xFF00b4d8) : Colors.transparent),
+                      foregroundColor: WidgetStateProperty.all(Colors.white),
+                      side: WidgetStateProperty.resolveWith((states) =>
+                        BorderSide(color: states.contains(WidgetState.focused) ? const Color(0xFF00b4d8) : Colors.white54)),
+                      shape: WidgetStateProperty.all(
+                        RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                      padding: WidgetStateProperty.all(
+                        const EdgeInsets.symmetric(horizontal: 18, vertical: 14)),
+                      elevation: WidgetStateProperty.resolveWith((states) =>
+                        states.contains(WidgetState.focused) ? 10.0 : 0.0),
+                    ),
                   ),
                 ),
               ]),

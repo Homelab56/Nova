@@ -758,12 +758,26 @@ class _WatchScreenState extends State<WatchScreen> {
                 ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
                 : const Icon(Icons.play_arrow, size: 20),
               label: Text(_loadingStream ? 'Laden...' : 'Afspelen'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _isAvailable == true ? const Color(0xFF00b4d8) : Colors.white,
-                foregroundColor: _isAvailable == true ? Colors.white : Colors.black,
-                textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+              // ButtonStyle i.p.v. ElevatedButton.styleFrom - bij focus altijd
+              // cyaan/wit, ongeacht beschikbaarheid, zodat een niet-
+              // beschikbare (dus witte) knop bij focus ook duidelijk van
+              // kleur wisselt i.p.v. enkel een rand te tonen (te weinig
+              // contrast op wit, zie home_screen.dart's Afspelen-knop).
+              style: ButtonStyle(
+                backgroundColor: WidgetStateProperty.resolveWith((states) =>
+                  states.contains(WidgetState.focused) || _isAvailable == true
+                    ? const Color(0xFF00b4d8) : Colors.white),
+                foregroundColor: WidgetStateProperty.resolveWith((states) =>
+                  states.contains(WidgetState.focused) || _isAvailable == true
+                    ? Colors.white : Colors.black),
+                textStyle: WidgetStateProperty.all(
+                  const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                shape: WidgetStateProperty.all(
+                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                padding: WidgetStateProperty.all(
+                  const EdgeInsets.symmetric(horizontal: 22, vertical: 14)),
+                elevation: WidgetStateProperty.resolveWith((states) =>
+                  states.contains(WidgetState.focused) ? 10.0 : 2.0),
               ),
             ),
           ),
@@ -774,12 +788,20 @@ class _WatchScreenState extends State<WatchScreen> {
             child: OutlinedButton.icon(
               focusNode: _sourcesFocus,
               onPressed: _loadingStream ? null : () => _pickSource(),
-              icon: const Icon(Icons.dns_outlined, size: 18, color: Colors.white),
-              label: const Text('Bronnen', style: TextStyle(color: Colors.white, fontSize: 15)),
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: Colors.white54),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+              icon: const Icon(Icons.dns_outlined, size: 18),
+              label: const Text('Bronnen', style: TextStyle(fontSize: 15)),
+              style: ButtonStyle(
+                backgroundColor: WidgetStateProperty.resolveWith((states) =>
+                  states.contains(WidgetState.focused) ? const Color(0xFF00b4d8) : Colors.transparent),
+                foregroundColor: WidgetStateProperty.all(Colors.white),
+                side: WidgetStateProperty.resolveWith((states) =>
+                  BorderSide(color: states.contains(WidgetState.focused) ? const Color(0xFF00b4d8) : Colors.white54)),
+                shape: WidgetStateProperty.all(
+                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                padding: WidgetStateProperty.all(
+                  const EdgeInsets.symmetric(horizontal: 18, vertical: 14)),
+                elevation: WidgetStateProperty.resolveWith((states) =>
+                  states.contains(WidgetState.focused) ? 10.0 : 0.0),
               ),
             ),
           ),
@@ -790,14 +812,24 @@ class _WatchScreenState extends State<WatchScreen> {
           child: OutlinedButton.icon(
             focusNode: _watchlistFocus,
             onPressed: _toggleWatchlist,
-            icon: Icon(_inWatchlist ? Icons.bookmark : Icons.bookmark_outline, size: 18,
-              color: _inWatchlist ? const Color(0xFF00b4d8) : Colors.white),
-            label: Text(_inWatchlist ? 'In watchlist' : '+ Watchlist',
-              style: TextStyle(color: _inWatchlist ? const Color(0xFF00b4d8) : Colors.white, fontSize: 15)),
-            style: OutlinedButton.styleFrom(
-              side: BorderSide(color: _inWatchlist ? const Color(0xFF00b4d8) : Colors.white54),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            icon: Icon(_inWatchlist ? Icons.bookmark : Icons.bookmark_outline, size: 18),
+            label: Text(_inWatchlist ? 'In watchlist' : '+ Watchlist', style: const TextStyle(fontSize: 15)),
+            style: ButtonStyle(
+              backgroundColor: WidgetStateProperty.resolveWith((states) =>
+                states.contains(WidgetState.focused) ? const Color(0xFF00b4d8) : Colors.transparent),
+              foregroundColor: WidgetStateProperty.resolveWith((states) =>
+                states.contains(WidgetState.focused)
+                  ? Colors.white
+                  : (_inWatchlist ? const Color(0xFF00b4d8) : Colors.white)),
+              side: WidgetStateProperty.resolveWith((states) =>
+                BorderSide(color: states.contains(WidgetState.focused) || _inWatchlist
+                  ? const Color(0xFF00b4d8) : Colors.white54)),
+              shape: WidgetStateProperty.all(
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+              padding: WidgetStateProperty.all(
+                const EdgeInsets.symmetric(horizontal: 18, vertical: 14)),
+              elevation: WidgetStateProperty.resolveWith((states) =>
+                states.contains(WidgetState.focused) ? 10.0 : 0.0),
             ),
           ),
         ),
