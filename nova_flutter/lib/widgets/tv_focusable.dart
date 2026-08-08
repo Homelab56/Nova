@@ -56,7 +56,13 @@ class TvHighlightBox extends StatelessWidget {
           boxShadow: !focused
             ? const []
             : (muted
-                ? [BoxShadow(color: const Color(0xFF00b4d8).withOpacity(0.55), blurRadius: 10, spreadRadius: 0.5)]
+                // Was blurRadius:10, spreadRadius:0.5, opacity:0.55 - te
+                // subtiel op knoppen met een eigen effen (vaak witte)
+                // achtergrond, zoals "Afspelen": een dunne rand op wit heeft
+                // weinig contrast, maar de gloed zelf valt WEL duidelijk op
+                // - die tekent buiten de knop, tegen de donkere pagina-
+                // achtergrond, ongeacht de knop se eigen kleur.
+                ? [BoxShadow(color: const Color(0xFF00b4d8).withOpacity(0.75), blurRadius: 18, spreadRadius: 2)]
                 : [
                     BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.95), blurRadius: 10, spreadRadius: 1),
                     BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.6), blurRadius: 26, spreadRadius: 3),
@@ -66,7 +72,9 @@ class TvHighlightBox extends StatelessWidget {
           borderRadius: borderRadius,
           border: Border.all(
             color: !focused ? Colors.transparent : (muted ? const Color(0xFF00b4d8) : const Color(0xFF00e5ff)),
-            width: muted ? 2 : 4,
+            // Was 2 voor gemute knoppen - iets dikker leest duidelijker,
+            // ook op een effen witte achtergrond zoals de "Afspelen"-knop.
+            width: muted ? 3 : 4,
           ),
         ),
         child: child,
