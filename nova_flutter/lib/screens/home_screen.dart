@@ -681,15 +681,13 @@ class _HomeScreenState extends State<HomeScreen> {
     return MediaRow(
       title: title,
       titleColor: isRd ? const Color(0xFF00b4d8) : Colors.white,
-      // Groter dan voorheen (was 185/320/300) - de posterkaarten zelf werden
-      // ook groter, zodat de focus-vergroting evenveel absolute pixels
-      // wint als in het "Meer bekijken"-raster (waar dat overduidelijk las
-      // als "naar voren poppen") i.p.v. de kleinere/subtielere groei die
-      // dezelfde 25% op een kleinere kaart hier opleverde. Ruim boven de
-      // precies-berekende hoogte van poster+titel (was 325/330, gaf een
-      // echte RenderFlex-overflow van een paar pixels op de gewone
-      // posterrij - tekst-regelhoogte is lastig exact te voorspellen).
-      height: isProgress ? 200 : (isRanked ? 345 : 345),
+      // Groter dan voorheen - de posterkaarten zelf werden ook groter, zodat
+      // de focus-vergroting evenveel absolute pixels wint als in het "Meer
+      // bekijken"-raster. Groter dan de vorige poging omdat de tussenruimte
+      // tussen poster en titel ondertussen ook groeide (zie de kaart-
+      // builders hieronder - de poster groeit bij focus ook náár beneden,
+      // en had daar niet genoeg ruimte voor).
+      height: isProgress ? 225 : (isRanked ? 385 : 385),
       itemCount: isRanked ? (items.length < 10 ? items.length : 10) : items.length,
       path: path,
       onSeeAll: path != null
@@ -779,7 +777,11 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ]),
         ),
-        const SizedBox(height: 8),
+        // Was 8 - de poster groeit bij focus ook náár beneden (schaal
+        // vertrekt vanuit het midden), en de rand tekende daardoor dwars
+        // door/vlak tegen de titel eronder i.p.v. netjes rond enkel de
+        // poster te sluiten. Genoeg ruimte hier voorkomt dat.
+        const SizedBox(height: 45),
         Padding(
           padding: EdgeInsets.only(left: numVisible),
           child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
@@ -887,7 +889,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ]),
             ),
           ),
-          const SizedBox(height: 8),
+          // Was 8 - zie toelichting bij de ranked-kaart hierboven.
+          const SizedBox(height: 36),
           Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
         ]),
@@ -924,7 +927,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
-        const SizedBox(height: 8),
+        // Was 8 - zie toelichting bij de ranked-kaart hierboven.
+        const SizedBox(height: 45),
         Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
         if (!isRd && yearStr.isNotEmpty)
