@@ -160,18 +160,25 @@ class _PersonScreenState extends State<PersonScreen> {
           child: Text('$key:', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF00b4d8))),
         ),
       ));
-      slivers.add(SliverGrid(
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: crossAxisCount,
-          childAspectRatio: 0.6,
-          // Was 12/16 - te weinig voor de focus-vergroting (schaal 1.25),
-          // zie category_screen.dart voor de volledige toelichting.
-          crossAxisSpacing: 32,
-          mainAxisSpacing: 52,
-        ),
-        delegate: SliverChildBuilderDelegate(
-          (context, i) => _buildCreditTile(items[i]),
-          childCount: items.length,
+      slivers.add(SliverPadding(
+        // Was geen padding hier - de linkerkolom groeide bij focus dan
+        // tegen de rand van de sliver aan (leek of de poster er niet
+        // volledig op stond, "start te veel naar links"), en de bovenste
+        // rij van elke letter-sectie kon overlappen met de "A:"/"B:"-
+        // koptekst erboven. Zie category_screen.dart voor hetzelfde
+        // patroon in het "Meer bekijken"-raster.
+        padding: const EdgeInsets.fromLTRB(40, 40, 40, 10),
+        sliver: SliverGrid(
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: crossAxisCount,
+            childAspectRatio: 0.6,
+            crossAxisSpacing: 32,
+            mainAxisSpacing: 52,
+          ),
+          delegate: SliverChildBuilderDelegate(
+            (context, i) => _buildCreditTile(items[i]),
+            childCount: items.length,
+          ),
         ),
       ));
     }
