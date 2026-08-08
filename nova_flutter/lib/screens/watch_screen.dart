@@ -1980,13 +1980,16 @@ class _WatchScreenState extends State<WatchScreen> {
                       const SizedBox(height: 28),
                       const Text('Cast', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: Colors.white)),
                       const SizedBox(height: 14),
-                      // +50 kopruimte - anders sneed de standaard clip van
-                      // ListView de focus-vergroting/gloed van de avatar af
-                      // (zie MediaRow voor dezelfde reden/berekening).
-                      SizedBox(height: 172 + 50, child: Padding(
-                        padding: const EdgeInsets.only(top: 50),
+                      // Kopruimte boven + horizontale padding op de ListView -
+                      // anders snijdt de standaard clip van ListView de
+                      // focus-groei van de avatar af (boven) of van de
+                      // eerste/laatste avatar specifiek (opzij, kan niet
+                      // verder scrollen om daar ruimte voor te maken).
+                      SizedBox(height: 172 + 90, child: Padding(
+                        padding: const EdgeInsets.only(top: 90),
                         child: ListView.builder(
                         scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 50),
                         itemCount: _cast.length,
                         itemBuilder: (_, i) {
                           final p = _cast[i];

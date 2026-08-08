@@ -109,7 +109,11 @@ class _CategoryScreenState extends State<CategoryScreen> {
                       // Extra ruimte bovenaan - anders sneed de standaard
                       // clip van GridView de focus-vergroting/gloed van de
                       // bovenste rij tegels af (net als bij MediaRow).
-                      padding: const EdgeInsets.fromLTRB(12, 90, 12, 12),
+                      // Links/rechts/onder ruimer dan 12 - anders snijdt de
+                      // GridView's eigen rand de focus-groei van de eerste/
+                      // laatste kolom en de onderste rij af (kunnen niet
+                      // verder scrollen om daar ruimte voor te maken).
+                      padding: const EdgeInsets.fromLTRB(60, 90, 60, 60),
                       // Groter dan standaard zodat een D-pad meerdere rijen
                       // voorbij het scherm al kan focussen i.p.v. vast te
                       // lopen bij een nog niet opgebouwde tegel.

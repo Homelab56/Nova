@@ -140,13 +140,16 @@ class _SearchScreenState extends State<SearchScreen> {
                 children: [
                   const Text('Acteurs & actrices', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
                   const SizedBox(height: 10),
-                  // +50 kopruimte - anders sneed de standaard clip van
-                  // ListView de focus-vergroting/gloed van de avatar af
-                  // (zie MediaRow voor dezelfde reden/berekening).
-                  SizedBox(height: 132 + 50, child: Padding(
-                    padding: const EdgeInsets.only(top: 50),
+                  // Kopruimte boven + horizontale padding op de ListView -
+                  // anders snijdt de standaard clip van ListView de focus-
+                  // groei van de avatar af (boven) of van de eerste/laatste
+                  // avatar specifiek (opzij, kan niet verder scrollen om
+                  // daar ruimte voor te maken).
+                  SizedBox(height: 132 + 90, child: Padding(
+                    padding: const EdgeInsets.only(top: 90),
                     child: ListView.builder(
                     scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 50),
                     itemCount: _people.length,
                     itemBuilder: (_, i) {
                       final p = _people[i];
@@ -197,7 +200,11 @@ class _SearchScreenState extends State<SearchScreen> {
                       // Extra ruimte bovenaan - anders sneed de standaard
                       // clip van GridView de focus-vergroting/gloed van de
                       // bovenste rij tegels af (net als bij MediaRow).
-                      padding: const EdgeInsets.fromLTRB(12, 90, 12, 12),
+                      // Links/rechts/onder ruimer dan 12 - anders snijdt de
+                      // GridView's eigen rand de focus-groei van de eerste/
+                      // laatste kolom en de onderste rij af (kunnen niet
+                      // verder scrollen om daar ruimte voor te maken).
+                      padding: const EdgeInsets.fromLTRB(60, 90, 60, 60),
                       cacheExtent: 2000,
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: crossAxisCount,

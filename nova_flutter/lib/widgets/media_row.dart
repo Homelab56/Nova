@@ -122,7 +122,13 @@ class _MediaRowState extends State<MediaRow> {
               child: ListView.builder(
                 controller: _scrollCtrl,
                 scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                // Was 12 - de eerste/laatste tegel in de rij kan niet verder
+                // scrollen om ruimte te maken voor zijn eigen groei bij
+                // focus, dus sneed de ListView's eigen linker-/rechterrand
+                // die groei simpelweg af (een heel andere oorzaak dan de
+                // tussenruimte tussen kaarten - dít treft enkel de eerste/
+                // laatste tegel, niet de rest van de rij).
+                padding: const EdgeInsets.symmetric(horizontal: 60),
                 // Een stuk groter dan de standaard (~250px) zodat een D-pad
                 // meerdere kaarten voorbij het scherm al kan focussen i.p.v.
                 // vast te lopen zodra hij een nog niet opgebouwde kaart nadert.
