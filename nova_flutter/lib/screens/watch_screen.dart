@@ -1835,7 +1835,10 @@ class _WatchScreenState extends State<WatchScreen> {
                         duration: const Duration(milliseconds: 250),
                         child: IgnorePointer(
                           ignoring: !_controlsVisible,
-                          child: InkWell(
+                          // Was InkWell - geeft amper zichtbare focus op de
+                          // TV, net als overal elders in de app.
+                          child: TvFocusable(
+                            muted: true,
                             borderRadius: BorderRadius.circular(24),
                             onTap: _handleBack,
                             child: Container(
@@ -1883,7 +1886,9 @@ class _WatchScreenState extends State<WatchScreen> {
                     ]),
                     Positioned(
                       top: 16, left: 16,
-                      child: InkWell(
+                      // Was InkWell - zie toelichting hierboven.
+                      child: TvFocusable(
+                        muted: true,
                         borderRadius: BorderRadius.circular(24),
                         onTap: () => Navigator.pop(context),
                         child: Container(
@@ -1916,7 +1921,9 @@ class _WatchScreenState extends State<WatchScreen> {
                         stops: [0.0, 0.6]))),
                     Positioned(
                       top: 16, left: 16,
-                      child: InkWell(
+                      // Was InkWell - zie toelichting hierboven.
+                      child: TvFocusable(
+                        muted: true,
                         borderRadius: BorderRadius.circular(24),
                         onTap: () => Navigator.pop(context),
                         child: Container(
