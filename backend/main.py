@@ -2,7 +2,7 @@ import os
 import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from routers import search, debrid, stream, settings, userdata, library, seerr, profiles
+from routers import search, debrid, stream, settings, userdata, library, seerr, profiles, streamio_addon
 
 app = FastAPI(title="Nova API", version="1.1.0")
 
@@ -40,6 +40,7 @@ app.include_router(userdata.router, prefix="/user", tags=["user"])
 app.include_router(profiles.router, prefix="/profiles", tags=["profiles"])
 app.include_router(library.router, prefix="/library", tags=["library"])
 app.include_router(seerr.router, prefix="/seerr", tags=["seerr"])
+app.include_router(streamio_addon.router, prefix="/streamio", tags=["streamio-addon"])
 
 @app.get("/")
 def root():
