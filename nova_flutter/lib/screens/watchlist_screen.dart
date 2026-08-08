@@ -62,8 +62,31 @@ class _WatchlistScreenState extends State<WatchlistScreen> {
 
     return TvFocusable(
       borderRadius: BorderRadius.circular(14),
+      // Deze rij is bijna schermbreed - 1.3x vergroten zou hem honderden
+      // pixels breder maken (de poster duwt dan grotendeels van het scherm
+      // af, precies wat er gebeurde). noGrow: enkel rand+gloed, geen scale.
+      noGrow: true,
       onTap: () => Navigator.push(context, MaterialPageRoute(
         builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))).then((_) => _load()),
+      // Het X-knopje hierbeneden is een losse GestureDetector, niet los
+      // bereikbaar met een afstandsbediening - lang indrukken van de rij
+      // zelf (die al focus heeft) is het bereikbare alternatief.
+      onLongPress: () => showModalBottomSheet(
+        context: context,
+        backgroundColor: const Color(0xFF0f1520),
+        builder: (_) => SafeArea(
+          child: ListTile(
+            autofocus: true,
+            leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+            title: const Text('Verwijderen uit watchlist', style: TextStyle(color: Colors.white)),
+            onTap: () async {
+              Navigator.pop(context);
+              await UserDataService.removeFromWatchlist(item['id'] as int);
+              _load();
+            },
+          ),
+        ),
+      ),
       child: Container(
         decoration: BoxDecoration(
           color: const Color(0xFF0f1520),

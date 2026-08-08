@@ -2117,6 +2117,8 @@ class _WatchScreenState extends State<WatchScreen> {
     final state = _episodeWatchState(epNum);
     return TvFocusable(
       borderRadius: BorderRadius.circular(12),
+      // Bijna schermbrede rij - zie toelichting in watchlist_screen.dart.
+      noGrow: true,
       onTap: () => _play(episode: ep),
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
