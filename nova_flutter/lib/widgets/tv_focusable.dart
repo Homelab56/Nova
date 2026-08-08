@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -144,6 +145,19 @@ class _TvFocusableState extends State<TvFocusable> {
   // Enkel relevant als onLongPress is opgegeven: voorkomt dat de KeyUp na
   // een lange druk ook nog eens als gewone tik telt.
   bool _longPressFired = false;
+  // Was gebaseerd op Android's eigen "herhaal"-toets-gebeurtenis
+  // (KeyRepeatEvent), maar de timing daarvan bleek onvoorspelbaar genoeg
+  // (verschilt per toestel/afstandsbediening) dat een bedoelde lange druk
+  // soms nog als gewone tik telde - de tegel opende dan gewoon i.p.v. het
+  // verwijder-/watchlist-menu te tonen. Een eigen Timer geeft een vaste,
+  // voorspelbare duur, los van toestel-specifieke herhaal-timing.
+  Timer? _longPressTimer;
+
+  @override
+  void dispose() {
+    _longPressTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -181,19 +195,24 @@ class _TvFocusableState extends State<TvFocusable> {
         }
         // Met long-press: pas op KeyUp een gewone tik doen (niet meteen op
         // KeyDown), zodat we eerst kunnen zien of de toets lang genoeg
-        // ingedrukt blijft om als long-press te tellen.
+        // ingedrukt blijft om als long-press te tellen. Een vaste Timer
+        // i.p.v. Android's herhaal-toets-gebeurtenis (zie toelichting bij
+        // _longPressTimer hierboven).
         if (event is KeyDownEvent) {
-          _longPressFired = false;
-          return KeyEventResult.handled;
-        }
-        if (event is KeyRepeatEvent) {
-          if (!_longPressFired) {
-            _longPressFired = true;
-            widget.onLongPress!();
+          // Herhaalde KeyDown-events tijdens het ingedrukt houden mogen de
+          // timer niet telkens herstarten - enkel bij de allereerste indruk.
+          if (_longPressTimer == null) {
+            _longPressFired = false;
+            _longPressTimer = Timer(const Duration(milliseconds: 500), () {
+              _longPressFired = true;
+              widget.onLongPress!();
+            });
           }
           return KeyEventResult.handled;
         }
         if (event is KeyUpEvent) {
+          _longPressTimer?.cancel();
+          _longPressTimer = null;
           if (!_longPressFired) widget.onTap?.call();
           _longPressFired = false;
           return KeyEventResult.handled;
