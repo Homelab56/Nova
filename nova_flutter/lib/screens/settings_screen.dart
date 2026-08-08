@@ -32,6 +32,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _backendCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     _backendCtrl.text = await SettingsService.getBackendUrl();
     if (_backendCtrl.text.isNotEmpty) {

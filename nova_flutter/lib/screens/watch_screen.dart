@@ -155,7 +155,12 @@ class _WatchScreenState extends State<WatchScreen> {
     // Luister naar player updates voor progress
     int lastSave = -1;
     _player.stream.position.listen((pos) {
-      if (mounted) setState(() => _position = pos);
+      // De stream tikt vaker dan één keer per seconde, maar de UI toont
+      // enkel hele seconden (tijdsweergave + schuifbalk op een film van
+      // uren) - een rebuild van dit hele (zeer grote) scherm bij elke tik
+      // i.p.v. enkel wanneer de getoonde seconde echt verandert, was nodeloos
+      // veel vaker dan zichtbaar nodig, zeker op zwakkere TV-hardware.
+      if (mounted && pos.inSeconds != _position.inSeconds) setState(() => _position = pos);
       final dur = _player.state.duration;
       final sec = pos.inSeconds;
       if (dur.inSeconds > 0 && sec > 0 && sec % 10 == 0 && sec != lastSave) {
@@ -540,47 +545,6 @@ class _WatchScreenState extends State<WatchScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Geen Nederlandse ondertitels gevonden.'), backgroundColor: Colors.redAccent));
     }
-  }
-
-  Future<bool> _tryStartProcess(String exe, List<String> args) async {
-    try {
-      final p = await Process.start(exe, args, runInShell: true);
-      unawaited(p.exitCode);
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  Future<bool> _tryStartExePath(String exePath, List<String> args) async {
-    try {
-      final f = File(exePath);
-      if (!await f.exists()) return false;
-      final p = await Process.start(exePath, args, runInShell: true);
-      unawaited(p.exitCode);
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  Future<void> _openExternalPlayer(String url) async {
-    final okMpv = await _tryStartProcess('mpv', [url]);
-    if (okMpv) return;
-    final okMpvPath = await _tryStartExePath(r'C:\Program Files\mpv\mpv.exe', [url]) ||
-        await _tryStartExePath(r'C:\Program Files (x86)\mpv\mpv.exe', [url]);
-    if (okMpvPath) return;
-
-    final okVlc = await _tryStartProcess('vlc', [url]);
-    if (okVlc) return;
-    final okVlcPath = await _tryStartExePath(r'C:\Program Files\VideoLAN\VLC\vlc.exe', [url]) ||
-        await _tryStartExePath(r'C:\Program Files (x86)\VideoLAN\VLC\vlc.exe', [url]);
-    if (okVlcPath) return;
-
-    final okExplorer = await _tryStartProcess('explorer.exe', [url]);
-    if (okExplorer) return;
-
-    await _tryStartProcess('cmd', ['/c', 'start', '', '"$url"']);
   }
 
   // Sommige meegegeven media-data (bv. een oude rangschikking die ooit met
@@ -1499,11 +1463,10 @@ class _WatchScreenState extends State<WatchScreen> {
     );
   }
 
-  Widget _trackButton(IconData icon, VoidCallback onTap, String tooltip, {bool autofocus = false, FocusNode? focusNode}) {
-    final node = focusNode ?? FocusNode();
+  Widget _trackButton(IconData icon, VoidCallback onTap, String tooltip, {bool autofocus = false, required FocusNode focusNode}) {
     final button = InkWell(
       autofocus: autofocus,
-      focusNode: node,
+      focusNode: focusNode,
       focusColor: Colors.white24,
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
@@ -1518,7 +1481,7 @@ class _WatchScreenState extends State<WatchScreen> {
     );
     return Tooltip(
       message: tooltip,
-      child: _focusRing(focusNode: node, child: button),
+      child: _focusRing(focusNode: focusNode, child: button),
     );
   }
 

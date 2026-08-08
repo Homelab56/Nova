@@ -205,7 +205,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _topMovies = results[5];
       _topTv = results[6];
       _rdLibrary = results[7];
-      _progress = (results[8] as List).reversed.toList();
+      _progress = results[8].reversed.toList();
       _kidsMovies = results[9];
       _kidsTv = results[10];
       _kidsMoviesTop = kidsExtra[0];

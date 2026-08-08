@@ -20,6 +20,17 @@ _search_cache = {}
 _cache_ttl = 30  # 30 seconden cache
 
 
+def _prune_search_cache():
+    # Verlopen items werden voorheen enkel overgeslagen bij het lezen, nooit
+    # actief verwijderd - een cache_key die niet opnieuw wordt opgezocht
+    # (elke unieke titel/tmdb_id/resolutie-combinatie) bleef dan voor altijd
+    # in het geheugen staan zolang het proces draait.
+    now = time.time()
+    for k, (_, ts) in list(_search_cache.items()):
+        if now - ts > _cache_ttl:
+            _search_cache.pop(k, None)
+
+
 def rd_headers():
     return {"Authorization": f"Bearer {get_rd_token()}"}
 
@@ -618,9 +629,6 @@ async def _candidate_queries(q: str, tmdb_id: int | None, media_type: str | None
         out.append(c)
     return out
 
-async def _old_candidate_queries_deleted():
-    pass
-
 class MagnetRequest(BaseModel):
     magnet: str
 
@@ -739,7 +747,8 @@ async def search_and_stream(
     # Cache key
     cache_key = f"{q}:{tmdb_id}:{media_type}:{max_resolution or ''}"
     current_time = time.time()
-    
+    _prune_search_cache()
+
     # Check cache
     if cache_key in _search_cache:
         cached_result, cached_time = _search_cache[cache_key]

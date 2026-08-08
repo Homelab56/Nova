@@ -1,14 +1,5 @@
 import os
 import json
-from fastapi import APIRouter
-from pydantic import BaseModel
-
-router = APIRouter()
-DATA_FILE = "/app/data/userdata.json"
-
-
-import os
-import json
 import asyncio
 from fastapi import APIRouter
 from pydantic import BaseModel

@@ -172,6 +172,16 @@ class _TvFocusableState extends State<TvFocusable> {
           Scrollable.ensureVisible(context,
             duration: const Duration(milliseconds: 200), alignment: 0.5, curve: Curves.easeOut);
         }
+        // Zonder dit kon een lopende long-press-timer nog afgaan nadat de
+        // focus (bv. door snel verder te navigeren) al naar een andere
+        // tegel was verhuisd, zonder dat er ooit een KeyUp voor déze tegel
+        // binnenkwam - het verwijder-/watchlist-menu voor de verkeerde
+        // (niet meer gefocuste) tegel zou dan alsnog kunnen opengaan.
+        if (!has) {
+          _longPressTimer?.cancel();
+          _longPressTimer = null;
+          _longPressFired = false;
+        }
       },
       onKeyEvent: (node, event) {
         if (event is KeyDownEvent &&
@@ -217,7 +227,11 @@ class _TvFocusableState extends State<TvFocusable> {
           _longPressFired = false;
           return KeyEventResult.handled;
         }
-        return KeyEventResult.ignored;
+        // Android blijft KeyRepeatEvents sturen zolang de toets ingedrukt
+        // blijft (los van onze eigen Timer hierboven) - gewoon opslokken
+        // i.p.v. laten doorborrelen naar een voorouder-widget, anders kon
+        // die tijdens een lange druk ongewenst herhaaldelijk reageren.
+        return KeyEventResult.handled;
       },
       child: GestureDetector(
         onTap: widget.onTap,

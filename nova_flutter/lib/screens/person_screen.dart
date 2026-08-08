@@ -25,6 +25,11 @@ class _PersonScreenState extends State<PersonScreen> {
   bool _loading = true;
   bool _bioExpanded = false;
   _SortMode _sortMode = _SortMode.name;
+  // Gecachet i.p.v. in build() herberekend - anders werd de volledige
+  // groepering + sortering van _credits opnieuw gedaan bij elke rebuild
+  // (bv. simpelweg de biografie in-/uitklappen), terwijl die enkel echt
+  // hoeft te veranderen als _credits of _sortMode wijzigt.
+  Map<String, List> _groups = {};
 
   @override
   void initState() {
@@ -43,6 +48,7 @@ class _PersonScreenState extends State<PersonScreen> {
         _person = results[0] as Map;
         _credits = results[1] as List;
         _loading = false;
+        _groups = _groupedCredits();
       });
     } catch (e) {
       if (!mounted) return;
@@ -99,7 +105,10 @@ class _PersonScreenState extends State<PersonScreen> {
     return TvFocusable(
       muted: true,
       borderRadius: BorderRadius.circular(20),
-      onTap: () => setState(() => _sortMode = mode),
+      onTap: () => setState(() {
+        _sortMode = mode;
+        _groups = _groupedCredits();
+      }),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
@@ -152,7 +161,7 @@ class _PersonScreenState extends State<PersonScreen> {
   }
 
   List<Widget> _buildGroupedSlivers(int crossAxisCount) {
-    final groups = _groupedCredits();
+    final groups = _groups;
     final keys = _sortedKeys(groups);
     final slivers = <Widget>[];
     for (final key in keys) {

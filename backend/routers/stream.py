@@ -1155,8 +1155,15 @@ async def play(
     except Exception:
         client_host = ""
     if client_host and (start and start > 0):
+        now = time.time()
+        # Verlopen items nooit actief opgeruimd - groeide anders onbeperkt mee
+        # met elke unieke client/pad-combinatie die ooit met een starttijd
+        # werd afgespeeld, ook lang nadat de 45s-relevantievenster verstreken is.
+        for k, (ts, _) in list(_LAST_START.items()):
+            if now - ts > 45:
+                _LAST_START.pop(k, None)
         key = f"{client_host}|{'path' if is_path else 'url'}|{path or url or ''}"
-        _LAST_START[key] = (time.time(), float(start))
+        _LAST_START[key] = (now, float(start))
 
     return StreamingResponse(
         _stream_with_semaphore(),
@@ -1166,100 +1173,6 @@ async def play(
             "Cache-Control": "no-cache",
         },
     )
-
-
-async def _proxy_external_url(url: str, request: Request, start: float = 0.0):
-    """Proxy externe HTTP URL met range request support voor seeken"""
-    # Haal start parameter uit URL query string (voeg toe door frontend)
-    parsed = urllib.parse.urlparse(url)
-    query_params = urllib.parse.parse_qs(parsed.query)
-    url_start = query_params.get("start", [None])[0]
-    
-    # Verwijder start parameter uit URL
-    query_params.pop("start", None)
-    new_query = urllib.parse.urlencode(query_params, doseq=True)
-    clean_url = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
-    
-    range_header = request.headers.get("range") or request.headers.get("Range") or ""
-    
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    }
-    if range_header:
-        headers["Range"] = range_header
-    
-    # Gebruik een nog grotere timeout voor streaming
-    timeout = httpx.Timeout(600.0, connect=120.0)
-    
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=False) as client:
-                async with client.stream("GET", clean_url, headers=headers) as response:
-                    if response.status_code not in [200, 206]:
-                        print(f"Externe URL fout: {response.status_code} (poging {attempt + 1}/{max_retries})")
-                        if attempt < max_retries - 1:
-                            await asyncio.sleep(2 ** attempt)  # Exponential backoff
-                            continue
-                        raise HTTPException(status_code=response.status_code, detail=f"Externe URL fout: {response.status_code}")
-                    
-                    content_type = response.headers.get("content-type", "video/mp4")
-                    content_length = response.headers.get("content-length")
-                    accept_ranges = response.headers.get("accept-ranges", "")
-                    
-                    response_headers = {
-                        "Content-Type": content_type,
-                        "Cache-Control": "no-cache",
-                        "Access-Control-Allow-Origin": "*",
-                        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-                        "Access-Control-Allow-Headers": "Range, Content-Type",
-                        "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
-                    }
-                    
-                    if content_length:
-                        response_headers["Content-Length"] = content_length
-                    
-                    # Altijd Accept-Ranges: bytes doorgeven als de server dat ondersteunt
-                    if accept_ranges == "bytes":
-                        response_headers["Accept-Ranges"] = "bytes"
-                    
-                    if response.status_code == 206:
-                        content_range = response.headers.get("content-range")
-                        if content_range:
-                            response_headers["Content-Range"] = content_range
-                    
-                    async def iter_chunks():
-                        try:
-                            async for chunk in response.aiter_bytes(chunk_size=256 * 1024):
-                                yield chunk
-                        except Exception as e:
-                            print(f"Stream error: {e}")
-                            raise
-                    
-                    return StreamingResponse(
-                        iter_chunks(),
-                        status_code=response.status_code,
-                        media_type=content_type,
-                        headers=response_headers
-                    )
-        except httpx.ConnectError as e:
-            print(f"Connect error naar {clean_url}: {e} (poging {attempt + 1}/{max_retries})")
-            if attempt < max_retries - 1:
-                await asyncio.sleep(2 ** attempt)
-                continue
-            raise HTTPException(status_code=502, detail="Kan geen verbinding maken met stream server")
-        except httpx.TimeoutException as e:
-            print(f"Timeout naar {clean_url}: {e} (poging {attempt + 1}/{max_retries})")
-            if attempt < max_retries - 1:
-                await asyncio.sleep(2 ** attempt)
-                continue
-            raise HTTPException(status_code=504, detail="Stream server timeout")
-        except Exception as e:
-            print(f"Proxy fout: {e} (poging {attempt + 1}/{max_retries})")
-            if attempt < max_retries - 1:
-                await asyncio.sleep(2 ** attempt)
-                continue
-            raise HTTPException(status_code=500, detail=f"Proxy fout: {str(e)}")
 
 
 @router.get("/file")

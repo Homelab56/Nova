@@ -7,13 +7,12 @@ import 'home_screen.dart';
 // Vaste seed zodat het sterrenveld niet bij elke rebuild/hot-reload
 // verspringt - het moet een rustige, stabiele achtergrond zijn.
 class _StarfieldPainter extends CustomPainter {
-  final int starCount;
-  const _StarfieldPainter({this.starCount = 140});
+  const _StarfieldPainter();
 
   @override
   void paint(Canvas canvas, Size size) {
     final rnd = Random(42);
-    for (var i = 0; i < starCount; i++) {
+    for (var i = 0; i < 140; i++) {
       final dx = rnd.nextDouble() * size.width;
       final dy = rnd.nextDouble() * size.height;
       final radius = rnd.nextDouble() * 1.4 + 0.3;
@@ -113,51 +112,55 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<bool?> _askPin(String correctPin) async {
     final ctrl = TextEditingController();
     String? error;
-    return showDialog<bool>(
-      context: context,
-      builder: (context) => StatefulBuilder(builder: (context, setDialogState) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF0f1520),
-          title: const Text('Pincode', style: TextStyle(color: Colors.white)),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
-            TextField(
-              controller: ctrl,
-              autofocus: true,
-              obscureText: true,
-              maxLength: 4,
-              keyboardType: TextInputType.number,
-              style: const TextStyle(color: Colors.white, fontSize: 24, letterSpacing: 8),
-              textAlign: TextAlign.center,
-              decoration: InputDecoration(
-                counterText: '',
-                errorText: error,
-                enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+    try {
+      return await showDialog<bool>(
+        context: context,
+        builder: (context) => StatefulBuilder(builder: (context, setDialogState) {
+          return AlertDialog(
+            backgroundColor: const Color(0xFF0f1520),
+            title: const Text('Pincode', style: TextStyle(color: Colors.white)),
+            content: Column(mainAxisSize: MainAxisSize.min, children: [
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                obscureText: true,
+                maxLength: 4,
+                keyboardType: TextInputType.number,
+                style: const TextStyle(color: Colors.white, fontSize: 24, letterSpacing: 8),
+                textAlign: TextAlign.center,
+                decoration: InputDecoration(
+                  counterText: '',
+                  errorText: error,
+                  enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                ),
+                onSubmitted: (v) {
+                  if (v == correctPin) {
+                    Navigator.pop(context, true);
+                  } else {
+                    setDialogState(() => error = 'Onjuiste pincode');
+                  }
+                },
               ),
-              onSubmitted: (v) {
-                if (v == correctPin) {
-                  Navigator.pop(context, true);
-                } else {
-                  setDialogState(() => error = 'Onjuiste pincode');
-                }
-              },
-            ),
-          ]),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuleren')),
-            TextButton(
-              onPressed: () {
-                if (ctrl.text == correctPin) {
-                  Navigator.pop(context, true);
-                } else {
-                  setDialogState(() => error = 'Onjuiste pincode');
-                }
-              },
-              child: const Text('Bevestigen', style: TextStyle(color: Color(0xFF00b4d8))),
-            ),
-          ],
-        );
-      }),
-    );
+            ]),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuleren')),
+              TextButton(
+                onPressed: () {
+                  if (ctrl.text == correctPin) {
+                    Navigator.pop(context, true);
+                  } else {
+                    setDialogState(() => error = 'Onjuiste pincode');
+                  }
+                },
+                child: const Text('Bevestigen', style: TextStyle(color: Color(0xFF00b4d8))),
+              ),
+            ],
+          );
+        }),
+      );
+    } finally {
+      ctrl.dispose();
+    }
   }
 
   Future<void> _createOrEditProfile({Profile? existing}) async {
@@ -178,7 +181,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     String? selectedIcon = existing?.icon;
     String? pinError;
 
-    final result = await showDialog<bool>(
+    try {
+      final result = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(builder: (context, setDialogState) {
         return AlertDialog(
@@ -327,17 +331,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }),
     );
 
-    if (result != true) return;
-    final name = nameCtrl.text.trim();
-    if (name.isEmpty) return;
-    final pin = pinCtrl.text.trim();
-    if (existing == null) {
-      await ProfileService.createProfile(name, pin: pin, colorIndex: colorIndex, icon: selectedIcon);
-    } else {
-      await ProfileService.updateProfile(existing.copyWith(
-        name: name, pin: pin, colorIndex: colorIndex, icon: selectedIcon, clearIcon: selectedIcon == null));
+      if (result != true) return;
+      final name = nameCtrl.text.trim();
+      if (name.isEmpty) return;
+      final pin = pinCtrl.text.trim();
+      if (existing == null) {
+        await ProfileService.createProfile(name, pin: pin, colorIndex: colorIndex, icon: selectedIcon);
+      } else {
+        await ProfileService.updateProfile(existing.copyWith(
+          name: name, pin: pin, colorIndex: colorIndex, icon: selectedIcon, clearIcon: selectedIcon == null));
+      }
+      _load();
+    } finally {
+      nameCtrl.dispose();
+      pinCtrl.dispose();
     }
-    _load();
   }
 
   @override

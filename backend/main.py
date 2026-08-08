@@ -1,9 +1,15 @@
+import os
 import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from routers import search, debrid, stream, settings, userdata, library, seerr, profiles
 
 app = FastAPI(title="Nova API", version="1.1.0")
+
+# Loggen van elke individuele request voegde vooral I/O-overhead en ruis toe
+# aan de logs voor een app die dag in dag uit draait - enkel nog aan te
+# zetten via NOVA_DEBUG=1 als het nodig is om iets te onderzoeken.
+_DEBUG = os.environ.get("NOVA_DEBUG") == "1"
 
 @app.get("/version")
 async def get_version():
@@ -14,7 +20,8 @@ async def add_process_time_header(request: Request, call_next):
     start_time = time.time()
     response = await call_next(request)
     process_time = time.time() - start_time
-    print(f"Request: {request.method} {request.url.path} - Duration: {process_time:.4f}s")
+    if _DEBUG:
+        print(f"Request: {request.method} {request.url.path} - Duration: {process_time:.4f}s")
     response.headers["X-Process-Time"] = str(process_time)
     return response
 
