@@ -28,11 +28,11 @@ class TvHighlightBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedScale(
-      // Was 1.1, toen 1.16 - in rijen (i.t.t. de rasters, waar tegels dichter
-      // opeen staan) bleek dat verschil met genoeg tussenruimte om clipping
-      // te voorkomen te subtiel om als "naar voren poppen" te lezen. Groter
-      // hier, met marges/kopruimte elders aangepast aan dit percentage.
-      scale: focused && !muted ? 1.25 : 1.0,
+      // Was 1.1, 1.16, 1.25 - telkens bleek de marge/kopruimte elders net
+      // niet genoeg voor de nieuwe waarde, wat halve/afgesneden randen gaf.
+      // Nu met ruim overgedimensioneerde marges (i.p.v. precies-berekende)
+      // in home_screen.dart/media_row.dart, dus geen scherpe grens meer.
+      scale: focused && !muted ? 1.3 : 1.0,
       duration: const Duration(milliseconds: 120),
       curve: Curves.easeOut,
       child: AnimatedContainer(

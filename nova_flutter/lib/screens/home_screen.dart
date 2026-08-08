@@ -681,13 +681,10 @@ class _HomeScreenState extends State<HomeScreen> {
     return MediaRow(
       title: title,
       titleColor: isRd ? const Color(0xFF00b4d8) : Colors.white,
-      // Groter dan voorheen - de posterkaarten zelf werden ook groter, zodat
-      // de focus-vergroting evenveel absolute pixels wint als in het "Meer
-      // bekijken"-raster. Groter dan de vorige poging omdat de tussenruimte
-      // tussen poster en titel ondertussen ook groeide (zie de kaart-
-      // builders hieronder - de poster groeit bij focus ook náár beneden,
-      // en had daar niet genoeg ruimte voor).
-      height: isProgress ? 225 : (isRanked ? 385 : 385),
+      // Ruim overgedimensioneerd (i.p.v. precies-berekend, wat telkens net
+      // te krap bleek) - zie de kaart-builders hieronder voor de nieuwe,
+      // grotere postermaten.
+      height: isProgress ? 280 : (isRanked ? 480 : 480),
       itemCount: isRanked ? (items.length < 10 ? items.length : 10) : items.length,
       path: path,
       onSeeAll: path != null
@@ -707,9 +704,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildRankedCard(Map item, int rank, {bool isFirstRow = false}) {
     final poster = item['poster_path'] as String?;
     final title = item['title'] ?? item['name'] ?? '';
-    // Was 165x250 - groter (zie toelichting bij de marge hieronder).
-    const posterWidth = 185.0;
-    const posterHeight = 280.0;
+    // Was 165x250, toen 185x280 - ruim overgedimensioneerd deze keer.
+    const posterWidth = 200.0;
+    const posterHeight = 300.0;
     // Zichtbaar deel van het cijfer vóór de poster begint overlappen, en de
     // volledige breedte die aan FittedBox gegeven wordt (iets ruimer, zodat
     // een klein stukje bewust achter de poster verdwijnt voor het bleed-
@@ -722,13 +719,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final double cardWidth = numVisible + posterWidth;
     return Container(
       width: cardWidth,
-      // Poster groter dan voorheen (net als het "Meer bekijken"-raster) zodat
-      // de focus-vergroting evenveel absolute pixels wint als daar. Marge
-      // blijft ruim boven de ~23px die per kant nodig is om niet tegen de
-      // buur aan te lopen (die er anders gedeeltelijk overheen tekent, want
-      // later in de rij = later getekend = bovenop) - en om te voorkomen dat
-      // het cijfer van de vólgende kaart over déze rand heen tekent.
-      margin: const EdgeInsets.symmetric(horizontal: 30),
+      // Ruim overgedimensioneerd deze keer i.p.v. precies-berekend - moet
+      // voorkomen dat de buur (later in de rij = later getekend = bovenop)
+      // of het cijfer van de vólgende kaart over déze rand heen tekent.
+      margin: const EdgeInsets.symmetric(horizontal: 45),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         SizedBox(
           height: posterHeight,
@@ -777,11 +771,11 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ]),
         ),
-        // Was 8 - de poster groeit bij focus ook náár beneden (schaal
-        // vertrekt vanuit het midden), en de rand tekende daardoor dwars
-        // door/vlak tegen de titel eronder i.p.v. netjes rond enkel de
-        // poster te sluiten. Genoeg ruimte hier voorkomt dat.
-        const SizedBox(height: 45),
+        // Was 8, toen 45 - ruim overgedimensioneerd deze keer. De poster
+        // groeit bij focus ook náár beneden (schaal vertrekt vanuit het
+        // midden), en de rand tekende daardoor dwars door/vlak tegen de
+        // titel eronder i.p.v. netjes rond enkel de poster te sluiten.
+        const SizedBox(height: 90),
         Padding(
           padding: EdgeInsets.only(left: numVisible),
           child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
@@ -858,11 +852,9 @@ class _HomeScreenState extends State<HomeScreen> {
       final double progress = (item['current_time'] ?? 0) / (item['duration'] ?? 1);
 
       return Container(
-        // Backdrop groter dan voorheen (net als het "Meer bekijken"-raster)
-        // zodat de focus-vergroting evenveel absolute pixels wint als daar.
-        // Marge blijft ruim boven de ~32px die per kant nodig is om niet
-        // tegen de volgende kaart aan te lopen.
-        width: 255, margin: const EdgeInsets.symmetric(horizontal: 40),
+        // Ruim overgedimensioneerd deze keer (was 230/255 breed, marge
+        // 32/40) i.p.v. precies-berekend.
+        width: 280, margin: const EdgeInsets.symmetric(horizontal: 55),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           TvFocusable(
             escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
@@ -873,7 +865,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: Stack(children: [
-                NovaImage(path: backdrop, width: 255, height: 144, baseUrl: 'https://image.tmdb.org/t/p/w300'),
+                NovaImage(path: backdrop, width: 280, height: 158, baseUrl: 'https://image.tmdb.org/t/p/w300'),
                 Positioned(bottom: 0, left: 0, right: 0,
                   child: Container(
                     height: 3, color: Colors.white24,
@@ -889,8 +881,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ]),
             ),
           ),
-          // Was 8 - zie toelichting bij de ranked-kaart hierboven.
-          const SizedBox(height: 36),
+          // Was 8, toen 36 - ruim overgedimensioneerd deze keer.
+          const SizedBox(height: 70),
           Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
         ]),
@@ -898,12 +890,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return Container(
-      // Was 168 breed/margin 26 - groter (net als het "Meer bekijken"-
-      // raster) zodat de focus-vergroting (schaal 1.25) evenveel absolute
-      // pixels wint als daar, i.p.v. een subtielere groei op een kleinere
-      // kaart. Marge blijft ruim boven de ~24px die per kant nodig is om
-      // niet tegen de volgende kaart aan te lopen.
-      width: 190, margin: const EdgeInsets.symmetric(horizontal: 30),
+      // Was 168/190 breed - ruim overgedimensioneerd deze keer, net als de
+      // marge (was 26/30) en de tussenruimte tot de titel (zie onder).
+      width: 205, margin: const EdgeInsets.symmetric(horizontal: 45),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         TvFocusable(
           escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
@@ -919,16 +908,18 @@ class _HomeScreenState extends State<HomeScreen> {
               borderRadius: BorderRadius.circular(12),
               child: Stack(children: [
                 isRd
-                  ? Container(width: 190, height: 265, color: const Color(0xFF0f1520),
+                  ? Container(width: 205, height: 285, color: const Color(0xFF0f1520),
                       child: const Icon(Icons.folder_open, color: Color(0xFF00b4d8), size: 36))
-                  : NovaImage(path: poster, width: 190, height: 265),
+                  : NovaImage(path: poster, width: 205, height: 285),
                 if (!isRd) _cornerIcon(Icons.add, () => _addToWatchlistWithFeedback(item)),
               ]),
             ),
           ),
         ),
-        // Was 8 - zie toelichting bij de ranked-kaart hierboven.
-        const SizedBox(height: 45),
+        // Was 8, toen 45 - ruim overgedimensioneerd deze keer i.p.v.
+        // precies-berekend (de poster groeit bij focus ook náár beneden,
+        // vertrekkend vanuit het midden van de schaal).
+        const SizedBox(height: 85),
         Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
         if (!isRd && yearStr.isNotEmpty)
