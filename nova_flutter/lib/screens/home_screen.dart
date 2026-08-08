@@ -681,7 +681,12 @@ class _HomeScreenState extends State<HomeScreen> {
     return MediaRow(
       title: title,
       titleColor: isRd ? const Color(0xFF00b4d8) : Colors.white,
-      height: isProgress ? 185 : (isRanked ? 320 : 300),
+      // Groter dan voorheen (was 185/320/300) - de posterkaarten zelf werden
+      // ook groter, zodat de focus-vergroting evenveel absolute pixels
+      // wint als in het "Meer bekijken"-raster (waar dat overduidelijk las
+      // als "naar voren poppen") i.p.v. de kleinere/subtielere groei die
+      // dezelfde 25% op een kleinere kaart hier opleverde.
+      height: isProgress ? 200 : (isRanked ? 330 : 325),
       itemCount: isRanked ? (items.length < 10 ? items.length : 10) : items.length,
       path: path,
       onSeeAll: path != null
@@ -701,8 +706,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildRankedCard(Map item, int rank, {bool isFirstRow = false}) {
     final poster = item['poster_path'] as String?;
     final title = item['title'] ?? item['name'] ?? '';
-    const posterWidth = 165.0;
-    const posterHeight = 250.0;
+    // Was 165x250 - groter (zie toelichting bij de marge hieronder).
+    const posterWidth = 185.0;
+    const posterHeight = 280.0;
     // Zichtbaar deel van het cijfer vóór de poster begint overlappen, en de
     // volledige breedte die aan FittedBox gegeven wordt (iets ruimer, zodat
     // een klein stukje bewust achter de poster verdwijnt voor het bleed-
@@ -715,13 +721,13 @@ class _HomeScreenState extends State<HomeScreen> {
     final double cardWidth = numVisible + posterWidth;
     return Container(
       width: cardWidth,
-      // Was horizontal: 3, toen 10, toen 16 - schaal ging ondertussen naar
-      // 1.25, heeft nu ~21px per kant nodig om niet tegen de buur aan te
-      // lopen. Te weinig ruimte liet zowel het cijfer van de vólgende kaart
-      // over déze rand heen tekenen als de vólgende poster zelf de
-      // rechterkant van dít kaartje verbergen (latere items in de rij
-      // tekenen later, dus bovenop).
-      margin: const EdgeInsets.symmetric(horizontal: 26),
+      // Poster groter dan voorheen (net als het "Meer bekijken"-raster) zodat
+      // de focus-vergroting evenveel absolute pixels wint als daar. Marge
+      // blijft ruim boven de ~23px die per kant nodig is om niet tegen de
+      // buur aan te lopen (die er anders gedeeltelijk overheen tekent, want
+      // later in de rij = later getekend = bovenop) - en om te voorkomen dat
+      // het cijfer van de vólgende kaart over déze rand heen tekent.
+      margin: const EdgeInsets.symmetric(horizontal: 30),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         SizedBox(
           height: posterHeight,
@@ -847,11 +853,11 @@ class _HomeScreenState extends State<HomeScreen> {
       final double progress = (item['current_time'] ?? 0) / (item['duration'] ?? 1);
 
       return Container(
-        // Was horizontal: 5, toen 16 - schaal ging ondertussen naar 1.25,
-        // heeft nu ~29px per kant nodig om niet tegen de volgende kaart aan
-        // te lopen (die er dan gedeeltelijk overheen tekent, want later in
-        // de rij = later getekend = bovenop).
-        width: 230, margin: const EdgeInsets.symmetric(horizontal: 32),
+        // Backdrop groter dan voorheen (net als het "Meer bekijken"-raster)
+        // zodat de focus-vergroting evenveel absolute pixels wint als daar.
+        // Marge blijft ruim boven de ~32px die per kant nodig is om niet
+        // tegen de volgende kaart aan te lopen.
+        width: 255, margin: const EdgeInsets.symmetric(horizontal: 40),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           TvFocusable(
             escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
@@ -862,7 +868,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: Stack(children: [
-                NovaImage(path: backdrop, width: 230, height: 130, baseUrl: 'https://image.tmdb.org/t/p/w300'),
+                NovaImage(path: backdrop, width: 255, height: 144, baseUrl: 'https://image.tmdb.org/t/p/w300'),
                 Positioned(bottom: 0, left: 0, right: 0,
                   child: Container(
                     height: 3, color: Colors.white24,
@@ -886,11 +892,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return Container(
-      // Was horizontal: 6, toen 16 - schaal ging ondertussen naar 1.25,
-      // heeft nu ~21px per kant nodig om niet tegen de volgende kaart aan
-      // te lopen (die er dan gedeeltelijk overheen tekent, want later in de
-      // rij = later getekend = bovenop).
-      width: 168, margin: const EdgeInsets.symmetric(horizontal: 26),
+      // Was 168 breed/margin 26 - groter (net als het "Meer bekijken"-
+      // raster) zodat de focus-vergroting (schaal 1.25) evenveel absolute
+      // pixels wint als daar, i.p.v. een subtielere groei op een kleinere
+      // kaart. Marge blijft ruim boven de ~24px die per kant nodig is om
+      // niet tegen de volgende kaart aan te lopen.
+      width: 190, margin: const EdgeInsets.symmetric(horizontal: 30),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         TvFocusable(
           escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
@@ -906,9 +913,9 @@ class _HomeScreenState extends State<HomeScreen> {
               borderRadius: BorderRadius.circular(12),
               child: Stack(children: [
                 isRd
-                  ? Container(width: 168, height: 235, color: const Color(0xFF0f1520),
+                  ? Container(width: 190, height: 265, color: const Color(0xFF0f1520),
                       child: const Icon(Icons.folder_open, color: Color(0xFF00b4d8), size: 36))
-                  : NovaImage(path: poster, width: 168, height: 235),
+                  : NovaImage(path: poster, width: 190, height: 265),
                 if (!isRd) _cornerIcon(Icons.add, () => _addToWatchlistWithFeedback(item)),
               ]),
             ),
