@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'tv_focusable.dart';
 
 // Horizontale rij met titel, optionele "Meer bekijken"-link en (bij hover,
 // desktop-only) pijltjes om verder te scrollen - de standaard muiswiel-scroll
@@ -97,7 +98,9 @@ class _MediaRowState extends State<MediaRow> {
             color: widget.titleColor)),
           if (widget.onSeeAll != null) ...[
             const SizedBox(width: 14),
-            InkWell(
+            TvFocusable(
+              muted: true,
+              borderRadius: BorderRadius.circular(6),
               onTap: widget.onSeeAll,
               child: const Text('Meer bekijken >',
                 style: TextStyle(fontSize: 13, color: Color(0xFF00b4d8), fontWeight: FontWeight.w600)),

@@ -58,6 +58,20 @@ class _WatchScreenState extends State<WatchScreen> {
   bool _autoAppliedAudio = false;
   bool _autoAppliedSubs = false;
   bool _autoFetchedExternalSubs = false;
+  // Handmatige ondertitel-vertraging (in seconden, via de +1s/-1s-knoppen in
+  // de ondertitel-kiezer) - een automatisch gevonden/gesynchroniseerd spoor
+  // is niet altijd perfect, dus kan de kijker het zelf bijregelen. Wordt
+  // opgeslagen bij de gewone voortgang van déze aflevering/film (zie
+  // _progressItem) zodat het bij hervatten meteen weer klopt, ook als de
+  // film/aflevering niet in 1 keer uitgekeken wordt.
+  double _subtitleOffsetSeconds = 0.0;
+  // Een vaste vertraging lost enkel een vast verschil op - loopt de
+  // ondertiteling geleidelijk verder uit (perfect op moment X, ernaast een
+  // paar zinnen later), dan is dat een framerate-mismatch tussen de
+  // ondertitel en déze release (bv. 23,976 vs 25 fps), geen vast verschil.
+  // mpv's "sub-speed" schaalt de tijdstippen zelf (i.p.v. ze te verschuiven)
+  // en kan zo'n geleidelijke drift wél corrigeren. 1.0 = geen aanpassing.
+  double _subtitleSpeedFactor = 1.0;
   Map? _savedProgress;
   int? _rating;
   final _scrollCtrl = ScrollController();
@@ -438,7 +452,7 @@ class _WatchScreenState extends State<WatchScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF0f1520),
-      builder: (_) => SafeArea(
+      builder: (_) => StatefulBuilder(builder: (context, setSheetState) => SafeArea(
         child: ListView(
           shrinkWrap: true,
           children: [
@@ -456,22 +470,96 @@ class _WatchScreenState extends State<WatchScreen> {
                   Navigator.pop(context);
                 },
               ),
-            if (!hasEmbeddedNl) ...[
-              const Divider(color: Colors.white12, height: 1),
-              ListTile(
-                leading: const Icon(Icons.cloud_download_outlined, color: Color(0xFF00b4d8)),
-                title: const Text('Extern NL zoeken (auto-sync)', style: TextStyle(color: Color(0xFF00b4d8))),
-                subtitle: const Text('Zoekt op OpenSubtitles en lijnt automatisch uit op de audio. Kan tot ~1-2 min duren.',
-                  style: TextStyle(color: Colors.grey, fontSize: 11)),
-                onTap: () {
-                  Navigator.pop(context);
-                  _loadExternalSubtitle();
-                },
-              ),
-            ],
+            // Ook tonen als er al een ingebouwd NL-spoor is - dat spoor is niet
+            // gegarandeerd getimed op déze release en kan dus best wel eens
+            // uit sync lopen (vandaar de klacht "loopt niet altijd correct").
+            // Dit blijft de enige plek om, terwijl de film/aflevering al
+            // gewoon speelt, alsnog een specifiek op déze audio gesynchro-
+            // niseerde ondertitel te laten ophalen en meteen toe te passen.
+            const Divider(color: Colors.white12, height: 1),
+            ListTile(
+              leading: const Icon(Icons.cloud_download_outlined, color: Color(0xFF00b4d8)),
+              title: Text(
+                hasEmbeddedNl ? 'NL ondertitels opnieuw synchroniseren' : 'Extern NL zoeken (auto-sync)',
+                style: const TextStyle(color: Color(0xFF00b4d8))),
+              subtitle: const Text('Zoekt op OpenSubtitles en lijnt automatisch uit op de audio. Kan tot ~1-2 min duren.',
+                style: TextStyle(color: Colors.grey, fontSize: 11)),
+              onTap: () {
+                Navigator.pop(context);
+                _loadExternalSubtitle();
+              },
+            ),
+            // Automatische sync is niet altijd raak - hiermee stel je de
+            // ondertiteling zelf een beetje bij terwijl het gewoon blijft
+            // spelen. Wordt meteen ook onthouden voor deze aflevering/film.
+            // Zowel grove (1s) als fijne (0,1s) stappen - een fractie van een
+            // seconde kan al het verschil maken tussen "net goed" en "net
+            // ernaast" bij het exact uitlijnen op de audio.
+            const Divider(color: Colors.white12, height: 1),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  const Text('Ondertiteling timing', style: TextStyle(color: Colors.white, fontSize: 13)),
+                  const Spacer(),
+                  Text(
+                    '${_subtitleOffsetSeconds >= 0 ? '+' : ''}${_subtitleOffsetSeconds.toStringAsFixed(1)}s',
+                    style: const TextStyle(color: Color(0xFF00b4d8), fontSize: 13, fontWeight: FontWeight.w700)),
+                ]),
+                const SizedBox(height: 10),
+                Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.center, children: [
+                  for (final delta in [-1.0, -0.5, -0.1, 0.1, 0.5, 1.0])
+                    _subtitleOffsetButton(delta, setSheetState),
+                ]),
+              ]),
+            ),
+            // Perfect op moment X, maar een paar zinnen verder toch weer
+            // ernaast - dat is geen vast verschil meer (dat lost hierboven
+            // op) maar een geleidelijke drift: de ondertitel is getimed op
+            // een andere framerate dan déze release. Schaalt de tijdstippen
+            // i.p.v. ze te verschuiven, en corrigeert zo wél de drift.
+            const Divider(color: Colors.white12, height: 1),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  const Text('Ondertiteling snelheid (bij geleidelijke drift)', style: TextStyle(color: Colors.white, fontSize: 13)),
+                ]),
+                const SizedBox(height: 2),
+                Row(children: [
+                  const Text('Als de ondertiteling ergens perfect staat maar er verderop weer naast ligt.',
+                    style: TextStyle(color: Colors.grey, fontSize: 11)),
+                ]),
+                const SizedBox(height: 10),
+                Row(children: [
+                  Text('${(_subtitleSpeedFactor * 100).toStringAsFixed(1)}%',
+                    style: const TextStyle(color: Color(0xFF00b4d8), fontSize: 13, fontWeight: FontWeight.w700)),
+                  const Spacer(),
+                ]),
+                const SizedBox(height: 10),
+                Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.center, children: [
+                  for (final delta in [-0.01, -0.001, 0.001, 0.01])
+                    _subtitleSpeedButton(delta, setSheetState),
+                  TvFocusable(
+                    muted: true,
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () => _adjustSubtitleSpeed(1.0 - _subtitleSpeedFactor, setSheetState),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0f1520),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.white12),
+                      ),
+                      child: const Text('Reset', style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                ]),
+              ]),
+            ),
           ],
         ),
-      ),
+      )),
     );
   }
 
@@ -530,21 +618,128 @@ class _WatchScreenState extends State<WatchScreen> {
     return null;
   }
 
+  // mpv's "sub-add" (wat setSubtitleTrack(SubtitleTrack.uri(...)) achter de
+  // schermen aanroept) vervangt nooit vanzelf een eerder toegevoegd extern
+  // spoor - elke hersync stapelde zo een extra "Nederlands (extern)"-
+  // vermelding op in de ondertitel-kiezer, zonder dat duidelijk was welke
+  // van de twee nu écht getoond werd. Ruim eerst alle eerder toegevoegde
+  // externe NL-sporen op (via hun echte mpv-spoor-id uit _tracks, niet de
+  // URL die enkel in het lokaal aangemaakte SubtitleTrack-object zit) vóór
+  // het nieuwe spoor toegevoegd wordt, zodat er nooit meer dan één is.
+  Future<void> _applyExternalSubtitle(String vttUrl) async {
+    final native = _player.platform;
+    if (native is NativePlayer) {
+      for (final t in _tracks.subtitle) {
+        if (t.title == 'Nederlands (extern)') {
+          try {
+            await native.command(['sub-remove', t.id]);
+          } catch (_) {}
+        }
+      }
+    }
+    await _player.setSubtitleTrack(SubtitleTrack.uri(vttUrl, title: 'Nederlands (extern)', language: 'nl'));
+  }
+
+  // Verhoogt bij elke nieuwe (her)synchronisatiepoging - dezelfde reden als
+  // _playGeneration bij afleveringen kiezen: zonder dit kon een oudere, nog
+  // lopende zoekopdracht (tot ~1-2 min) een net toegepast nieuwer resultaat
+  // alsnog overschrijven als ze toevallig later klaar was.
+  int _subtitleFetchGeneration = 0;
+
   Future<void> _loadExternalSubtitle() async {
     final url = _streamUrl;
     if (url == null) return;
+    final myGen = ++_subtitleFetchGeneration;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Nederlandse ondertitels zoeken en synchroniseren...'), duration: Duration(seconds: 6)));
     final vttUrl = await _fetchExternalSubtitleUri(url, episode: _currentEpisode);
-    if (!mounted) return;
+    if (!mounted || myGen != _subtitleFetchGeneration) return;
     if (vttUrl != null) {
-      await _player.setSubtitleTrack(SubtitleTrack.uri(vttUrl, title: 'Nederlands (extern)', language: 'nl'));
+      await _applyExternalSubtitle(vttUrl);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Nederlandse ondertitels geladen.'), backgroundColor: Color(0xFF00b4d8)));
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Geen Nederlandse ondertitels gevonden.'), backgroundColor: Colors.redAccent));
     }
+  }
+
+  // Automatische synchronisatie is niet altijd raak - laat de kijker de
+  // ondertiteling zelf een beetje bijregelen terwijl de film/aflevering al
+  // speelt (mpv's "sub-delay": positief = later tonen). Wordt meteen ook
+  // opgeslagen bij de voortgang van dit item (zie _progressItem), zodat de
+  // instelling nog klopt als je later verder kijkt i.p.v. alles in 1 keer.
+  Future<void> _adjustSubtitleOffset(double deltaSeconds, void Function(void Function()) setSheetState) async {
+    // Afronden op 1 decimaal - anders stapelt drijvendekomma-afrondruis
+    // (bv. 0.1 + 0.1 + 0.1 = 0.30000000000000004) na genoeg fijne stapjes op.
+    final raw = (_subtitleOffsetSeconds + deltaSeconds).clamp(-30.0, 30.0);
+    _subtitleOffsetSeconds = (raw * 10).round() / 10;
+    setSheetState(() {});
+    if (mounted) setState(() {});
+    final native = _player.platform;
+    if (native is NativePlayer) {
+      try {
+        await native.setProperty('sub-delay', _subtitleOffsetSeconds.toString());
+      } catch (_) {}
+    }
+    final pos = _player.state.position;
+    final dur = _player.state.duration;
+    UserDataService.saveProgress(_progressItem(), pos.inSeconds.toDouble(), dur.inSeconds.toDouble());
+  }
+
+  Widget _subtitleOffsetButton(double delta, void Function(void Function()) setSheetState) {
+    final label = '${delta > 0 ? '+' : ''}${delta.toStringAsFixed(1)}s';
+    return TvFocusable(
+      muted: true,
+      borderRadius: BorderRadius.circular(8),
+      onTap: () => _adjustSubtitleOffset(delta, setSheetState),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0f1520),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: Text(label, style: const TextStyle(color: Color(0xFF00b4d8), fontSize: 12, fontWeight: FontWeight.w600)),
+      ),
+    );
+  }
+
+  // Los van _adjustSubtitleOffset - dat verschuift met een vaste waarde, dit
+  // schaalt de tijdstippen (mpv's "sub-speed") en corrigeert zo een
+  // geleidelijke drift (framerate-mismatch) i.p.v. een vast verschil.
+  Future<void> _adjustSubtitleSpeed(double deltaFactor, void Function(void Function()) setSheetState) async {
+    final raw = (_subtitleSpeedFactor + deltaFactor).clamp(0.8, 1.2);
+    _subtitleSpeedFactor = (raw * 1000).round() / 1000;
+    setSheetState(() {});
+    if (mounted) setState(() {});
+    final native = _player.platform;
+    if (native is NativePlayer) {
+      try {
+        await native.setProperty('sub-speed', _subtitleSpeedFactor.toString());
+      } catch (_) {}
+    }
+    final pos = _player.state.position;
+    final dur = _player.state.duration;
+    UserDataService.saveProgress(_progressItem(), pos.inSeconds.toDouble(), dur.inSeconds.toDouble());
+  }
+
+  Widget _subtitleSpeedButton(double delta, void Function(void Function()) setSheetState) {
+    final label = '${delta > 0 ? '+' : ''}${(delta * 100).toStringAsFixed(1)}%';
+    return TvFocusable(
+      muted: true,
+      borderRadius: BorderRadius.circular(8),
+      onTap: () => _adjustSubtitleSpeed(delta, setSheetState),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0f1520),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: Text(label, style: const TextStyle(color: Color(0xFF00b4d8), fontSize: 12, fontWeight: FontWeight.w600)),
+      ),
+    );
   }
 
   // Sommige meegegeven media-data (bv. een oude rangschikking die ooit met
@@ -899,6 +1094,8 @@ class _WatchScreenState extends State<WatchScreen> {
       item['season_number'] = _selectedSeason;
       item['episode_number'] = _currentEpisode!['episode_number'];
     }
+    item['subtitle_offset'] = _subtitleOffsetSeconds;
+    item['subtitle_speed'] = _subtitleSpeedFactor;
     return item;
   }
 
@@ -915,6 +1112,11 @@ class _WatchScreenState extends State<WatchScreen> {
     } else if (saved['season_number'] != null) {
       return 0; // film, maar het opgeslagen record is van een aflevering
     }
+    // Het record hoort wel degelijk bij dit item - een eerder handmatig
+    // bijgeregelde ondertitel-vertraging mag dan ook meteen mee hersteld
+    // worden, los van of we ook effectief hervatten in tijd hieronder.
+    _subtitleOffsetSeconds = (saved['subtitle_offset'] as num?)?.toDouble() ?? 0.0;
+    _subtitleSpeedFactor = (saved['subtitle_speed'] as num?)?.toDouble() ?? 1.0;
     final t = (saved['current_time'] as num?)?.toDouble() ?? 0;
     final d = (saved['duration'] as num?)?.toDouble() ?? 0;
     if (t <= 10) return 0;
@@ -1105,24 +1307,31 @@ class _WatchScreenState extends State<WatchScreen> {
     }
   }
 
-  // Voorkomt dat twee _play()-aanroepen tegelijk lopen (bv. dubbel tikken op
-  // "Volgende aflevering", of een verdwaalde herhaalde toets-event) - zonder
-  // dit konden twee _player.open()-aanroepen door elkaar racen, wat als
-  // overlappende audio/beeld en "verspringende" staat naar buiten kwam.
-  bool _playInFlight = false;
+  // Voorkomt dat twee _player.open()-aanroepen door elkaar racen (bv. dubbel
+  // tikken op "Volgende aflevering") - maar simpelweg een tweede _play()
+  // negeren zolang de eerste nog bezig is (de oude aanpak) betekende dat een
+  // andere aflevering kiezen tijdens het zoeken naar streams (dat tot een
+  // minuut kan duren met ondertitel-synchronisatie) gewoon stil genegeerd
+  // werd - de eerst gekozen aflevering ging dan alsnog spelen, zonder dat
+  // duidelijk was welke van de twee je nu eigenlijk had gekozen. Elke nieuwe
+  // poging verhoogt deze teller; een oudere, nog lopende poging herkent aan
+  // een verouderd nummer dat ze intussen ingehaald is en breekt zichzelf af
+  // vlak vóór ze de speler zou aanraken, i.p.v. de nieuwere keuze te negeren.
+  int _playGeneration = 0;
 
   Future<void> _play({Map? episode}) async {
-    if (_playInFlight) return;
-    _playInFlight = true;
-    try {
-      await _playInternal(episode: episode);
-    } finally {
-      _playInFlight = false;
-    }
+    final myGen = ++_playGeneration;
+    await _playInternal(episode: episode, gen: myGen);
   }
 
-  Future<void> _playInternal({Map? episode}) async {
+  Future<void> _playInternal({Map? episode, required int gen}) async {
     _currentEpisode = episode;
+    // Opnieuw op de standaardwaarden - worden zo dadelijk in _resumeSeconds
+    // hersteld als er effectief een opgeslagen waarde voor déze aflevering/
+    // film bestaat, anders blijft een vorige aflevering se instelling niet
+    // per ongeluk hangen.
+    _subtitleOffsetSeconds = 0.0;
+    _subtitleSpeedFactor = 1.0;
     if (Platform.isAndroid) {
       // Op een TV-toestel met maar ~2GB RAM (logcat op een Shield bevestigde
       // dit) kan alles wat Flutter's afbeeldingscache nog vasthoudt van het
@@ -1197,6 +1406,10 @@ class _WatchScreenState extends State<WatchScreen> {
 
       await attempt(isMovie ? 'movie' : 'tv');
       if (url == null) await attempt(isMovie ? 'tv' : 'movie');
+      // Een nieuwere selectie is intussen begonnen - deze verouderde poging
+      // mag de laadstatus/speler niet meer aanraken, anders zou die alsnog
+      // over de nieuwere heen kunnen schrijven zodra ze klaar is.
+      if (gen != _playGeneration) return;
 
       // Soms faalt de zoekopdracht tijdelijk (een kortstondig RD/AIOStreams-
       // hikje) terwijl een volgende identieke poging wél lukt - automatisch
@@ -1208,6 +1421,7 @@ class _WatchScreenState extends State<WatchScreen> {
         await attempt(isMovie ? 'movie' : 'tv');
         if (url == null) await attempt(isMovie ? 'tv' : 'movie');
       }
+      if (gen != _playGeneration) return;
 
       if (url == null) {
         setState(() {
@@ -1224,6 +1438,7 @@ class _WatchScreenState extends State<WatchScreen> {
 
       final statusLabel = source == 'scraper' ? 'Gevonden op internet. Laden...' : 'Gevonden in bibliotheek. Laden...';
       final resume = await _resumeSeconds(episode: episode);
+      if (gen != _playGeneration) return;
 
       // Vóór het afspelen starten al voor Nederlandse ondertitels zorgen, zodat
       // de film pas begint als ze al klaarstaan - i.p.v. ze er halverwege pas
@@ -1241,10 +1456,11 @@ class _WatchScreenState extends State<WatchScreen> {
           final hasEmbeddedNl = await _hasEmbeddedDutchSubtitle(resolvedUrl);
           debugPrint('[Nova] geen externe NL-ondertitel gevonden, ingebouwd spoor aanwezig: $hasEmbeddedNl');
         }
+        if (gen != _playGeneration) return;
       }
-      if (!mounted) return;
+      if (!mounted || gen != _playGeneration) return;
 
-      await _playUrl(resolvedUrl, statusLabel: statusLabel, resumeSeconds: resume, externalSubtitleUri: externalSubUri);
+      await _playUrl(resolvedUrl, statusLabel: statusLabel, resumeSeconds: resume, externalSubtitleUri: externalSubUri, gen: gen);
     } catch (e) {
       setState(() {
         _status = 'Fout bij afspelen: $e';
@@ -1253,11 +1469,18 @@ class _WatchScreenState extends State<WatchScreen> {
     }
   }
 
-  Future<void> _playUrl(String url, {String statusLabel = 'Laden...', double resumeSeconds = 0, String? externalSubtitleUri}) async {
+  Future<void> _playUrl(String url, {String statusLabel = 'Laden...', double resumeSeconds = 0, String? externalSubtitleUri, required int gen}) async {
     final baseUrl = (await SettingsService.getBackendUrl()).trim().replaceAll(RegExp(r'/$'), '');
     if (url.startsWith('/')) {
       url = baseUrl + url;
     }
+    // Geen await tussen deze check en de _player-aanroepen hieronder waar het
+    // écht op aankomt (open/seek/play) - Dart kan daar niets anders tussen
+    // uitvoeren, dus dit sluit het laatste stukje race helemaal af: een
+    // verouderde poging die hier toch nog aankomt (bv. een muisklik op een
+    // andere bron vlak na het kiezen van een aflevering) raakt de speler
+    // dan nooit meer aan.
+    if (gen != _playGeneration) return;
 
     _autoAppliedAudio = false;
     // Als we al een extern gesynchroniseerde NL-ondertitel hebben (vóór het
@@ -1282,10 +1505,14 @@ class _WatchScreenState extends State<WatchScreen> {
     await _player.open(Media(url, httpHeaders: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     }), play: false);
+    // Een nieuwere poging is intussen al gestart (en heeft ondertussen zelf
+    // al een _player.open() gedaan of gaat dat zo doen) - niet meer verder
+    // bemoeien met sporen/seeken/afspelen, anders vechten de twee pogingen
+    // om dezelfde speler.
+    if (gen != _playGeneration) return;
 
     if (externalSubtitleUri != null) {
-      await _player.setSubtitleTrack(
-        SubtitleTrack.uri(externalSubtitleUri, title: 'Nederlands (extern)', language: 'nl'));
+      await _applyExternalSubtitle(externalSubtitleUri);
     }
 
     if (resumeSeconds > 0) {
@@ -1294,6 +1521,23 @@ class _WatchScreenState extends State<WatchScreen> {
       } catch (_) {}
       await _player.seek(Duration(seconds: resumeSeconds.round()));
       debugPrint('[Nova] seeked to ${resumeSeconds.round()}s, position now: ${_player.state.position}');
+    }
+    // Een eerder voor déze aflevering/film handmatig bijgeregelde
+    // ondertitel-vertraging/snelheid (zie _adjustSubtitleOffset/-Speed)
+    // meteen weer toepassen, zodat je bij hervatten niet opnieuw moet
+    // bijregelen.
+    if (_subtitleOffsetSeconds != 0.0 || _subtitleSpeedFactor != 1.0) {
+      final nativeForSubDelay = _player.platform;
+      if (nativeForSubDelay is NativePlayer) {
+        try {
+          if (_subtitleOffsetSeconds != 0.0) {
+            await nativeForSubDelay.setProperty('sub-delay', _subtitleOffsetSeconds.toString());
+          }
+          if (_subtitleSpeedFactor != 1.0) {
+            await nativeForSubDelay.setProperty('sub-speed', _subtitleSpeedFactor.toString());
+          }
+        } catch (_) {}
+      }
     }
     await _player.play();
 
@@ -1315,7 +1559,7 @@ class _WatchScreenState extends State<WatchScreen> {
 
     UserDataService.saveProgress(_progressItem(), resumeSeconds, resumeSeconds > 0 ? resumeSeconds + 100 : 100);
 
-    if (mounted) {
+    if (mounted && gen == _playGeneration) {
       setState(() {
         _loadingStream = false;
         _status = '';
@@ -1418,7 +1662,8 @@ class _WatchScreenState extends State<WatchScreen> {
         if (chosen != null) {
           setState(() => _currentSourceUrl = direct);
           final resume = await _resumeSeconds(episode: episode);
-          _playUrl(chosen, statusLabel: 'Bron laden...', resumeSeconds: resume);
+          final myGen = ++_playGeneration;
+          _playUrl(chosen, statusLabel: 'Bron laden...', resumeSeconds: resume, gen: myGen);
         }
       },
     );
@@ -2085,6 +2330,13 @@ class _WatchScreenState extends State<WatchScreen> {
     final epNum = ep['episode_number'] as int;
     final runtime = ep['runtime'];
     final state = _episodeWatchState(epNum);
+    // Zonder dit was er nergens in de lijst te zien welke aflevering nu
+    // écht geladen wordt of speelt - koos je tijdens het zoeken (tot een
+    // minuut met ondertitel-synchronisatie) toch een andere, dan was niet
+    // duidelijk of die tweede keuze ook echt was doorgekomen.
+    final isActive = _currentEpisode != null &&
+      _currentEpisode!['episode_number'] == epNum &&
+      (_loadingStream || _showPlayer);
     return TvFocusable(
       borderRadius: BorderRadius.circular(12),
       // Bijna schermbrede rij - zie toelichting in watchlist_screen.dart.
@@ -2096,7 +2348,10 @@ class _WatchScreenState extends State<WatchScreen> {
         decoration: BoxDecoration(
           color: const Color(0xFF0f1520),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey.withOpacity(0.12)),
+          border: Border.all(
+            color: isActive ? const Color(0xFF00b4d8) : Colors.grey.withOpacity(0.12),
+            width: isActive ? 1.5 : 1,
+          ),
         ),
         child: Row(children: [
           SizedBox(
@@ -2140,8 +2395,12 @@ class _WatchScreenState extends State<WatchScreen> {
               if (runtime != null) Text('${runtime}m', style: const TextStyle(color: Colors.grey, fontSize: 12)),
             ]),
             const SizedBox(height: 4),
-            Text(ep['overview'] ?? '', maxLines: 2, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.grey, fontSize: 12, height: 1.4)),
+            if (isActive)
+              Text(_loadingStream ? 'Wordt geladen...' : 'Nu aan het spelen',
+                style: const TextStyle(color: Color(0xFF00b4d8), fontSize: 12, fontWeight: FontWeight.w600))
+            else
+              Text(ep['overview'] ?? '', maxLines: 2, overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.grey, fontSize: 12, height: 1.4)),
           ])),
           const SizedBox(width: 8),
           GestureDetector(
@@ -2152,7 +2411,10 @@ class _WatchScreenState extends State<WatchScreen> {
             ),
           ),
           const SizedBox(width: 6),
-          const Icon(Icons.play_arrow, color: Color(0xFF00b4d8), size: 24),
+          isActive && _loadingStream
+            ? const SizedBox(width: 24, height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00b4d8)))
+            : const Icon(Icons.play_arrow, color: Color(0xFF00b4d8), size: 24),
         ]),
       ),
     );
