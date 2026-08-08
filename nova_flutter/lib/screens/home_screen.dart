@@ -330,12 +330,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF080c14),
-      // clipBehavior: Clip.none - Stack's eigen standaard is Clip.hardEdge
-      // (niet none). Dit is de buitenste Stack van de hele pagina (scroll-
-      // inhoud + de zwevende navigatiebalk erboven) - had deze over het
-      // hoofd gezien terwijl alle focus-groei-fixes tot nu toe enkel op
-      // Stacks binnenin MediaRow/de kaarten zaten.
-      body: Stack(clipBehavior: Clip.none, children: [
+      body: Stack(children: [
         _loading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF00b4d8)))
           : RefreshIndicator(
@@ -686,10 +681,11 @@ class _HomeScreenState extends State<HomeScreen> {
     return MediaRow(
       title: title,
       titleColor: isRd ? const Color(0xFF00b4d8) : Colors.white,
-      // Ruim overgedimensioneerd (i.p.v. precies-berekend, wat telkens net
-      // te krap bleek) - zie de kaart-builders hieronder voor de nieuwe,
-      // grotere postermaten.
-      height: isProgress ? 280 : (isRanked ? 480 : 480),
+      // Rijen laten de tegel bij focus niet meer vergroten (noGrow, zie de
+      // kaart-builders hieronder) - enkel rand+gloed, geen scale. Dus geen
+      // extra ruimte hier meer nodig, gewoon exact rond de tegel op normale
+      // grootte, zoals vóór de hele focus-highlight-zoektocht.
+      height: isProgress ? 195 : (isRanked ? 310 : 300),
       itemCount: isRanked ? (items.length < 10 ? items.length : 10) : items.length,
       path: path,
       onSeeAll: path != null
@@ -709,9 +705,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildRankedCard(Map item, int rank, {bool isFirstRow = false}) {
     final poster = item['poster_path'] as String?;
     final title = item['title'] ?? item['name'] ?? '';
-    // Was 165x250, toen 185x280 - ruim overgedimensioneerd deze keer.
-    const posterWidth = 200.0;
-    const posterHeight = 300.0;
+    const posterWidth = 165.0;
+    const posterHeight = 250.0;
     // Zichtbaar deel van het cijfer vóór de poster begint overlappen, en de
     // volledige breedte die aan FittedBox gegeven wordt (iets ruimer, zodat
     // een klein stukje bewust achter de poster verdwijnt voor het bleed-
@@ -724,10 +719,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final double cardWidth = numVisible + posterWidth;
     return Container(
       width: cardWidth,
-      // Ruim overgedimensioneerd deze keer i.p.v. precies-berekend - moet
-      // voorkomen dat de buur (later in de rij = later getekend = bovenop)
-      // of het cijfer van de vólgende kaart over déze rand heen tekent.
-      margin: const EdgeInsets.symmetric(horizontal: 45),
+      margin: const EdgeInsets.symmetric(horizontal: 6),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         SizedBox(
           height: posterHeight,
@@ -765,6 +757,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 onTap: () => _openWatch(item),
                 onLongPress: () => _showPosterActionMenu(item),
                 borderRadius: BorderRadius.circular(10),
+                noGrow: true,
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(10),
                   child: Stack(children: [
@@ -776,11 +769,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ]),
         ),
-        // Was 8, toen 45 - ruim overgedimensioneerd deze keer. De poster
-        // groeit bij focus ook náár beneden (schaal vertrekt vanuit het
-        // midden), en de rand tekende daardoor dwars door/vlak tegen de
-        // titel eronder i.p.v. netjes rond enkel de poster te sluiten.
-        const SizedBox(height: 90),
+        const SizedBox(height: 8),
         Padding(
           padding: EdgeInsets.only(left: numVisible),
           child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
@@ -857,9 +846,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final double progress = (item['current_time'] ?? 0) / (item['duration'] ?? 1);
 
       return Container(
-        // Ruim overgedimensioneerd deze keer (was 230/255 breed, marge
-        // 32/40) i.p.v. precies-berekend.
-        width: 280, margin: const EdgeInsets.symmetric(horizontal: 55),
+        width: 230, margin: const EdgeInsets.symmetric(horizontal: 5),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           TvFocusable(
             escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
@@ -867,10 +854,11 @@ class _HomeScreenState extends State<HomeScreen> {
             onLongPress: () => _showPosterActionMenu(item,
               onRemove: () => _removeFromProgress(item), removeLabel: 'Verwijderen uit Verder kijken'),
             borderRadius: BorderRadius.circular(8),
+            noGrow: true,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: Stack(children: [
-                NovaImage(path: backdrop, width: 280, height: 158, baseUrl: 'https://image.tmdb.org/t/p/w300'),
+                NovaImage(path: backdrop, width: 230, height: 130, baseUrl: 'https://image.tmdb.org/t/p/w300'),
                 Positioned(bottom: 0, left: 0, right: 0,
                   child: Container(
                     height: 3, color: Colors.white24,
@@ -886,8 +874,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ]),
             ),
           ),
-          // Was 8, toen 36 - ruim overgedimensioneerd deze keer.
-          const SizedBox(height: 70),
+          const SizedBox(height: 8),
           Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
         ]),
@@ -895,15 +882,14 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return Container(
-      // Was 168/190 breed - ruim overgedimensioneerd deze keer, net als de
-      // marge (was 26/30) en de tussenruimte tot de titel (zie onder).
-      width: 205, margin: const EdgeInsets.symmetric(horizontal: 45),
+      width: 168, margin: const EdgeInsets.symmetric(horizontal: 6),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         TvFocusable(
           escapeUp: isFirstRow ? _navFocusNodes[_tab] : null,
           onTap: () => _openWatch(item),
           onLongPress: isRd ? null : () => _showPosterActionMenu(item),
           borderRadius: BorderRadius.circular(12),
+          noGrow: true,
           child: Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
@@ -913,18 +899,15 @@ class _HomeScreenState extends State<HomeScreen> {
               borderRadius: BorderRadius.circular(12),
               child: Stack(children: [
                 isRd
-                  ? Container(width: 205, height: 285, color: const Color(0xFF0f1520),
+                  ? Container(width: 168, height: 235, color: const Color(0xFF0f1520),
                       child: const Icon(Icons.folder_open, color: Color(0xFF00b4d8), size: 36))
-                  : NovaImage(path: poster, width: 205, height: 285),
+                  : NovaImage(path: poster, width: 168, height: 235),
                 if (!isRd) _cornerIcon(Icons.add, () => _addToWatchlistWithFeedback(item)),
               ]),
             ),
           ),
         ),
-        // Was 8, toen 45 - ruim overgedimensioneerd deze keer i.p.v.
-        // precies-berekend (de poster groeit bij focus ook náár beneden,
-        // vertrekkend vanuit het midden van de schaal).
-        const SizedBox(height: 85),
+        const SizedBox(height: 8),
         Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
         if (!isRd && yearStr.isNotEmpty)

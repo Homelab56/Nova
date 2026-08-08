@@ -58,7 +58,7 @@ class _MediaRowState extends State<MediaRow> {
     return Positioned(
       left: alignment == Alignment.centerLeft ? 0 : null,
       right: alignment == Alignment.centerRight ? 0 : null,
-      top: 200, bottom: 30,
+      top: 0, bottom: 30,
       child: AnimatedOpacity(
         opacity: _hovering ? 1 : 0,
         duration: const Duration(milliseconds: 150),
@@ -106,41 +106,24 @@ class _MediaRowState extends State<MediaRow> {
         ]),
       ),
       SizedBox(
-        // +200 kopruimte boven de rij zelf - widget.height past exact rond
-        // de tegel op normale grootte, dus zonder dit sneed de standaard
-        // clip van ListView de focus-vergroting/gloed van de bovenste rij
-        // zo meteen af zodra een tegel focus kreeg (de bovenste rand van de
-        // highlight "viel weg"). Ruim overgedimensioneerd i.p.v.
-        // precies-berekend, wat telkens net te krap bleek.
-        height: widget.height + 200,
+        // Rij-tegels vergroten niet meer bij focus (noGrow op TvFocusable) -
+        // enkel rand+gloed binnen de tegel se eigen grootte, dus geen extra
+        // ruimte hier meer nodig om iets te laten overlopen.
+        height: widget.height,
         child: MouseRegion(
           onEnter: (_) => setState(() => _hovering = true),
           onExit: (_) => setState(() => _hovering = false),
-          // clipBehavior: Clip.none - Stack's eigen standaard is Clip.hardEdge
-          // (niet none), had over het hoofd gezien. Zou hier rekenkundig geen
-          // verschil moeten maken (de overloop van de poster reikt niet tot
-          // deze Stack se eigen randen), maar expliciet maken i.p.v. op de
-          // standaard vertrouwen.
-          child: Stack(clipBehavior: Clip.none, children: [
-            Padding(
-              padding: const EdgeInsets.only(top: 200),
-              child: ListView.builder(
-                controller: _scrollCtrl,
-                scrollDirection: Axis.horizontal,
-                // Was 12 - de eerste/laatste tegel in de rij kan niet verder
-                // scrollen om ruimte te maken voor zijn eigen groei bij
-                // focus, dus sneed de ListView's eigen linker-/rechterrand
-                // die groei simpelweg af (een heel andere oorzaak dan de
-                // tussenruimte tussen kaarten - dít treft enkel de eerste/
-                // laatste tegel, niet de rest van de rij).
-                padding: const EdgeInsets.symmetric(horizontal: 60),
-                // Een stuk groter dan de standaard (~250px) zodat een D-pad
-                // meerdere kaarten voorbij het scherm al kan focussen i.p.v.
-                // vast te lopen zodra hij een nog niet opgebouwde kaart nadert.
-                cacheExtent: 2000,
-                itemCount: widget.itemCount,
-                itemBuilder: widget.itemBuilder,
-              ),
+          child: Stack(children: [
+            ListView.builder(
+              controller: _scrollCtrl,
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              // Een stuk groter dan de standaard (~250px) zodat een D-pad
+              // meerdere kaarten voorbij het scherm al kan focussen i.p.v.
+              // vast te lopen zodra hij een nog niet opgebouwde kaart nadert.
+              cacheExtent: 2000,
+              itemCount: widget.itemCount,
+              itemBuilder: widget.itemBuilder,
             ),
             _arrow(Icons.chevron_left, () => _scrollBy(-800), alignment: Alignment.centerLeft),
             _arrow(Icons.chevron_right, () => _scrollBy(800), alignment: Alignment.centerRight),

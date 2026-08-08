@@ -1980,26 +1980,19 @@ class _WatchScreenState extends State<WatchScreen> {
                       const SizedBox(height: 28),
                       const Text('Cast', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: Colors.white)),
                       const SizedBox(height: 14),
-                      // Kopruimte boven + horizontale padding op de ListView -
-                      // anders snijdt de standaard clip van ListView de
-                      // focus-groei van de avatar af (boven) of van de
-                      // eerste/laatste avatar specifiek (opzij, kan niet
-                      // verder scrollen om daar ruimte voor te maken).
-                      SizedBox(height: 172 + 90, child: Padding(
-                        padding: const EdgeInsets.only(top: 90),
-                        child: ListView.builder(
+                      SizedBox(height: 172, child: ListView.builder(
                         scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(horizontal: 50),
                         itemCount: _cast.length,
                         itemBuilder: (_, i) {
                           final p = _cast[i];
                           final profile = p['profile_path'] as String?;
                           final character = p['character'] as String?;
                           final personId = p['id'] as int?;
-                          return Container(width: 96, margin: const EdgeInsets.only(right: 20),
+                          return Container(width: 96, margin: const EdgeInsets.only(right: 14),
                             child: Column(children: [
                               TvFocusable(
                                 borderRadius: BorderRadius.circular(44),
+                                noGrow: true,
                                 onTap: personId == null ? null : () => Navigator.push(context, MaterialPageRoute(
                                   builder: (_) => PersonScreen(personId: personId, name: p['name'] as String?, profilePath: profile))),
                                 child: CircleAvatar(radius: 44, backgroundColor: const Color(0xFF0f1520),
@@ -2017,7 +2010,7 @@ class _WatchScreenState extends State<WatchScreen> {
                             ]),
                           );
                         },
-                      ))),
+                      )),
                     ],
 
                   ],
@@ -2034,12 +2027,13 @@ class _WatchScreenState extends State<WatchScreen> {
                   itemBuilder: (_, i) {
                     final item = _similar[i];
                     final p = item['poster_path'];
-                    return Container(width: 150, margin: const EdgeInsets.symmetric(horizontal: 24),
+                    return Container(width: 150, margin: const EdgeInsets.symmetric(horizontal: 6),
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                         TvFocusable(
                           onTap: () => Navigator.pushReplacement(context, MaterialPageRoute(
                             builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
                           borderRadius: BorderRadius.circular(10),
+                          noGrow: true,
                           child: ClipRRect(borderRadius: BorderRadius.circular(10),
                             child: p != null
                               ? NovaImage(path: '$tmdbPoster$p', height: 210, width: 150, fit: BoxFit.cover)

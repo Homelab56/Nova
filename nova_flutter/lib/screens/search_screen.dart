@@ -140,25 +140,18 @@ class _SearchScreenState extends State<SearchScreen> {
                 children: [
                   const Text('Acteurs & actrices', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
                   const SizedBox(height: 10),
-                  // Kopruimte boven + horizontale padding op de ListView -
-                  // anders snijdt de standaard clip van ListView de focus-
-                  // groei van de avatar af (boven) of van de eerste/laatste
-                  // avatar specifiek (opzij, kan niet verder scrollen om
-                  // daar ruimte voor te maken).
-                  SizedBox(height: 132 + 90, child: Padding(
-                    padding: const EdgeInsets.only(top: 90),
-                    child: ListView.builder(
+                  SizedBox(height: 132, child: ListView.builder(
                     scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 50),
                     itemCount: _people.length,
                     itemBuilder: (_, i) {
                       final p = _people[i];
                       final profile = p['profile_path'] as String?;
                       final personId = p['id'] as int?;
-                      return Container(width: 88, margin: const EdgeInsets.only(right: 20),
+                      return Container(width: 88, margin: const EdgeInsets.only(right: 14),
                         child: Column(children: [
                           TvFocusable(
                             borderRadius: BorderRadius.circular(40),
+                            noGrow: true,
                             onTap: personId == null ? null : () => Navigator.push(context, MaterialPageRoute(
                               builder: (_) => PersonScreen(personId: personId, name: p['name'] as String?, profilePath: profile))),
                             child: CircleAvatar(radius: 40, backgroundColor: const Color(0xFF0f1520),
@@ -171,7 +164,7 @@ class _SearchScreenState extends State<SearchScreen> {
                         ]),
                       );
                     },
-                  ))),
+                  )),
                 ],
               ),
             ),

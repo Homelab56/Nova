@@ -17,22 +17,25 @@ class TvHighlightBox extends StatelessWidget {
   // bewust een lichtere highlight zonder vergroting - dezelfde zware gloed
   // als op een poster maakte tekst daar onleesbaar i.p.v. duidelijker.
   final bool muted;
+  // Voor tegels in krappe rijen/rasters waar geen enkele hoeveelheid marge
+  // rond de tegel betrouwbaar bleek: geen vergroting bij focus, enkel de
+  // rand + gloed. Een tegel die nooit buiten zijn eigen vak groeit kan ook
+  // nooit een halve/afgesneden rand geven, ongeacht buren of scherm-/
+  // scroll-randen - simpelweg omdat er dan niets is om af te snijden.
+  final bool noGrow;
   const TvHighlightBox({
     super.key,
     required this.focused,
     required this.child,
     this.borderRadius = const BorderRadius.all(Radius.circular(10)),
     this.muted = false,
+    this.noGrow = false,
   });
 
   @override
   Widget build(BuildContext context) {
     return AnimatedScale(
-      // Was 1.1, 1.16, 1.25 - telkens bleek de marge/kopruimte elders net
-      // niet genoeg voor de nieuwe waarde, wat halve/afgesneden randen gaf.
-      // Nu met ruim overgedimensioneerde marges (i.p.v. precies-berekende)
-      // in home_screen.dart/media_row.dart, dus geen scherpe grens meer.
-      scale: focused && !muted ? 1.3 : 1.0,
+      scale: focused && !muted && !noGrow ? 1.3 : 1.0,
       duration: const Duration(milliseconds: 120),
       curve: Curves.easeOut,
       child: AnimatedContainer(
@@ -89,6 +92,7 @@ class TvFocusable extends StatefulWidget {
   final BorderRadius borderRadius;
   final bool autofocus;
   final bool muted;
+  final bool noGrow;
   // Optioneel: gebruik een extern beheerde FocusNode i.p.v. er zelf een aan
   // te maken - nodig zodra ander code (zoals "omhoog"-navigatie vanuit een
   // andere rij) expliciet naar déze specifieke knop moet kunnen springen.
@@ -108,6 +112,7 @@ class TvFocusable extends StatefulWidget {
     this.borderRadius = const BorderRadius.all(Radius.circular(10)),
     this.autofocus = false,
     this.muted = false,
+    this.noGrow = false,
     this.focusNode,
     this.escapeUp,
   });
@@ -190,6 +195,7 @@ class _TvFocusableState extends State<TvFocusable> {
         child: TvHighlightBox(
           focused: _focused,
           muted: widget.muted,
+          noGrow: widget.noGrow,
           borderRadius: widget.borderRadius,
           child: widget.child,
         ),
