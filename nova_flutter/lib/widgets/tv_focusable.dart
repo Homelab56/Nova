@@ -56,13 +56,12 @@ class TvHighlightBox extends StatelessWidget {
           boxShadow: !focused
             ? const []
             : (muted
-                // Was blurRadius:10, spreadRadius:0.5, opacity:0.55 - te
-                // subtiel op knoppen met een eigen effen (vaak witte)
-                // achtergrond, zoals "Afspelen": een dunne rand op wit heeft
-                // weinig contrast, maar de gloed zelf valt WEL duidelijk op
-                // - die tekent buiten de knop, tegen de donkere pagina-
-                // achtergrond, ongeacht de knop se eigen kleur.
-                ? [BoxShadow(color: const Color(0xFF00b4d8).withOpacity(0.75), blurRadius: 18, spreadRadius: 2)]
+                // Was blurRadius:18, spreadRadius:2, opacity:0.75 - nog
+                // steeds te subtiel op een effen witte knop ("Afspelen").
+                // Fel/lichtblauw (0xFF00b4d8) heeft van nature weinig
+                // contrast tegen wit, ongeacht hoe groot de gloed is -
+                // fors groter gemaakt om dat te compenseren.
+                ? [BoxShadow(color: const Color(0xFF00b4d8).withOpacity(0.9), blurRadius: 28, spreadRadius: 5)]
                 : [
                     BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.95), blurRadius: 10, spreadRadius: 1),
                     BoxShadow(color: const Color(0xFF00e5ff).withOpacity(0.6), blurRadius: 26, spreadRadius: 3),
@@ -71,10 +70,14 @@ class TvHighlightBox extends StatelessWidget {
         foregroundDecoration: BoxDecoration(
           borderRadius: borderRadius,
           border: Border.all(
-            color: !focused ? Colors.transparent : (muted ? const Color(0xFF00b4d8) : const Color(0xFF00e5ff)),
-            // Was 2 voor gemute knoppen - iets dikker leest duidelijker,
-            // ook op een effen witte achtergrond zoals de "Afspelen"-knop.
-            width: muted ? 3 : 4,
+            // Donkerder, verzadigder blauw voor gemute knoppen (i.p.v. het
+            // lichtere 0xFF00b4d8) - een lichte kleur rand heeft weinig
+            // contrast tegen een effen witte knop zoals "Afspelen",
+            // ongeacht de dikte; donkerder leest daar wél duidelijk, en
+            // blijft ook tegen de donkere pagina-achtergrond goed zichtbaar.
+            color: !focused ? Colors.transparent : (muted ? const Color(0xFF0891b2) : const Color(0xFF00e5ff)),
+            // Was 2, toen 3 - nog dikker leest ondubbelzinniger.
+            width: muted ? 5 : 4,
           ),
         ),
         child: child,
