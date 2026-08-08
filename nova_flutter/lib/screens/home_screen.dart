@@ -647,11 +647,27 @@ class _HomeScreenState extends State<HomeScreen> {
                     onPressed: () => _openWatch(item),
                     icon: const Icon(Icons.play_arrow, size: 20),
                     label: const Text('Afspelen'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white, foregroundColor: Colors.black,
-                      textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14)),
+                    // ButtonStyle i.p.v. ElevatedButton.styleFrom (die geeft
+                    // enkel vaste kleuren) - de knop wisselt nu bij focus
+                    // helemaal van wit-op-zwart naar cyaan-op-wit. Een rand
+                    // alleen bleek herhaaldelijk niet duidelijk genoeg (zeker
+                    // niet voor de ouders van de gebruiker, 70 jaar) - een
+                    // volledige kleurwissel van de hele knop is een veel
+                    // grovere, ondubbelzinnigere verandering dan een rand.
+                    style: ButtonStyle(
+                      backgroundColor: WidgetStateProperty.resolveWith((states) =>
+                        states.contains(WidgetState.focused) ? const Color(0xFF00b4d8) : Colors.white),
+                      foregroundColor: WidgetStateProperty.resolveWith((states) =>
+                        states.contains(WidgetState.focused) ? Colors.white : Colors.black),
+                      textStyle: WidgetStateProperty.all(
+                        const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                      shape: WidgetStateProperty.all(
+                        RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                      padding: WidgetStateProperty.all(
+                        const EdgeInsets.symmetric(horizontal: 22, vertical: 14)),
+                      elevation: WidgetStateProperty.resolveWith((states) =>
+                        states.contains(WidgetState.focused) ? 10.0 : 2.0),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
