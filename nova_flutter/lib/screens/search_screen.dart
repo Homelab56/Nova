@@ -203,23 +203,13 @@ class _SearchScreenState extends State<SearchScreen> {
 
                     return GridView.builder(
                       controller: _scrollCtrl,
-                      // Extra ruimte bovenaan - anders sneed de standaard
-                      // clip van GridView de focus-vergroting/gloed van de
-                      // bovenste rij tegels af (net als bij MediaRow).
-                      // Links/rechts/onder ruimer dan 12 - anders snijdt de
-                      // GridView's eigen rand de focus-groei van de eerste/
-                      // laatste kolom en de onderste rij af (kunnen niet
-                      // verder scrollen om daar ruimte voor te maken).
-                      padding: const EdgeInsets.fromLTRB(60, 90, 60, 60),
+                      padding: const EdgeInsets.all(12),
                       cacheExtent: 2000,
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: crossAxisCount,
                         childAspectRatio: 0.62,
-                        // Was 14/18 - te weinig voor de focus-vergroting
-                        // (schaal 1.25), zie category_screen.dart voor de
-                        // volledige toelichting.
-                        crossAxisSpacing: 32,
-                        mainAxisSpacing: 52,
+                        crossAxisSpacing: 14,
+                        mainAxisSpacing: 18,
                       ),
                       // Volgende pagina laadt automatisch via _onScroll; deze
                       // laatste tegel is enkel nog een laad-indicator, geen
@@ -232,14 +222,17 @@ class _SearchScreenState extends State<SearchScreen> {
                         final item = _results[i];
                         final poster = item['poster_path'];
                         final title = item['title'] ?? item['name'] ?? '';
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: TvFocusable(
-                                onTap: () => Navigator.push(context, MaterialPageRoute(
-                                  builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
-                                borderRadius: BorderRadius.circular(10),
+                        // De hele kaart (poster + titel) als één highlight,
+                        // geen scale (noGrow) - zie category_screen.dart.
+                        return TvFocusable(
+                          onTap: () => Navigator.push(context, MaterialPageRoute(
+                            builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
+                          borderRadius: BorderRadius.circular(10),
+                          noGrow: true,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(10),
                                   child: poster != null
@@ -247,14 +240,11 @@ class _SearchScreenState extends State<SearchScreen> {
                                     : Container(color: const Color(0xFF0f1520), child: const Icon(Icons.movie, color: Colors.grey)),
                                 ),
                               ),
-                            ),
-                            // Was 6 - de poster groeit bij focus ook náár
-                            // beneden, zie de toelichting in
-                            // person_screen.dart's _buildCreditTile.
-                            const SizedBox(height: 45),
-                            Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 13, color: Colors.white70)),
-                          ],
+                              const SizedBox(height: 6),
+                              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 13, color: Colors.white70)),
+                            ],
+                          ),
                         );
                       },
                     );

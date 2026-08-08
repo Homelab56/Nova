@@ -117,15 +117,18 @@ class _PersonScreenState extends State<PersonScreen> {
     final poster = item['poster_path'];
     final title = _titleOf(item);
     final character = item['character'] as String?;
-    return Column(
+    // De hele kaart (poster + titel) als één highlight, geen scale
+    // (noGrow) - zie category_screen.dart.
+    return TvFocusable(
+      onTap: () => Navigator.push(context, MaterialPageRoute(
+        builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
+      borderRadius: BorderRadius.circular(10),
+      noGrow: true,
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Expanded(
-          child: TvFocusable(
-            onTap: () => Navigator.push(context, MaterialPageRoute(
-              builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
-            borderRadius: BorderRadius.circular(10),
-            child: ClipRRect(
+          child: ClipRRect(
               borderRadius: BorderRadius.circular(10),
               child: poster != null
                 ? NovaImage(path: poster, baseUrl: tmdbPersonPoster, fit: BoxFit.cover, width: double.infinity)
@@ -135,21 +138,16 @@ class _PersonScreenState extends State<PersonScreen> {
                 : Container(width: double.infinity, height: double.infinity,
                     color: const Color(0xFF0f1520),
                     child: const Icon(Icons.movie, color: Colors.grey)),
-            ),
           ),
         ),
-        // Was 6 - de poster groeit bij focus (schaal) ook náár beneden
-        // (vertrekt vanuit het midden), en met maar 6px ertussen tekende de
-        // rand/poster dan dwars over de titel eronder i.p.v. netjes rond
-        // enkel de poster te sluiten - zelfde patroon als de kaarten in
-        // home_screen.dart.
-        const SizedBox(height: 45),
+        const SizedBox(height: 6),
         Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 13, color: Colors.white)),
         if (character != null && character.isNotEmpty)
           Text(character, maxLines: 1, overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 11, color: Colors.grey)),
       ],
+      ),
     );
   }
 
@@ -166,19 +164,13 @@ class _PersonScreenState extends State<PersonScreen> {
         ),
       ));
       slivers.add(SliverPadding(
-        // Was geen padding hier - de linkerkolom groeide bij focus dan
-        // tegen de rand van de sliver aan (leek of de poster er niet
-        // volledig op stond, "start te veel naar links"), en de bovenste
-        // rij van elke letter-sectie kon overlappen met de "A:"/"B:"-
-        // koptekst erboven. Zie category_screen.dart voor hetzelfde
-        // patroon in het "Meer bekijken"-raster.
-        padding: const EdgeInsets.fromLTRB(40, 40, 40, 10),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
         sliver: SliverGrid(
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: crossAxisCount,
             childAspectRatio: 0.6,
-            crossAxisSpacing: 32,
-            mainAxisSpacing: 52,
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 16,
           ),
           delegate: SliverChildBuilderDelegate(
             (context, i) => _buildCreditTile(items[i]),

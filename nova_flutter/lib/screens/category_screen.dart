@@ -120,14 +120,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
                     if (crossAxisCount < 2) crossAxisCount = 2;
                     return GridView.builder(
                       controller: _scrollCtrl,
-                      // Extra ruimte bovenaan - anders sneed de standaard
-                      // clip van GridView de focus-vergroting/gloed van de
-                      // bovenste rij tegels af (net als bij MediaRow).
-                      // Links/rechts/onder ruimer dan 12 - anders snijdt de
-                      // GridView's eigen rand de focus-groei van de eerste/
-                      // laatste kolom en de onderste rij af (kunnen niet
-                      // verder scrollen om daar ruimte voor te maken).
-                      padding: const EdgeInsets.fromLTRB(60, 90, 60, 60),
+                      padding: const EdgeInsets.all(12),
                       // Groter dan standaard zodat een D-pad meerdere rijen
                       // voorbij het scherm al kan focussen i.p.v. vast te
                       // lopen bij een nog niet opgebouwde tegel.
@@ -135,14 +128,8 @@ class _CategoryScreenState extends State<CategoryScreen> {
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: crossAxisCount,
                         childAspectRatio: 0.62,
-                        // Was 14/18 - te weinig voor de focus-vergroting
-                        // (schaal 1.25): een tegel kon zo tegen zijn buur
-                        // aanlopen, en omdat latere tegels in de grid later
-                        // getekend worden (dus bovenop), verborg de buur dan
-                        // een stuk van de gefocuste tegel - leek dan of de
-                        // poster niet volledig zichtbaar was.
-                        crossAxisSpacing: 32,
-                        mainAxisSpacing: 52,
+                        crossAxisSpacing: 14,
+                        mainAxisSpacing: 18,
                       ),
                       itemCount: _results.length + (_page < _totalPages ? 1 : 0),
                       itemBuilder: (_, i) {
@@ -155,14 +142,19 @@ class _CategoryScreenState extends State<CategoryScreen> {
                         final item = _results[i];
                         final poster = item['poster_path'];
                         final title = item['title'] ?? item['name'] ?? '';
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: TvFocusable(
-                                onTap: () => Navigator.push(context, MaterialPageRoute(
-                                  builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
-                                borderRadius: BorderRadius.circular(10),
+                        // De hele kaart (poster + titel) als één highlight,
+                        // geen scale (noGrow) - geen overloop mogelijk, dus
+                        // altijd een nette, volledige rand, ongeacht
+                        // titellengte of cel-afmetingen.
+                        return TvFocusable(
+                          onTap: () => Navigator.push(context, MaterialPageRoute(
+                            builder: (_) => WatchScreen(media: Map<String, dynamic>.from(item)))),
+                          borderRadius: BorderRadius.circular(10),
+                          noGrow: true,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(10),
                                   child: poster != null
@@ -170,14 +162,11 @@ class _CategoryScreenState extends State<CategoryScreen> {
                                     : Container(color: const Color(0xFF0f1520), child: const Icon(Icons.movie, color: Colors.grey)),
                                 ),
                               ),
-                            ),
-                            // Was 6 - de poster groeit bij focus ook náár
-                            // beneden, zie de toelichting in
-                            // person_screen.dart's _buildCreditTile.
-                            const SizedBox(height: 45),
-                            Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 13, color: Colors.white70)),
-                          ],
+                              const SizedBox(height: 6),
+                              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 13, color: Colors.white70)),
+                            ],
+                          ),
                         );
                       },
                     );
