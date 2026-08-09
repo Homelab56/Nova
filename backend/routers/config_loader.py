@@ -82,6 +82,21 @@ def get_seerr_config() -> dict:
     return {"url": url, "api_key": key}
 
 
+def get_aiostreams_stremio_addon_url() -> str:
+    """Volledige Stremio-protocol addon-basis-URL van AIOStreams (dus met het
+    /stremio/<user>/<config>-pad, niet de kale /api/v1/... basis-URL hierboven)
+    - gebruikt als server-side fallback om een referentiestream te vinden voor
+    ffsubsync wanneer Nova's eigen (smallere) zoeklogica niets vindt maar
+    AIOStreams' eigen, veel bredere aggregatie wel iets zou vinden."""
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE) as f:
+            data = json.load(f)
+        url = (data.get("aiostreams_addon_url") or "").strip().replace("`", "").rstrip("/")
+        if url:
+            return url
+    return os.getenv("AIOSTREAMS_ADDON_URL", "").strip().replace("`", "").rstrip("/")
+
+
 def get_aiostreams_config() -> dict:
     """AIOStreams (Stremio-aggregator) basis-URL en optionele auth."""
     url = ""

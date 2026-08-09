@@ -1,8 +1,10 @@
 import urllib.parse
+import httpx
 from fastapi import APIRouter, Request
 
 from .search import tmdb_get
 from .debrid import search_and_stream
+from .config_loader import get_aiostreams_stremio_addon_url
 
 router = APIRouter()
 
@@ -61,6 +63,32 @@ async def _imdb_to_tmdb(imdb_id: str, media_type: str) -> tuple[int | None, str 
     return item.get("id"), title, year
 
 
+async def _aiostreams_fallback_stream_url(stremio_type: str, id_: str) -> str | None:
+    """Nova's eigen zoeklogica (search_and_stream) is smaller/strenger dan
+    AIOStreams' eigen, veel bredere bron-aggregatie - kan dus best eens niets
+    vinden voor een titel die de gebruiker via AIOStreams gewoon wél gewoon kan
+    afspelen. Vraagt in dat geval rechtstreeks bij AIOStreams' eigen Stremio-
+    stream-endpoint (dezelfde die Nuvio zelf ook gebruikt) een referentiestream
+    op, i.p.v. helemaal geen ondertitel terug te geven."""
+    base = get_aiostreams_stremio_addon_url()
+    if not base:
+        return None
+    url = f"{base}/stream/{stremio_type}/{id_}.json"
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(url)
+            if r.status_code != 200:
+                return None
+            data = r.json()
+    except Exception:
+        return None
+    for stream in (data.get("streams") or []):
+        candidate = stream.get("url")
+        if candidate:
+            return candidate
+    return None
+
+
 async def _resolve_subtitles(stremio_type: str, id_: str, request: Request) -> dict:
     imdb_id, season, episode = _parse_stremio_id(id_)
     if not imdb_id.startswith("tt"):
@@ -84,8 +112,13 @@ async def _resolve_subtitles(stremio_type: str, id_: str, request: Request) -> d
     try:
         result = await search_and_stream(q=q, tmdb_id=tmdb_id, media_type=media_type)
     except Exception:
-        return {"subtitles": []}
+        result = None
     stream_url = (result or {}).get("direct_url") or (result or {}).get("stream_url")
+    if not stream_url:
+        # Nova's eigen zoekopdracht vond niets - probeer rechtstreeks bij
+        # AIOStreams (dezelfde bron die de gebruiker al succesvol gebruikt om
+        # dit gewoon af te spelen) vóór helemaal op te geven.
+        stream_url = await _aiostreams_fallback_stream_url(stremio_type, id_)
     if not stream_url:
         return {"subtitles": []}
 
