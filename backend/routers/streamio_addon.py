@@ -1,3 +1,4 @@
+import re
 import urllib.parse
 import httpx
 from fastapi import APIRouter, Request
@@ -40,6 +41,25 @@ def _parse_stremio_id(id_: str) -> tuple[str, int | None, int | None]:
     return imdb_id, season, episode
 
 
+def _parse_extra_params(extra: str) -> dict:
+    """"videoHash=X&videoSize=Y&filename=Z" (nog URL-gecodeerd, want dit is het
+    padsegment zelf) -> {'videoHash': X, 'videoSize': Y, 'filename': Z}. Nuvio
+    stuurt dit mee, berekend uit het bestand dat effectief afgespeeld wordt -
+    de sleutel om een referentiestream te vinden die bij dezelfde release
+    hoort i.p.v. een willekeurige andere (zie _best_matching_stream_url)."""
+    result: dict[str, str] = {}
+    for pair in extra.split("&"):
+        if "=" not in pair:
+            continue
+        k, _, v = pair.partition("=")
+        result[urllib.parse.unquote(k)] = urllib.parse.unquote(v)
+    return result
+
+
+def _normalize_filename(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", name.lower())
+
+
 async def _imdb_to_tmdb(imdb_id: str, media_type: str) -> tuple[int | None, str | None, int | None]:
     """(tmdb_id, titel, jaar), of (None, None, None) als niet gevonden. Stremio/
     Nuvio identificeert content via IMDB-id's; Nova's hele backend (OpenSubtitles-
@@ -63,33 +83,55 @@ async def _imdb_to_tmdb(imdb_id: str, media_type: str) -> tuple[int | None, str 
     return item.get("id"), title, year
 
 
-async def _aiostreams_fallback_stream_url(stremio_type: str, id_: str) -> str | None:
-    """Nova's eigen zoeklogica (search_and_stream) is smaller/strenger dan
-    AIOStreams' eigen, veel bredere bron-aggregatie - kan dus best eens niets
-    vinden voor een titel die de gebruiker via AIOStreams gewoon wél gewoon kan
-    afspelen. Vraagt in dat geval rechtstreeks bij AIOStreams' eigen Stremio-
-    stream-endpoint (dezelfde die Nuvio zelf ook gebruikt) een referentiestream
-    op, i.p.v. helemaal geen ondertitel terug te geven."""
+async def _aiostreams_candidates(stremio_type: str, id_: str) -> list[dict]:
+    """Alle stream-kandidaten van AIOStreams (dezelfde Stremio-stream-endpoint
+    die Nuvio zelf ook gebruikt) voor deze titel, met hun url + behaviorHints
+    (filename/videoSize) - zodat de caller de release kan kiezen die het best
+    overeenkomt met wat er effectief afgespeeld wordt."""
     base = get_aiostreams_stremio_addon_url()
     if not base:
-        return None
+        return []
     url = f"{base}/stream/{stremio_type}/{id_}.json"
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             r = await client.get(url)
             if r.status_code != 200:
-                return None
+                return []
             data = r.json()
     except Exception:
+        return []
+    return [s for s in (data.get("streams") or []) if s.get("url")]
+
+
+def _best_matching_stream_url(
+    candidates: list[dict], filename_hint: str | None, size_hint: int | None
+) -> str | None:
+    """Een verkeerde (andere release/montage dan wat je effectief afspeelt)
+    referentiestream geeft ffsubsync een perfecte sync op de vérkeerde audio -
+    dat toont zich als een vast tijdsverschil, niet als drift. Kiest daarom
+    bewust de kandidaat die overeenkomt met het bestand dat Nuvio meestuurt
+    i.p.v. gewoon de eerste te nemen."""
+    if not candidates:
         return None
-    for stream in (data.get("streams") or []):
-        candidate = stream.get("url")
-        if candidate:
-            return candidate
-    return None
+    if filename_hint:
+        target = _normalize_filename(filename_hint)
+        for s in candidates:
+            fn = (s.get("behaviorHints") or {}).get("filename")
+            if fn and _normalize_filename(fn) == target:
+                return s["url"]
+    if size_hint:
+        def size_diff(s: dict) -> float:
+            sz = (s.get("behaviorHints") or {}).get("videoSize")
+            return abs(sz - size_hint) if isinstance(sz, (int, float)) else float("inf")
+        best = min(candidates, key=size_diff)
+        if size_diff(best) != float("inf"):
+            return best["url"]
+    return candidates[0]["url"]
 
 
-async def _resolve_subtitles(stremio_type: str, id_: str, request: Request) -> dict:
+async def _resolve_subtitles(
+    stremio_type: str, id_: str, request: Request, extra_params: dict | None = None
+) -> dict:
     imdb_id, season, episode = _parse_stremio_id(id_)
     if not imdb_id.startswith("tt"):
         return {"subtitles": []}
@@ -99,26 +141,40 @@ async def _resolve_subtitles(stremio_type: str, id_: str, request: Request) -> d
     if not tmdb_id or not title:
         return {"subtitles": []}
 
-    if media_type == "tv" and season and episode:
-        q = f"{title} S{season:02d}E{episode:02d}"
-    else:
-        q = f"{title} {year or ''}".strip()
+    filename_hint = (extra_params or {}).get("filename")
+    size_raw = (extra_params or {}).get("videoSize")
+    size_hint = int(size_raw) if size_raw and size_raw.isdigit() else None
 
-    # In-process aanroep i.p.v. een eigen HTTP-request naar /debrid/search -
-    # hergebruikt zo dezelfde cache/semaphore als Nova's eigen frontend al doet.
-    # We lossen bewust zelf een referentiestream op i.p.v. te vertrouwen op wat
-    # Nuvio's speler koos: ffsubsync heeft enkel een correct passende audiotrack
-    # nodig, geen byte-identieke bron.
-    try:
-        result = await search_and_stream(q=q, tmdb_id=tmdb_id, media_type=media_type)
-    except Exception:
-        result = None
-    stream_url = (result or {}).get("direct_url") or (result or {}).get("stream_url")
+    stream_url: str | None = None
+
+    # Weten we welk bestand Nuvio effectief afspeelt? Dan eerst proberen
+    # daarmee te matchen tegen AIOStreams' kandidatenlijst - veel
+    # betrouwbaarder dan gokken, want een andere release/montage geeft
+    # ffsubsync een verkeerde (maar wél intern consistente) referentie.
+    if filename_hint or size_hint:
+        candidates = await _aiostreams_candidates(stremio_type, id_)
+        stream_url = _best_matching_stream_url(candidates, filename_hint, size_hint)
+
+    if not stream_url:
+        if media_type == "tv" and season and episode:
+            q = f"{title} S{season:02d}E{episode:02d}"
+        else:
+            q = f"{title} {year or ''}".strip()
+        # In-process aanroep i.p.v. een eigen HTTP-request naar /debrid/search -
+        # hergebruikt zo dezelfde cache/semaphore als Nova's eigen frontend al doet.
+        try:
+            result = await search_and_stream(q=q, tmdb_id=tmdb_id, media_type=media_type)
+        except Exception:
+            result = None
+        stream_url = (result or {}).get("direct_url") or (result or {}).get("stream_url")
+
     if not stream_url:
         # Nova's eigen zoekopdracht vond niets - probeer rechtstreeks bij
         # AIOStreams (dezelfde bron die de gebruiker al succesvol gebruikt om
         # dit gewoon af te spelen) vóór helemaal op te geven.
-        stream_url = await _aiostreams_fallback_stream_url(stremio_type, id_)
+        candidates = await _aiostreams_candidates(stremio_type, id_)
+        stream_url = _best_matching_stream_url(candidates, None, None)
+
     if not stream_url:
         return {"subtitles": []}
 
@@ -143,8 +199,4 @@ async def get_subtitles(type: str, id: str, request: Request):
 
 @router.get("/subtitles/{type}/{id}/{extra}.json")
 async def get_subtitles_with_extra(type: str, id: str, extra: str, request: Request):
-    # De extra padsegment (videoHash=...&videoSize=...&filename=...) hebben we
-    # niet nodig - we lossen hierboven zelf een referentiestream op - maar de
-    # route moet wel bestaan zodat Nuvio's variant met die parameters niet
-    # gewoon 404 geeft.
-    return await _resolve_subtitles(type, id, request)
+    return await _resolve_subtitles(type, id, request, extra_params=_parse_extra_params(extra))
