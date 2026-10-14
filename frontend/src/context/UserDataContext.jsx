@@ -7,6 +7,7 @@ export function UserDataProvider({ children }) {
   const { selectedProfileId, authedFetch } = useProfile();
   const [watchlist, setWatchlist] = useState([]);
   const [progress, setProgress] = useState([]);
+  const [ratings, setRatings] = useState({});
 
   const refreshWatchlist = useCallback(() => {
     if (!selectedProfileId) {
@@ -30,9 +31,21 @@ export function UserDataProvider({ children }) {
       .catch(() => setProgress([]));
   }, [selectedProfileId, authedFetch]);
 
+  const refreshRatings = useCallback(() => {
+    if (!selectedProfileId) {
+      setRatings({});
+      return;
+    }
+    authedFetch(`/profiles/${selectedProfileId}/ratings`)
+      .then((r) => (r.ok ? r.json() : {}))
+      .then(setRatings)
+      .catch(() => setRatings({}));
+  }, [selectedProfileId, authedFetch]);
+
   useEffect(() => {
     refreshWatchlist();
     refreshProgress();
+    refreshRatings();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProfileId]);
 
@@ -139,6 +152,33 @@ export function UserDataProvider({ children }) {
     return progress.find((p) => p.id === id) || null;
   }
 
+  async function setRating(item, stars) {
+    if (!selectedProfileId) return;
+    await authedFetch(`/profiles/${selectedProfileId}/ratings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: item.id,
+        stars,
+        media_type: item.media_type || (item.title ? "movie" : "tv"),
+        title: item.title || item.name || "",
+        poster_path: item.poster_path || "",
+        backdrop_path: item.backdrop_path || "",
+      }),
+    });
+    refreshRatings();
+  }
+
+  async function clearRating(item) {
+    if (!selectedProfileId) return;
+    await authedFetch(`/profiles/${selectedProfileId}/ratings/${item.id}`, { method: "DELETE" });
+    refreshRatings();
+  }
+
+  function getRating(id) {
+    return ratings[String(id)]?.stars || 0;
+  }
+
   const progressMap = Object.fromEntries(progress.map((p) => [p.id, p]));
 
   return (
@@ -147,11 +187,15 @@ export function UserDataProvider({ children }) {
         watchlist,
         progress,
         progressMap,
+        ratings,
         toggleWatchlist,
         saveProgress,
         clearContinueWatching,
         isInList,
         getProgress,
+        setRating,
+        clearRating,
+        getRating,
       }}
     >
       {children}

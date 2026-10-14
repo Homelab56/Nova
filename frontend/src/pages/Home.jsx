@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import Navbar from "../components/Navbar";
+import Sidebar from "../components/Sidebar";
 import HeroBanner from "../components/HeroBanner";
 import Row from "../components/Row";
 import MediaCard from "../components/MediaCard";
@@ -419,9 +419,9 @@ export default function Home() {
   // Watchlist pagina
   if (mode === "watchlist") {
     return (
-      <div className="min-h-screen bg-nova-bg">
-        <Navbar onSearch={handleSearch} onClear={handleClear} hasResults={false} onGenre={handleGenre} mode={mode} onMode={handleMode} />
-        <div className="pt-24 px-4 md:px-10 pb-16">
+      <div className="min-h-screen bg-nova-bg pl-20 md:pl-60">
+        <Sidebar onSearch={handleSearch} onClear={handleClear} onGenre={handleGenre} mode={mode} onMode={handleMode} />
+        <div className="pt-8 px-4 md:px-10 pb-16">
           <h1 className="text-2xl md:text-3xl font-black mb-2">Mijn Watchlist</h1>
           <p className="text-gray-500 text-sm mb-8">{watchlist.length} {watchlist.length === 1 ? "titel" : "titels"}</p>
           {watchlist.length === 0 ? (
@@ -441,11 +441,11 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-nova-bg">
-      <Navbar onSearch={handleSearch} onClear={handleClear} hasResults={!!showOverlay} onGenre={handleGenre} mode={mode} onMode={handleMode} />
+    <div className="min-h-screen bg-nova-bg pl-20 md:pl-60">
+      <Sidebar onSearch={handleSearch} onClear={handleClear} onGenre={handleGenre} mode={mode} onMode={handleMode} />
 
       {showOverlay ? (
-        <div className="pt-24 px-4 md:px-10 pb-16">
+        <div className="pt-8 px-4 md:px-10 pb-16">
           <div className="flex items-baseline gap-3 mb-6">
             <h2 className="text-xl md:text-2xl font-bold">{overlayTitle}</h2>
             {modeLabel && <span className="text-sm text-nova-accent border border-nova-accent/40 px-2 py-0.5 rounded-full">{modeLabel}</span>}

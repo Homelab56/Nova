@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import Sidebar from "../components/Sidebar";
 
 function StatusCard({ title, description, status, loading }) {
   const ok = status?.ok;
@@ -106,7 +107,15 @@ export default function Settings() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-nova-bg px-6 py-10 max-w-3xl mx-auto">
+    <div className="min-h-screen bg-nova-bg pl-20 md:pl-60">
+      <Sidebar
+        onSearch={(q) => navigate(`/?mode=all&q=${encodeURIComponent(q)}`)}
+        onClear={() => navigate("/")}
+        onGenre={() => navigate("/")}
+        mode=""
+        onMode={(m) => navigate(`/?mode=${encodeURIComponent(m)}`)}
+      />
+      <div className="px-6 py-10 max-w-3xl mx-auto">
       <div className="flex items-center justify-between mb-10">
         <div className="flex items-center gap-4">
           <button 
@@ -257,12 +266,13 @@ export default function Settings() {
       <div className="mt-12 p-6 bg-nova-card/50 rounded-2xl border border-gray-800/50">
         <h3 className="text-lg font-bold text-white mb-2">Hoe pas ik instellingen aan?</h3>
         <p className="text-gray-400 text-sm leading-relaxed">
-          Omdat Nova in Docker draait, worden alle API keys en paden beheerd in je <code className="bg-black/50 px-1.5 py-0.5 rounded text-nova-accent font-mono text-xs">.env</code> bestand op de server. 
+          Omdat de server in Docker draait, worden alle API keys en paden beheerd in je <code className="bg-black/50 px-1.5 py-0.5 rounded text-nova-accent font-mono text-xs">.env</code> bestand op de server.
           Na een wijziging in de <code className="bg-black/50 px-1.5 py-0.5 rounded text-nova-accent font-mono text-xs">.env</code> moet je de containers herstarten met:
         </p>
         <div className="mt-4 bg-black/50 p-4 rounded-xl font-mono text-xs text-gray-300 border border-white/5">
           docker compose up -d
         </div>
+      </div>
       </div>
     </div>
   );

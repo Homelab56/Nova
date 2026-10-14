@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import Navbar from "../components/Navbar";
+import Sidebar from "../components/Sidebar";
+import StarRating from "../components/StarRating";
 import Player from "../components/Player";
 import Row from "../components/Row";
 import { useUserData } from "../context/UserDataContext";
@@ -635,11 +636,10 @@ export default function Watch() {
   const playBusy = loading || requestBusy;
 
   return (
-    <div className="min-h-screen bg-nova-bg">
-      <Navbar
+    <div className="min-h-screen bg-nova-bg pl-20 md:pl-60">
+      <Sidebar
         onSearch={(q) => navigate(`/?mode=all&q=${encodeURIComponent(q)}`)}
         onClear={() => navigate("/")}
-        hasResults={false}
         onGenre={() => navigate("/")}
         mode={type}
         onMode={(m) => navigate(`/?mode=${encodeURIComponent(m)}`)}
@@ -809,6 +809,7 @@ export default function Watch() {
                   >
                     {inList ? "✓ In watchlist" : "+ Watchlist"}
                   </button>
+                  <StarRating item={media} />
                   {isMovie && savedProgress && (
                     <span className="text-sm text-gray-400">
                       Gestopt op {Math.floor(savedProgress.current_time / 60)}:{String(Math.floor(savedProgress.current_time % 60)).padStart(2, "0")}
