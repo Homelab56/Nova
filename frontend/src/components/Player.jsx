@@ -29,6 +29,8 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const absTimeRef = useRef(0);
   const totalRef = useRef(0);
   const lastReportRef = useRef({ t: 0, d: 0, ts: 0 });
+  const userChangedSubtitleRef = useRef(false);
+  const externalBlobUrlRef = useRef(null);
   const [error, setError] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [buffering, setBuffering] = useState(false);
@@ -123,6 +125,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       clearTimeout(flashTimer.current);
       clearTimeout(bufferingTimerRef.current);
       if (subsAbortRef.current) subsAbortRef.current.abort();
+      if (externalBlobUrlRef.current) URL.revokeObjectURL(externalBlobUrlRef.current);
       reportProgress();
     };
   }, []);
@@ -238,6 +241,31 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     if (subtitleDelay && Math.abs(subtitleDelay) > 0.0005) {
       u.searchParams.set("delay", String(Number(subtitleDelay).toFixed(3)));
     }
+    return u.toString();
+  };
+
+  const getExternalSubtitleInfo = () => {
+    const mt = media?.media_type === "tv_episode" ? "tv" : (media?.media_type || (media?.name ? "tv" : "movie"));
+    const tmdbId = media?.media_type === "tv_episode"
+      ? media?.show_id
+      : (media?.id ?? media?.tmdb_id ?? media?.tmdbId ?? media?.tmdbID);
+    if (!tmdbId) return null;
+    return { tmdbId, mediaType: mt, season: media?.season_number, episode: media?.episode_number };
+  };
+
+  const buildExternalSubtitleUrl = (lang) => {
+    const info = getExternalSubtitleInfo();
+    if (!info) return null;
+    const src = extractOriginalUrlParam();
+    const rawUrl = src ? (typeof src === "object" ? src.path : String(src)) : url;
+    if (!rawUrl) return null;
+    const u = new URL("/api/stream/subtitle-external.vtt", window.location.origin);
+    u.searchParams.set("url", rawUrl);
+    u.searchParams.set("tmdb_id", String(info.tmdbId));
+    u.searchParams.set("media_type", info.mediaType);
+    if (info.season != null) u.searchParams.set("season", String(info.season));
+    if (info.episode != null) u.searchParams.set("episode", String(info.episode));
+    u.searchParams.set("lang", lang);
     return u.toString();
   };
 
@@ -472,6 +500,11 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     if (subsAbortRef.current) subsAbortRef.current.abort();
     const ac = new AbortController();
     subsAbortRef.current = ac;
+    userChangedSubtitleRef.current = false;
+    if (externalBlobUrlRef.current) {
+      URL.revokeObjectURL(externalBlobUrlRef.current);
+      externalBlobUrlRef.current = null;
+    }
     setSubtitleTracks([]);
     setSubtitleSelected(null);
     setSubtitleLabel("");
@@ -492,6 +525,43 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         } else {
           setSubtitleSelected(null);
           setSubtitleLabel("");
+        }
+
+        // Geen ingebakken track in de voorkeurstaal gevonden (zeer gebruikelijk bij
+        // scene-releases, vooral voor Nederlands/Vlaams) - zoek op de achtergrond een
+        // externe op OpenSubtitles, automatisch gesynchroniseerd op de audio. Kan
+        // 10-30s duren (download + ffsubsync), dus blokkeert het afspelen niet.
+        const dutchVariants = ["nl", "nld", "dut", "vla", "nl-be", "nld-be"];
+        const prefNorm = normLang(prefs.default_sub_lang_1);
+        // OpenSubtitles kent alleen de kale "nl"-taalcode (geen apart "nl-be"/Vlaams).
+        const osLang = dutchVariants.includes(prefNorm) ? "nl" : prefNorm;
+        const matchesPref = (lang) => osLang === "nl" ? dutchVariants.includes(lang) : lang === osLang;
+        const hasConfidentPrefMatch = filtered.some(t => matchesPref(normLang(t?.language)));
+        if (osLang && !hasConfidentPrefMatch && prefs.subtitles_enabled) {
+          const extUrl = buildExternalSubtitleUrl(osLang);
+          if (extUrl) {
+            fetch(extUrl, { signal: ac.signal })
+              .then(r => r.ok ? r.text() : null)
+              .then(vtt => {
+                if (ac.signal.aborted || !vtt) return;
+                const blobUrl = URL.createObjectURL(new Blob([vtt], { type: "text/vtt" }));
+                externalBlobUrlRef.current = blobUrl;
+                const trackKey = `external-${osLang}`;
+                const extTrack = {
+                  stream_index: trackKey,
+                  language: osLang,
+                  title: "OpenSubtitles",
+                  external: true,
+                  vttBlobUrl: blobUrl,
+                };
+                setSubtitleTracks(prev => [...prev, extTrack]);
+                if (!userChangedSubtitleRef.current) {
+                  setSubtitleSelected(trackKey);
+                  setSubtitleLabel(prettyLang(osLang, "") || "Ondertitels");
+                }
+              })
+              .catch(() => {});
+          }
         }
       })
       .catch(() => {});
@@ -519,7 +589,9 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const selectedTrackObj = subtitleSelected !== null
     ? subtitleTracks.find(t => t.stream_index === subtitleSelected) || null
     : null;
-  const vttSrc = selectedTrackObj ? buildSubtitleVttUrl(selectedTrackObj.stream_index) : null;
+  const vttSrc = selectedTrackObj
+    ? (selectedTrackObj.external ? selectedTrackObj.vttBlobUrl : buildSubtitleVttUrl(selectedTrackObj.stream_index))
+    : null;
 
   // Reload video when audio selection changes (alleen voor backend proxy URLs, niet externe redirect URLs)
   useEffect(() => {
@@ -991,7 +1063,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
                     <div className="text-xs font-bold text-white/60 uppercase tracking-wide">Ondertitels</div>
                   </div>
                   <button
-                    onClick={() => { setSubtitleSelected(null); setSubtitleLabel(""); setSubMenuOpen(false); }}
+                    onClick={() => { userChangedSubtitleRef.current = true; setSubtitleSelected(null); setSubtitleLabel(""); setSubMenuOpen(false); }}
                     className={`w-full text-left px-4 py-2.5 text-sm flex items-center gap-3 border-l-2 transition-colors ${
                       subtitleSelected === null
                         ? "bg-white/15 border-nova-accent text-white"
@@ -1051,6 +1123,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
                         <button
                           key={idx}
                           onClick={() => {
+                            userChangedSubtitleRef.current = true;
                             setSubtitleSelected(idx);
                             setSubtitleLabel(pretty || label);
                             setSubMenuOpen(false);
