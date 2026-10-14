@@ -67,7 +67,7 @@ def _norm_text(s: str) -> str:
 async def tmdb_get(path: str, params: dict = {}):
     p = dict(params)
     p["api_key"] = get_tmdb_key()
-    p["language"] = "nl-NL"
+    p.setdefault("language", "nl-NL")
     p.setdefault("include_adult", "false")
     async with _tmdb_concurrency:
         r = await _tmdb_client.get(f"{TMDB_BASE}{path}", params=p)
@@ -657,7 +657,14 @@ async def search_person(q: str = Query(..., min_length=1), page: int = 1):
 
 @router.get("/person/{person_id}")
 async def person_detail(person_id: int):
-    return await tmdb_get(f"/person/{person_id}")
+    data = await tmdb_get(f"/person/{person_id}")
+    # TMDB heeft voor veel personen geen Nederlandse biografie (leeg veld) terwijl
+    # de Engelse wel bestaat - liever een Engelse tekst tonen dan niks.
+    if not (data.get("biography") or "").strip():
+        en = await tmdb_get(f"/person/{person_id}", {"language": "en-US"})
+        if (en.get("biography") or "").strip():
+            data["biography"] = en["biography"]
+    return data
 
 @router.get("/person/{person_id}/credits")
 async def person_credits(person_id: int):

@@ -123,6 +123,7 @@ export default function Home() {
   const [loadingGenre, setLoadingGenre] = useState(false);
   const [searchResults, setSearchResults] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [personResults, setPersonResults] = useState([]);
   const [genreResults, setGenreResults] = useState(null);
   const [activeGenre, setActiveGenre] = useState(null);
   const [overlayPage, setOverlayPage] = useState(1);
@@ -318,12 +319,18 @@ export default function Home() {
     setOverlayTotalPages(data.total_pages);
     setOverlayTotal(data.total_results);
     setOverlayPage(data.page ?? 1);
+
+    fetch(`/api/search/person?q=${encodeURIComponent(query)}`)
+      .then(r => r.json())
+      .then(d => setPersonResults((d.items || []).filter(p => p.profile_path).slice(0, 10)))
+      .catch(() => setPersonResults([]));
   }
 
   async function handleGenre(genre) {
     setActiveGenre(genre);
     setSearchResults(null);
     setSearchQuery("");
+    setPersonResults([]);
     setOverlayPage(1);
     overlayType.current = "genre";
     overlayMeta.current = { genre };
@@ -398,6 +405,7 @@ export default function Home() {
     setOverlayPage(1);
     setOverlayTotalPages(1);
     setOverlayTotal(0);
+    setPersonResults([]);
   }
 
   function handleMode(key) {
@@ -453,8 +461,27 @@ export default function Home() {
               {overlayItems.length} van {overlayTotal > 0 ? overlayTotal.toLocaleString() : "?"} resultaten
             </span>
           </div>
+          {searchResults && personResults.length > 0 && (
+            <div className="mb-8">
+              <h3 className="text-sm font-bold text-gray-400 mb-3">Personen</h3>
+              <div className="flex gap-4 overflow-x-auto pb-3" style={{ scrollbarWidth: "none" }}>
+                {personResults.map(person => (
+                  <div
+                    key={person.id}
+                    onClick={() => navigate("/person", { state: { person } })}
+                    className="flex-shrink-0 w-20 md:w-24 text-center cursor-pointer group"
+                  >
+                    <div className="w-20 h-20 md:w-24 md:h-24 rounded-full overflow-hidden bg-nova-card mx-auto mb-2 border-2 border-gray-700 group-hover:border-nova-accent transition-colors">
+                      <img src={`https://image.tmdb.org/t/p/w185${person.profile_path}`} alt={person.name} className="w-full h-full object-cover" />
+                    </div>
+                    <p className="text-xs font-semibold leading-tight truncate">{person.name}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {overlayItems.length === 0
-            ? <p className="text-gray-500">Geen resultaten gevonden.</p>
+            ? (personResults.length === 0 && <p className="text-gray-500">Geen resultaten gevonden.</p>)
             : <>
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-9 gap-3">
                   {overlayItems.map(item => <MediaCard key={item.id} item={item} />)}

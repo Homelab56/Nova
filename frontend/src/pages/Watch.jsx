@@ -942,8 +942,12 @@ export default function Watch() {
             <h2 className="text-xl md:text-2xl font-bold mb-4">Cast</h2>
             <div className="flex gap-4 overflow-x-auto pb-3" style={{ scrollbarWidth: "none" }}>
               {cast.map(person => (
-                <div key={person.id} className="flex-shrink-0 w-24 md:w-28 text-center">
-                  <div className="w-24 h-24 md:w-28 md:h-28 rounded-full overflow-hidden bg-nova-card mx-auto mb-2 border-2 border-gray-700">
+                <div
+                  key={person.id}
+                  onClick={() => navigate("/person", { state: { person } })}
+                  className="flex-shrink-0 w-24 md:w-28 text-center cursor-pointer group"
+                >
+                  <div className="w-24 h-24 md:w-28 md:h-28 rounded-full overflow-hidden bg-nova-card mx-auto mb-2 border-2 border-gray-700 group-hover:border-nova-accent transition-colors">
                     {person.profile_path ? (
                       <img src={`${TMDB_PROFILE}${person.profile_path}`} alt={person.name} className="w-full h-full object-cover" />
                     ) : (
