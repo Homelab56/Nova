@@ -136,7 +136,7 @@ export default function Home() {
   const sessionSeed = useRef(Math.floor(Math.random() * 1e9));
   const initFromUrlRef = useRef(false);
 
-  const { watchlist, progress, progressMap } = useUserData();
+  const { watchlist, progress, progressMap, suggestions } = useUserData();
   const inProgressRaw = progress.filter(p => {
     const t = Number(p?.current_time) || 0;
     const d = Number(p?.duration) || 0;
@@ -510,6 +510,14 @@ export default function Home() {
             {/* Persoonlijke rijen bovenaan */}
             {inProgress.length > 0 && (
               <Row title="Verder kijken" items={inProgress} progressMap={progressMap} dismissable={true} />
+            )}
+
+            {/* "Voor jou" op basis van je sterrenbeoordelingen */}
+            {(mode === "all" || mode === "movie") && suggestions.movies.length > 0 && (
+              <Row title="Films voor jou" items={suggestions.movies} progressMap={progressMap} />
+            )}
+            {(mode === "all" || mode === "tv") && suggestions.tv.length > 0 && (
+              <Row title="Series voor jou" items={suggestions.tv} progressMap={progressMap} />
             )}
 
             {/* Vaste rijen */}

@@ -9,6 +9,7 @@ ownership - we still filter by profile_id/user_id explicitly for clarity,
 but a mismatched profile_id simply returns nothing rather than someone
 else's data.
 """
+import asyncio
 import uuid
 from datetime import datetime, timezone
 
@@ -16,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
 from .supabase_auth import UserContext, get_user_context
+from .search import tmdb_get, _filter_items
 
 router = APIRouter()
 
@@ -324,3 +326,61 @@ async def clear_rating(profile_id: str, item_id: int, ctx: UserContext = Depends
         "user_id", ctx.user_id
     ).eq("tmdb_id", item_id).execute()
     return {"ok": True}
+
+
+# --- "Voor jou" suggesties (gebaseerd op je beoordelingen) ---
+# Zelfde opzet als de tv-app (zie TmdbSuggestions.kt): de hoogst (en meest
+# recent) beoordeelde titels dienen als "seed", per seed wordt TMDB's eigen
+# /recommendations endpoint geraadpleegd, en de resultaten worden gemerged -
+# geen aparte rij per beoordeelde titel.
+MAX_SUGGESTION_SEEDS = 5
+MAX_SUGGESTION_ITEMS = 20
+
+
+@router.get("/{profile_id}/suggestions")
+async def get_suggestions(profile_id: str, ctx: UserContext = Depends(get_user_context)):
+    res = (
+        ctx.client.table(RATINGS_TABLE)
+        .select("tmdb_id, media_type, stars, rated_at")
+        .eq("profile_id", profile_id)
+        .eq("user_id", ctx.user_id)
+        .is_("deleted_at", "null")
+        .order("stars", desc=True)
+        .order("rated_at", desc=True)
+        .limit(MAX_SUGGESTION_SEEDS)
+        .execute()
+    )
+    seeds = [s for s in (res.data or []) if s.get("media_type") in ("movie", "tv")]
+    if not seeds:
+        return {"movies": [], "tv": []}
+
+    seed_ids_by_type: dict[str, set[int]] = {"movie": set(), "tv": set()}
+    for s in seeds:
+        seed_ids_by_type[s["media_type"]].add(int(s["tmdb_id"]))
+
+    async def fetch_for(seed: dict) -> list[dict]:
+        try:
+            data = await tmdb_get(f"/{seed['media_type']}/{seed['tmdb_id']}/recommendations")
+        except Exception:
+            return []
+        items = data.get("results", []) or []
+        for it in items:
+            it["media_type"] = seed["media_type"]
+        return items
+
+    results = await asyncio.gather(*[fetch_for(s) for s in seeds])
+
+    merged: dict[tuple, dict] = {}
+    for items in results:
+        for it in items:
+            mt, tid = it.get("media_type"), it.get("id")
+            if tid is None or tid in seed_ids_by_type.get(mt, set()):
+                continue
+            merged.setdefault((mt, tid), it)
+
+    all_items = _filter_items(list(merged.values()), media_type=None, suggestion_mode=True, allow_kids=False)
+    all_items.sort(key=lambda x: x.get("vote_average") or 0, reverse=True)
+
+    movies = [it for it in all_items if it.get("media_type") == "movie"][:MAX_SUGGESTION_ITEMS]
+    tv = [it for it in all_items if it.get("media_type") == "tv"][:MAX_SUGGESTION_ITEMS]
+    return {"movies": movies, "tv": tv}

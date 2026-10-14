@@ -8,6 +8,7 @@ export function UserDataProvider({ children }) {
   const [watchlist, setWatchlist] = useState([]);
   const [progress, setProgress] = useState([]);
   const [ratings, setRatings] = useState({});
+  const [suggestions, setSuggestions] = useState({ movies: [], tv: [] });
 
   const refreshWatchlist = useCallback(() => {
     if (!selectedProfileId) {
@@ -42,10 +43,22 @@ export function UserDataProvider({ children }) {
       .catch(() => setRatings({}));
   }, [selectedProfileId, authedFetch]);
 
+  const refreshSuggestions = useCallback(() => {
+    if (!selectedProfileId) {
+      setSuggestions({ movies: [], tv: [] });
+      return;
+    }
+    authedFetch(`/profiles/${selectedProfileId}/suggestions`)
+      .then((r) => (r.ok ? r.json() : { movies: [], tv: [] }))
+      .then(setSuggestions)
+      .catch(() => setSuggestions({ movies: [], tv: [] }));
+  }, [selectedProfileId, authedFetch]);
+
   useEffect(() => {
     refreshWatchlist();
     refreshProgress();
     refreshRatings();
+    refreshSuggestions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProfileId]);
 
@@ -167,12 +180,14 @@ export function UserDataProvider({ children }) {
       }),
     });
     refreshRatings();
+    refreshSuggestions();
   }
 
   async function clearRating(item) {
     if (!selectedProfileId) return;
     await authedFetch(`/profiles/${selectedProfileId}/ratings/${item.id}`, { method: "DELETE" });
     refreshRatings();
+    refreshSuggestions();
   }
 
   function getRating(id) {
@@ -188,6 +203,7 @@ export function UserDataProvider({ children }) {
         progress,
         progressMap,
         ratings,
+        suggestions,
         toggleWatchlist,
         saveProgress,
         clearContinueWatching,
