@@ -1,3 +1,4 @@
+import asyncio
 import httpx
 from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Query
@@ -14,6 +15,13 @@ TMDB_BASE = "https://api.themoviedb.org/3"
 # timeout (de httpx default is maar 5s in totaal voor connect+read+write+pool) geeft
 # bovendien een nette fout i.p.v. te snel opgeven onder belasting.
 _tmdb_client = httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=10.0))
+
+# Zelfs met een gedeelde client bleef /search/genre-rows (tot ~24 gelijktijdige TMDB-calls
+# via asyncio.gather - elk genre x movie/tv) af en toe ConnectTimeouts geven; blijkbaar is
+# er ergens tussen deze server en TMDB (homelab-firewall, ISP) een grens op het aantal
+# nieuwe gelijktijdige connecties naar dezelfde host. Deze semafoor begrenst dat voor élke
+# aanroeper van tmdb_get, niet enkel genre_rows.
+_tmdb_concurrency = asyncio.Semaphore(6)
 
 # Genre IDs
 GENRE_ROWS = [
@@ -61,7 +69,8 @@ async def tmdb_get(path: str, params: dict = {}):
     p["api_key"] = get_tmdb_key()
     p["language"] = "nl-NL"
     p.setdefault("include_adult", "false")
-    r = await _tmdb_client.get(f"{TMDB_BASE}{path}", params=p)
+    async with _tmdb_concurrency:
+        r = await _tmdb_client.get(f"{TMDB_BASE}{path}", params=p)
     if r.status_code == 404:
         # Verwacht en normaal, geen serverfout: gebeurt elke keer dat de
         # client een movie-id als tv (of omgekeerd) probeert (de client
