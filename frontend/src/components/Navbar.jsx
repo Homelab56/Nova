@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { useProfile } from "../context/ProfileContext";
+import { useAuth } from "../context/AuthContext";
 
 const GENRES = [
   { id: 28, name: "Actie" }, { id: 12, name: "Avontuur" }, { id: 16, name: "Animatie" },
@@ -22,13 +24,17 @@ const MODES = [
 
 export default function Navbar({ onSearch, onClear, hasResults, onGenre, mode, onMode }) {
   const navigate = useNavigate();
+  const { selectedProfile, clearSelectedProfile } = useProfile();
+  const { signOut } = useAuth();
   const [scrolled, setScrolled] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [genreOpen, setGenreOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeGenre, setActiveGenre] = useState(null);
   const genreRef = useRef(null);
+  const profileRef = useRef(null);
 
   useEffect(() => {
     const handler = () => setScrolled(window.scrollY > 20);
@@ -44,6 +50,15 @@ export default function Navbar({ onSearch, onClear, hasResults, onGenre, mode, o
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [genreOpen]);
+
+  useEffect(() => {
+    if (!profileOpen) return;
+    const handler = (e) => {
+      if (profileRef.current && !profileRef.current.contains(e.target)) setProfileOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [profileOpen]);
 
   function handleSubmit(e) {
     e.preventDefault();
@@ -153,6 +168,41 @@ export default function Navbar({ onSearch, onClear, hasResults, onGenre, mode, o
               </svg>
             </button>
 
+            {/* Profiel (desktop) */}
+            {selectedProfile && (
+              <div className="hidden md:block relative" ref={profileRef}>
+                <button
+                  onClick={() => setProfileOpen((v) => !v)}
+                  className="flex items-center gap-2 p-1 pr-2 rounded-lg hover:bg-white/10 transition-colors"
+                >
+                  <div
+                    className="w-8 h-8 rounded-md flex items-center justify-center text-sm font-bold text-white"
+                    style={{ backgroundColor: selectedProfile.avatar_color_hex || "#1E88E5" }}
+                  >
+                    {(selectedProfile.name || "?").charAt(0).toUpperCase()}
+                  </div>
+                  <span className="text-sm text-gray-300 max-w-[7rem] truncate">{selectedProfile.name}</span>
+                </button>
+
+                {profileOpen && (
+                  <div className="absolute top-12 right-0 z-50 bg-nova-card/95 backdrop-blur border border-gray-700 rounded-xl shadow-2xl py-2 w-48">
+                    <button
+                      onClick={() => { setProfileOpen(false); clearSelectedProfile(); }}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-white/10 hover:text-white"
+                    >
+                      Wissel van profiel
+                    </button>
+                    <button
+                      onClick={() => { setProfileOpen(false); signOut(); }}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-white/10 hover:text-white"
+                    >
+                      Uitloggen
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Hamburger (mobile) */}
             <button onClick={() => setMobileOpen(v => !v)}
               className="md:hidden text-gray-300 hover:text-white p-2 rounded-lg hover:bg-white/10 transition-colors">
@@ -194,6 +244,18 @@ export default function Navbar({ onSearch, onClear, hasResults, onGenre, mode, o
                 className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm text-gray-300 hover:bg-white/10">
                 ⚙ Instellingen
               </button>
+              {selectedProfile && (
+                <>
+                  <button onClick={() => { setMobileOpen(false); clearSelectedProfile(); }}
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm text-gray-300 hover:bg-white/10">
+                    👤 Wissel van profiel ({selectedProfile.name})
+                  </button>
+                  <button onClick={() => { setMobileOpen(false); signOut(); }}
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm text-gray-300 hover:bg-white/10">
+                    Uitloggen
+                  </button>
+                </>
+              )}
             </div>
           </div>
         )}
