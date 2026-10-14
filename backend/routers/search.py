@@ -7,6 +7,14 @@ import re
 router = APIRouter()
 TMDB_BASE = "https://api.themoviedb.org/3"
 
+# Eén gedeelde client (eigen connection pool, keep-alive) in plaats van een nieuwe
+# httpx.AsyncClient per aanroep - de Home-pagina vuurt tientallen TMDB-calls
+# gelijktijdig af (elke rij, elk genre), en dat elk een eigen verse TLS-handshake +
+# DNS-lookup liet doen veroorzaakte ConnectTimeouts onder die burst. Een expliciete
+# timeout (de httpx default is maar 5s in totaal voor connect+read+write+pool) geeft
+# bovendien een nette fout i.p.v. te snel opgeven onder belasting.
+_tmdb_client = httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=10.0))
+
 # Genre IDs
 GENRE_ROWS = [
     {"id": 28,    "name": "Actie"},
@@ -53,16 +61,15 @@ async def tmdb_get(path: str, params: dict = {}):
     p["api_key"] = get_tmdb_key()
     p["language"] = "nl-NL"
     p.setdefault("include_adult", "false")
-    async with httpx.AsyncClient() as client:
-        r = await client.get(f"{TMDB_BASE}{path}", params=p)
-        if r.status_code == 404:
-            # Verwacht en normaal, geen serverfout: gebeurt elke keer dat de
-            # client een movie-id als tv (of omgekeerd) probeert (de client
-            # herkent dit al en probeert dan zelf het andere type) - dat
-            # verdient een nette 404, geen onverwerkte 500 met stacktrace.
-            raise HTTPException(status_code=404, detail=f"TMDB: niet gevonden ({path})")
-        r.raise_for_status()
-        return r.json()
+    r = await _tmdb_client.get(f"{TMDB_BASE}{path}", params=p)
+    if r.status_code == 404:
+        # Verwacht en normaal, geen serverfout: gebeurt elke keer dat de
+        # client een movie-id als tv (of omgekeerd) probeert (de client
+        # herkent dit al en probeert dan zelf het andere type) - dat
+        # verdient een nette 404, geen onverwerkte 500 met stacktrace.
+        raise HTTPException(status_code=404, detail=f"TMDB: niet gevonden ({path})")
+    r.raise_for_status()
+    return r.json()
 
 def _as_int_set(values) -> set[int]:
     if not isinstance(values, list):
