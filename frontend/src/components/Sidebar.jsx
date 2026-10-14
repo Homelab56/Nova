@@ -48,27 +48,11 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode }) {
   const [profileOpen, setProfileOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeGenre, setActiveGenre] = useState(null);
-  const genreRef = useRef(null);
-  const profileRef = useRef(null);
   const searchInputRef = useRef(null);
 
   useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus();
   }, [searchOpen]);
-
-  useEffect(() => {
-    if (!genreOpen) return;
-    const handler = (e) => { if (genreRef.current && !genreRef.current.contains(e.target)) setGenreOpen(false); };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [genreOpen]);
-
-  useEffect(() => {
-    if (!profileOpen) return;
-    const handler = (e) => { if (profileRef.current && !profileRef.current.contains(e.target)) setProfileOpen(false); };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [profileOpen]);
 
   function handleSubmit(e) {
     e.preventDefault();
@@ -89,13 +73,14 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode }) {
   }
 
   return (
+    <>
     <nav className="fixed left-0 top-0 bottom-0 z-50 w-20 md:w-60 bg-nova-card/95 backdrop-blur border-r border-gray-800 flex flex-col">
       {/* Logo (gepind, scrollt niet mee) */}
       <div
         onClick={() => { onClear(); setActiveGenre(null); onMode("all"); navigate("/"); }}
-        className="cursor-pointer select-none flex items-center justify-center md:justify-start px-2 md:px-5 py-6 shrink-0"
+        className="cursor-pointer select-none flex items-center justify-center md:justify-start px-2 md:px-5 py-7 shrink-0"
       >
-        <img src="/logo.png" alt="Streamify" className="h-9 w-auto drop-shadow-[0_0_10px_rgba(0,180,216,0.4)]" />
+        <img src="/logo.png" alt="Streamify" className="h-12 md:h-16 w-auto drop-shadow-[0_0_14px_rgba(0,180,216,0.5)]" />
       </div>
 
       {/* Navigatie (scrollt indien nodig in de resterende ruimte) */}
@@ -113,7 +98,7 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode }) {
           </button>
         ))}
 
-        <div className="relative pt-2" ref={genreRef}>
+        <div className="relative pt-2">
           <button
             onClick={() => setGenreOpen((v) => !v)}
             className={`w-full flex items-center justify-center md:justify-start gap-3 px-2 md:px-3 py-2.5 rounded-xl text-sm font-medium transition-all border ${
@@ -125,30 +110,11 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode }) {
             </svg>
             <span className="hidden md:inline truncate">{activeGenre ? activeGenre.name : "Genres"}</span>
           </button>
-
-          {genreOpen && (
-            <div className="absolute left-full top-0 ml-2 z-50 bg-nova-card/95 backdrop-blur border border-gray-700 rounded-2xl shadow-2xl p-4 w-64">
-              <div className="grid grid-cols-2 gap-2">
-                {GENRES.map((g) => (
-                  <button key={g.id} onClick={() => handleGenre(g)}
-                    className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${activeGenre?.id === g.id ? "bg-nova-accent text-white" : "hover:bg-white/10 text-gray-300 hover:text-white"}`}>
-                    {g.name}
-                  </button>
-                ))}
-              </div>
-              {activeGenre && (
-                <button onClick={() => { setActiveGenre(null); onClear(); setGenreOpen(false); }}
-                  className="mt-3 w-full text-xs text-gray-500 hover:text-white text-center py-1">
-                  ✕ Filter wissen
-                </button>
-              )}
-            </div>
-          )}
         </div>
 
-        <div className="relative pt-2">
+        <div>
           <button
-            onClick={() => setSearchOpen((v) => !v)}
+            onClick={() => setSearchOpen(true)}
             className={`w-full flex items-center justify-center md:justify-start gap-3 px-2 md:px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${searchOpen ? "text-nova-accent" : "text-gray-400 hover:text-white hover:bg-white/5"}`}
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -156,18 +122,6 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode }) {
             </svg>
             <span className="hidden md:inline">Zoeken</span>
           </button>
-          {searchOpen && (
-            <form onSubmit={handleSubmit} className="absolute left-full top-0 ml-2 z-50 bg-nova-card/95 backdrop-blur border border-gray-700 rounded-xl shadow-2xl p-2 w-64 flex gap-2">
-              <input
-                ref={searchInputRef}
-                className="flex-1 bg-black/30 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-nova-accent"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Zoeken..."
-              />
-              <button type="submit" className="px-3 rounded-lg bg-nova-accent text-white text-sm">Ga</button>
-            </form>
-          )}
         </div>
       </div>
 
@@ -183,7 +137,7 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode }) {
         </button>
 
         {selectedProfile && (
-          <div className="relative" ref={profileRef}>
+          <div>
             <button
               onClick={() => setProfileOpen((v) => !v)}
               className="w-full flex items-center justify-center md:justify-start gap-2 px-1 md:px-2 py-2 rounded-xl hover:bg-white/5 transition-colors"
@@ -194,22 +148,71 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode }) {
               </div>
               <span className="hidden md:inline text-sm text-gray-300 truncate">{selectedProfile.name}</span>
             </button>
-
-            {profileOpen && (
-              <div className="absolute left-full bottom-0 ml-2 z-50 bg-nova-card/95 backdrop-blur border border-gray-700 rounded-xl shadow-2xl py-2 w-48">
-                <button onClick={() => { setProfileOpen(false); clearSelectedProfile(); }}
-                  className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-white/10 hover:text-white">
-                  Wissel van profiel
-                </button>
-                <button onClick={() => { setProfileOpen(false); signOut(); }}
-                  className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-white/10 hover:text-white">
-                  Uitloggen
-                </button>
-              </div>
-            )}
           </div>
         )}
       </div>
     </nav>
+
+    {/* Popouts worden buiten <nav> gerenderd: backdrop-blur op <nav> maakt er anders zelf een
+        "containing block" van, waardoor fixed-positioned kinderen beperkt blijven tot de smalle
+        zijbalk-breedte i.p.v. het volledige scherm - dat veroorzaakte eerder horizontaal scrollen. */}
+    {genreOpen && (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setGenreOpen(false)}>
+        <div className="bg-nova-card border border-gray-700 rounded-2xl shadow-2xl p-5 w-full max-w-md max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold text-white">Genres</h3>
+            <button onClick={() => setGenreOpen(false)} className="text-gray-400 hover:text-white text-xl leading-none">✕</button>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {GENRES.map((g) => (
+              <button key={g.id} onClick={() => handleGenre(g)}
+                className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${activeGenre?.id === g.id ? "bg-nova-accent text-white" : "hover:bg-white/10 text-gray-300 hover:text-white"}`}>
+                {g.name}
+              </button>
+            ))}
+          </div>
+          {activeGenre && (
+            <button onClick={() => { setActiveGenre(null); onClear(); setGenreOpen(false); }}
+              className="mt-4 w-full text-xs text-gray-500 hover:text-white text-center py-1">
+              ✕ Filter wissen
+            </button>
+          )}
+        </div>
+      </div>
+    )}
+
+    {searchOpen && (
+      <div className="fixed inset-0 z-[60] flex items-start justify-center pt-28 bg-black/60 backdrop-blur-sm p-4" onClick={() => setSearchOpen(false)}>
+        <form onSubmit={handleSubmit} onClick={(e) => e.stopPropagation()} className="bg-nova-card border border-gray-700 rounded-2xl shadow-2xl p-3 w-full max-w-md flex gap-2">
+          <input
+            ref={searchInputRef}
+            className="flex-1 bg-black/30 border border-gray-700 rounded-lg px-4 py-3 text-base text-white outline-none focus:border-nova-accent"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Zoeken..."
+          />
+          <button type="submit" className="px-5 rounded-lg bg-nova-accent text-white text-sm font-semibold">Ga</button>
+        </form>
+      </div>
+    )}
+
+    {profileOpen && selectedProfile && (
+      <div className="fixed inset-0 z-[60] bg-transparent" onClick={() => setProfileOpen(false)}>
+        <div
+          className="absolute bottom-20 left-24 md:left-64 ml-2 bg-nova-card border border-gray-700 rounded-xl shadow-2xl py-2 w-48"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button onClick={() => { setProfileOpen(false); clearSelectedProfile(); }}
+            className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-white/10 hover:text-white">
+            Wissel van profiel
+          </button>
+          <button onClick={() => { setProfileOpen(false); signOut(); }}
+            className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-white/10 hover:text-white">
+            Uitloggen
+          </button>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
