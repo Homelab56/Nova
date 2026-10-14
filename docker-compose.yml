@@ -27,6 +27,11 @@ services:
     environment:
       # Vite proxy: gebruik host poort 8005 voor backend
       VITE_DEV_PROXY_TARGET: ${VITE_DEV_PROXY_TARGET:-http://192.168.1.75:8005}
+      # Zelfde Supabase-project als de Streamify tv-app (C:\Streamio\local.properties) -
+      # zet beide in .env op deze server, zelfde waarden als SUPABASE_URL/SUPABASE_ANON_KEY
+      # hieronder bij backend.
+      VITE_SUPABASE_URL: ${SUPABASE_URL}
+      VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
     ports:
       - "8004:5173"
     depends_on:

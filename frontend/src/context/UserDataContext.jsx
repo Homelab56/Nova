@@ -1,36 +1,48 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { useProfile } from "./ProfileContext";
 
 const UserDataContext = createContext(null);
 
 export function UserDataProvider({ children }) {
+  const { selectedProfileId, authedFetch } = useProfile();
   const [watchlist, setWatchlist] = useState([]);
   const [progress, setProgress] = useState([]);
 
   const refreshWatchlist = useCallback(() => {
-    fetch("/api/user/watchlist")
-      .then(r => r.ok ? r.json() : [])
+    if (!selectedProfileId) {
+      setWatchlist([]);
+      return;
+    }
+    authedFetch(`/profiles/${selectedProfileId}/watchlist`)
+      .then((r) => (r.ok ? r.json() : []))
       .then(setWatchlist)
       .catch(() => setWatchlist([]));
-  }, []);
+  }, [selectedProfileId, authedFetch]);
 
   const refreshProgress = useCallback(() => {
-    fetch("/api/user/progress")
-      .then(r => r.ok ? r.json() : [])
+    if (!selectedProfileId) {
+      setProgress([]);
+      return;
+    }
+    authedFetch(`/profiles/${selectedProfileId}/progress`)
+      .then((r) => (r.ok ? r.json() : []))
       .then(setProgress)
       .catch(() => setProgress([]));
-  }, []);
+  }, [selectedProfileId, authedFetch]);
 
   useEffect(() => {
     refreshWatchlist();
     refreshProgress();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProfileId]);
 
   async function toggleWatchlist(item) {
-    const inList = watchlist.some(w => w.id === item.id);
+    if (!selectedProfileId) return;
+    const inList = watchlist.some((w) => w.id === item.id);
     if (inList) {
-      await fetch(`/api/user/watchlist/${item.id}`, { method: "DELETE" });
+      await authedFetch(`/profiles/${selectedProfileId}/watchlist/${item.id}`, { method: "DELETE" });
     } else {
-      await fetch("/api/user/watchlist", {
+      await authedFetch(`/profiles/${selectedProfileId}/watchlist`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -50,11 +62,11 @@ export function UserDataProvider({ children }) {
   }
 
   async function saveProgress(item, currentTime, duration) {
-    if (!item) return;
+    if (!item || !selectedProfileId) return;
     const t = Number(currentTime) || 0;
     const d = Number(duration) || 0;
     if (t <= 0) return;
-    await fetch("/api/user/progress", {
+    await authedFetch(`/profiles/${selectedProfileId}/progress`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -77,11 +89,13 @@ export function UserDataProvider({ children }) {
   }
 
   async function clearContinueWatching(item) {
-    if (!item) return;
+    if (!item || !selectedProfileId) return;
     const isSeries = item.media_type === "tv" || item.media_type === "tv_episode";
     if (!isSeries) {
-      setProgress(prev => prev.filter(p => String(p.id) !== String(item.id)));
-      await fetch(`/api/user/progress/${encodeURIComponent(String(item.id))}`, { method: "DELETE" });
+      setProgress((prev) => prev.filter((p) => String(p.id) !== String(item.id)));
+      await authedFetch(`/profiles/${selectedProfileId}/progress/${encodeURIComponent(String(item.id))}`, {
+        method: "DELETE",
+      });
       refreshProgress();
       return;
     }
@@ -89,7 +103,7 @@ export function UserDataProvider({ children }) {
     const showId = item.show_id ?? item.id;
     const showIdStr = String(showId);
     const ids = progress
-      .filter(p => {
+      .filter((p) => {
         const pid = String(p.id);
         if (p.show_id != null && String(p.show_id) === showIdStr) return true;
         if (String(p.id) === showIdStr) return true;
@@ -97,36 +111,49 @@ export function UserDataProvider({ children }) {
         if (pid.startsWith(`tv:${showIdStr}:`)) return true;
         return false;
       })
-      .map(p => String(p.id));
+      .map((p) => String(p.id));
 
-    setProgress(prev => prev.filter(p => {
-      const pid = String(p.id);
-      if (p.show_id != null && String(p.show_id) === showIdStr) return false;
-      if (String(p.id) === showIdStr) return false;
-      if (pid.startsWith(`tv:${showIdStr}:`)) return false;
-      return true;
-    }));
+    setProgress((prev) =>
+      prev.filter((p) => {
+        const pid = String(p.id);
+        if (p.show_id != null && String(p.show_id) === showIdStr) return false;
+        if (String(p.id) === showIdStr) return false;
+        if (pid.startsWith(`tv:${showIdStr}:`)) return false;
+        return true;
+      })
+    );
 
-    await Promise.all(ids.map(id => fetch(`/api/user/progress/${encodeURIComponent(id)}`, { method: "DELETE" })));
+    await Promise.all(
+      ids.map((id) =>
+        authedFetch(`/profiles/${selectedProfileId}/progress/${encodeURIComponent(id)}`, { method: "DELETE" })
+      )
+    );
     refreshProgress();
   }
 
   function isInList(id) {
-    return watchlist.some(w => w.id === id);
+    return watchlist.some((w) => w.id === id);
   }
 
   function getProgress(id) {
-    return progress.find(p => p.id === id) || null;
+    return progress.find((p) => p.id === id) || null;
   }
 
-  const progressMap = Object.fromEntries(progress.map(p => [p.id, p]));
+  const progressMap = Object.fromEntries(progress.map((p) => [p.id, p]));
 
   return (
-    <UserDataContext.Provider value={{
-      watchlist, progress, progressMap,
-      toggleWatchlist, saveProgress, clearContinueWatching,
-      isInList, getProgress,
-    }}>
+    <UserDataContext.Provider
+      value={{
+        watchlist,
+        progress,
+        progressMap,
+        toggleWatchlist,
+        saveProgress,
+        clearContinueWatching,
+        isInList,
+        getProgress,
+      }}
+    >
       {children}
     </UserDataContext.Provider>
   );

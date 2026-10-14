@@ -75,6 +75,28 @@ def get_jackett_config() -> dict:
     }
 
 
+def get_supabase_url() -> str:
+    """Zelfde Supabase-project als de Streamify TV-app (zie C:\\Streamio\\local.properties) -
+    gedeeld account, profielen en kijkgeschiedenis tussen tv en pc."""
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE) as f:
+            data = json.load(f)
+        url = (data.get("supabase_url") or "").strip().replace("`", "").rstrip("/")
+        if url:
+            return url
+    return os.getenv("SUPABASE_URL", "").strip().replace("`", "").rstrip("/")
+
+
+def get_supabase_anon_key() -> str:
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE) as f:
+            data = json.load(f)
+        key = (data.get("supabase_anon_key") or "").strip().replace("`", "")
+        if key:
+            return key
+    return os.getenv("SUPABASE_ANON_KEY", "").strip().replace("`", "")
+
+
 def get_seerr_config() -> dict:
     """Haalt Overseerr/Jellyseerr URL en API key op uit config of env."""
     url = os.getenv("SEERR_URL", "").strip().replace("`", "").rstrip("/")

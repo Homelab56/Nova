@@ -7,6 +7,7 @@
     "build": "node node_modules/vite/bin/vite.js build"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
     "hls.js": "^1.6.7",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

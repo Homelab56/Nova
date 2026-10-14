@@ -30,8 +30,12 @@ echo "Git pull (lokale wijzigingen worden weggegooid)..."
 git fetch origin main
 git reset --hard origin/main
 
-echo "Docker containers herstarten..."
-docker compose restart backend frontend 2>/dev/null || docker-compose restart backend frontend 2>/dev/null
+echo "Docker containers herbouwen en herstarten..."
+# --build (niet enkel restart): een plain restart hergebruikt de bestaande image en pakt dus
+# geen nieuwe/gewijzigde dependencies op (requirements.txt, package.json) - dat gaf eerder
+# precies het "staat in de code maar werkt niet op de server" probleem dat dit script juist
+# moet voorkomen.
+docker compose up -d --build backend frontend 2>/dev/null || docker-compose up -d --build backend frontend 2>/dev/null
 
 echo "Klaar! De wijzigingen zijn actief."
 echo "Frontend: http://192.168.1.75:8004"
