@@ -768,17 +768,27 @@ async def _ffprobe_streams(input_value: str, is_path: bool) -> dict:
     if is_path:
         args[-1] = input_value
 
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        out, _err = await asyncio.wait_for(proc.communicate(), timeout=8)
+        # Grote 4K/HDR/DV-bronnen over een (trage) debrid-link hebben soms meer dan
+        # de oorspronkelijke 8s nodig om te analyseren - een timeout hier liet de
+        # resolutie-check stilletjes falen (hoogte=0), wat de 1080p-transcode-cap
+        # uitschakelde i.p.v. hem te laten gelden (zie do_scale hierboven/verderop).
+        out, _err = await asyncio.wait_for(proc.communicate(), timeout=15)
         if proc.returncode != 0: return {}
         return json.loads(out.decode("utf-8"))
     except Exception as e:
         print(f"FFProbe streams fout: {e}")
+        if proc is not None:
+            try:
+                proc.kill()
+            except Exception:
+                pass
         return {}
 
 
@@ -911,7 +921,12 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0, au
     if copy_video:
         cmd += ["-c:v", "copy"]
     else:
-        do_scale = bool(max_h and max_h > 0 and v_height and v_height > max_h)
+        # Onbekende hoogte (ffprobe gaf niks terug, bv. door timeout op een grote
+        # 4K/HDR/DV-bron over een trage debrid-link) moet voorzichtig behandeld
+        # worden als "kan 4K zijn" i.p.v. "geen schaling nodig" - anders probeert
+        # ultrafast x264 een onbekende, mogelijk 4K-bron realtime te encoderen
+        # zonder de 1080p-veiligheidscap, wat de CPU niet bijhoudt (hapering).
+        do_scale = bool(max_h and max_h > 0) and (not v_height or v_height > max_h)
         do_fps = bool(target_fps and target_fps > 0)
         crf = "21" if do_scale else ("18" if v_height >= 1440 else "20")
         vf_parts = []
@@ -1793,7 +1808,12 @@ async def _ensure_hls_session(session_id: str, input_value: str):
 
     copy_video = v_codec == "h264"
     copy_audio = a_codec in {"aac", "mp3"}
-    do_scale = bool(max_h and max_h > 0 and v_height and v_height > max_h)
+    # Onbekende hoogte (ffprobe gaf niks terug, bv. door timeout op een grote
+    # 4K/HDR/DV-bron over een trage debrid-link) moet voorzichtig behandeld worden
+    # als "kan 4K zijn" i.p.v. "geen schaling nodig" - anders probeert ultrafast
+    # x264 een onbekende, mogelijk 4K-bron realtime te encoderen zonder de
+    # 1080p-veiligheidscap, wat de CPU niet bijhoudt (hapering).
+    do_scale = bool(max_h and max_h > 0) and (not v_height or v_height > max_h)
 
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin"]
     if start and start > 0:
