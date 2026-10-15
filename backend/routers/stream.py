@@ -1447,7 +1447,7 @@ _OS_USER_AGENT = "Nova v1.0"
 # parameters, referentie-venster, kandidaat-selectie, ...), anders blijven
 # oude, met de vorige logica gesynchroniseerde resultaten hangen.
 _SUB_CACHE_DIR = "/app/data/subtitles_cache"
-_SUB_CACHE_VERSION = "v11"
+_SUB_CACHE_VERSION = "v12"
 
 
 def _subtitle_cache_path(cache_key: str) -> str:
@@ -1923,18 +1923,21 @@ async def _extract_sub_window(input_value: str, t0: float, win: float, idx: int,
     return [[c[0] + t0, c[1] + t0, c[2]] for c in cues]
 
 
-def _ref_offset(ref_cues: list[list], cues: list[list], t0: float, win: float, center: float, max_off: float) -> float | None:
-    """Offset (referentietijd - ondertitel-tijd) via kruiscorrelatie van de BEGINMOMENTEN
-    (en deels de eindmomenten) van de ondertitelregels van de referentie in [t0, t0+win]
-    en van de te synchroniseren ondertitel, binnen center +- max_off. Beginmomenten zijn
-    veel scherper dan 'er staat tekst' (die twee talen segmenteren verschillend, maar
-    laten een zin op vrijwel hetzelfde moment beginnen): ~0.3s nauwkeurig i.p.v. enkele
-    seconden. Een reeks onsets is bovendien bijna een vingerafdruk - zeldzaam vals-positief."""
+def _ref_offset_candidates(
+    ref_cues: list[list], cues: list[list], t0: float, win: float, center: float, max_off: float, n_best: int = 4
+) -> list[tuple[float, float]]:
+    """Kandidaat-offsets (referentietijd - ondertitel-tijd, relatieve score 0..1) via
+    kruiscorrelatie van de BEGINMOMENTEN (en deels de eindmomenten) van de ondertitelregels
+    van de referentie in [t0, t0+win] en van de te synchroniseren ondertitel, binnen
+    center +- max_off. Beginmomenten zijn veel scherper dan 'er staat tekst' (twee talen
+    segmenteren verschillend, maar laten een zin op vrijwel hetzelfde moment beginnen).
+    Ritmische dialoog geeft sterke zijpieken (~3s verderop) - daarom meerdere kandidaten;
+    de keuze gebeurt over alle vensters heen (zie _pick_offset_path)."""
     import numpy as np
 
     dt = 0.1
     if len(ref_cues) < 8:
-        return None
+        return []
     sigma = 0.4
     kx = np.arange(-1.5, 1.5 + dt / 2, dt)
     kernel = np.exp(-0.5 * (kx / sigma) ** 2).astype(np.float32)
@@ -1950,23 +1953,58 @@ def _ref_offset(ref_cues: list[list], cues: list[list], t0: float, win: float, c
     n_ref = int(win / dt)
     ref = signal([(c[0], 1.0) for c in ref_cues] + [(c[1], 0.5) for c in ref_cues], t0, n_ref)
     if float(ref.sum()) < 10:
-        return None
-
+        return []
     t_s = t0 - (center + max_off)
     t_e = t0 + win - (center - max_off)
     n_d = int((t_e - t_s) / dt) + 2
     if n_d <= n_ref:
-        return None
+        return []
     dut = signal([(c[0], 1.0) for c in cues] + [(c[1], 0.5) for c in cues], t_s, n_d)
     corr = np.correlate(dut, ref, mode="valid")  # corr[k] = sum_i dut[k+i] * ref[i]
-    k = int(np.argmax(corr))
-    if float(corr[k]) <= 0:
-        return None
-    # Bewust géén 'unieke piek'-drempel per venster: ritmische dialoog geeft sterke
-    # zijpieken (~3s verderop). De hoogste piek blijkt in de praktijk bijna altijd juist;
-    # de betrouwbaarheid komt uit de onderlinge overeenstemming van veel vensters
-    # (zie _robust_line), niet uit één venster.
-    return (t0 - t_s) - k * dt
+    top = float(corr.max())
+    if top <= 0:
+        return []
+    guard = int(1.2 / dt)
+    picks: list[tuple[int, float]] = []
+    for idx in np.argsort(corr)[::-1]:
+        if all(abs(int(idx) - p_) > guard for p_, _ in picks):
+            picks.append((int(idx), float(corr[idx])))
+        if len(picks) >= n_best:
+            break
+    return [((t0 - t_s) - k * dt, v / top) for k, v in picks]
+
+
+def _pick_offset_path(windows: list[tuple[float, list[tuple[float, float]]]]) -> list[tuple[float, float]]:
+    """windows = [(sub-tijd van het venster, [(offset, score), ...])] in tijdsvolgorde. Kiest via
+    dynamic programming per venster de kandidaat zodat de som van scores hoog is en de offset
+    tussen opeenvolgende vensters vloeiend verloopt (echte drift is traag; een zijpiek
+    springt ~3s heen en weer). Sprongen blijven mogelijk (begrensde straf) voor echte
+    montageverschillen."""
+    lam, cap = 0.12, 8.0
+    ws = [w for w in windows if w[1]]
+    if not ws:
+        return []
+    best = [[sc for _, sc in ws[0][1]]]
+    back: list[list[int]] = [[-1] * len(ws[0][1])]
+    for i in range(1, len(ws)):
+        row, brow = [], []
+        for off, sc in ws[i][1]:
+            cands = [
+                best[i - 1][j] - lam * min(abs(off - po), cap)
+                for j, (po, _) in enumerate(ws[i - 1][1])
+            ]
+            j = max(range(len(cands)), key=cands.__getitem__)
+            row.append(sc + cands[j])
+            brow.append(j)
+        best.append(row)
+        back.append(brow)
+    j = max(range(len(best[-1])), key=best[-1].__getitem__)
+    path = []
+    for i in range(len(ws) - 1, -1, -1):
+        path.append((ws[i][0], ws[i][1][j][0]))
+        j = back[i][j]
+    path.reverse()
+    return path
 
 
 def _robust_line(anchors: list[tuple[float, float]], duration: float, tol: float = 1.8):
@@ -2009,12 +2047,13 @@ def _robust_line(anchors: list[tuple[float, float]], duration: float, tol: float
 async def _ref_sync(
     input_value: str, cues: list[list], is_tv: bool, duration: float, ref_sub_idx: int
 ) -> tuple[list[list], int, int] | None:
-    """Sync tegen de ingebakken ondertitel van het bestand zelf: ~9 vensters verspreid over
-    de film, per venster de hoogste onset-correlatiepiek, daarna een robuuste lijn (constant
-    of lineaire drift - bv. 23.976 vs 24 fps geeft enkele seconden per uur) door de ankers."""
-    win = 180.0 if is_tv else 240.0
+    """Sync tegen de ingebakken ondertitel van het bestand zelf: ~11 vensters verspreid over
+    de film, per venster een paar kandidaat-pieken van de onset-correlatie, daarna het meest
+    vloeiende pad door die kandidaten (_pick_offset_path), licht gladgestreken en lineair
+    geïnterpoleerd. Volgt zowel constante offsets als drift of een andere montage."""
+    win = 240.0 if is_tv else 300.0
     d = duration if duration > 0 else (2700.0 if is_tv else 6600.0)
-    fracs = [0.03, 0.14, 0.25, 0.36, 0.47, 0.58, 0.69, 0.80, 0.90]
+    fracs = [0.03, 0.12, 0.21, 0.30, 0.39, 0.48, 0.57, 0.66, 0.75, 0.84, 0.93]
     starts = _pick_window_starts(duration, is_tv, win, fracs)
     sem = asyncio.Semaphore(3)
 
@@ -2022,22 +2061,44 @@ async def _ref_sync(
         async with sem:
             ref = await _extract_sub_window(input_value, t0, win, ref_sub_idx)
             if ref is None:
-                return t0, None
-            return t0, _ref_offset(ref, cues, t0, win, 0.0, 120.0)
+                return t0, []
+            return t0, _ref_offset_candidates(ref, cues, t0, win, 0.0, 120.0)
 
-    results = await asyncio.gather(*[one(t) for t in starts])
-    anchors = sorted((t0 + win / 2 - off, off) for t0, off in results if off is not None)
-    print("sync ref-ankers (sub-tijd s, offset s): " + ", ".join(f"({k:.0f}, {o:+.1f})" for k, o in anchors))
-    fit = _robust_line(anchors, d)
-    if fit is None:
+    results = sorted(await asyncio.gather(*[one(t) for t in starts]))
+    # 'sub-tijd' van een venster ~ midden van het venster min de offset; voor DP volstaat
+    # de venstermidden (offsets verschillen slechts seconden t.o.v. vensters van minuten).
+    windows = [(t0 + win / 2, cands) for t0, cands in results]
+    n_valid = sum(1 for _, c in windows if c)
+    path = _pick_offset_path(windows)
+    if n_valid < 3 or len(path) < 3:
         return None
-    offset_at, desc, n_in = fit
-    print(f"sync model: {desc}")
+    # lichte gladstrijking (mediaan van 3) tegen eenzame foute vensters
+    offs = [o for _, o in path]
+    smooth = [offs[0]] + [sorted(offs[i - 1:i + 2])[1] for i in range(1, len(offs) - 1)] + [offs[-1]]
+    anchors = [(t - o, o_s) for (t, _), o, o_s in zip(path, offs, smooth)]  # (ondertitel-tijd, offset)
+    anchors.sort()
+    print("sync ref-pad (sub-tijd s, offset s): " + ", ".join(f"({k:.0f}, {o:+.1f})" for k, o in anchors))
+
+    ks = [a[0] for a in anchors]
+    os_ = [a[1] for a in anchors]
+
+    def offset_at(t: float) -> float:
+        if t <= ks[0]:
+            return os_[0]
+        if t >= ks[-1]:
+            return os_[-1]
+        for i in range(len(ks) - 1):
+            if ks[i] <= t <= ks[i + 1]:
+                span = ks[i + 1] - ks[i]
+                return os_[i] + (os_[i + 1] - os_[i]) * ((t - ks[i]) / span if span > 0 else 0.0)
+        return os_[-1]
+
+    jumps = sum(1 for i in range(len(os_) - 1) if abs(os_[i + 1] - os_[i]) > 4.0)
     shifted = []
     for st_, en, tx in cues:
         o = offset_at(st_)
         shifted.append([max(0.0, st_ + o), max(0.0, en + o), tx])
-    return shifted, n_in, 0
+    return shifted, n_valid, jumps
 
 
 def _fit_offset_model(anchors: list[tuple[float, float]], duration: float):
