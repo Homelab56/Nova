@@ -496,8 +496,8 @@ async def by_keyword(name: str, type: str = "movie", page: int = 1):
 _SORTS = {
     "popularity": {"movie": ("popularity.desc", {}), "tv": ("popularity.desc", {})},
     "rating": {
-        "movie": ("vote_average.desc", {"vote_count.gte": 500}),
-        "tv": ("vote_average.desc", {"vote_count.gte": 300}),
+        "movie": ("vote_average.desc", {"vote_count.gte": 3000}),
+        "tv": ("vote_average.desc", {"vote_count.gte": 1000}),
     },
     "newest": {
         "movie": ("primary_release_date.desc", {"vote_count.gte": 30}),
