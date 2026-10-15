@@ -1447,7 +1447,7 @@ _OS_USER_AGENT = "Nova v1.0"
 # parameters, referentie-venster, kandidaat-selectie, ...), anders blijven
 # oude, met de vorige logica gesynchroniseerde resultaten hangen.
 _SUB_CACHE_DIR = "/app/data/subtitles_cache"
-_SUB_CACHE_VERSION = "v10"
+_SUB_CACHE_VERSION = "v11"
 
 
 def _subtitle_cache_path(cache_key: str) -> str:
@@ -1960,14 +1960,84 @@ def _ref_offset(ref_cues: list[list], cues: list[list], t0: float, win: float, c
     dut = signal([(c[0], 1.0) for c in cues] + [(c[1], 0.5) for c in cues], t_s, n_d)
     corr = np.correlate(dut, ref, mode="valid")  # corr[k] = sum_i dut[k+i] * ref[i]
     k = int(np.argmax(corr))
-    peak = float(corr[k])
-    guard = int(3.0 / dt)
-    others = np.concatenate([corr[:max(0, k - guard)], corr[k + guard + 1:]])
-    second = float(others.max()) if others.size else 0.0
-    # duidelijke, unieke piek: minstens 25% hoger dan de beste 'andere' piek
-    if peak <= 0 or peak < 1.25 * second:
+    if float(corr[k]) <= 0:
         return None
+    # Bewust géén 'unieke piek'-drempel per venster: ritmische dialoog geeft sterke
+    # zijpieken (~3s verderop). De hoogste piek blijkt in de praktijk bijna altijd juist;
+    # de betrouwbaarheid komt uit de onderlinge overeenstemming van veel vensters
+    # (zie _robust_line), niet uit één venster.
     return (t0 - t_s) - k * dt
+
+
+def _robust_line(anchors: list[tuple[float, float]], duration: float, tol: float = 1.8):
+    """RANSAC-achtige lijn door (ondertitel-tijd, offset): kies de lijn met de meeste ankers
+    binnen [tol] seconden en fit die opnieuw op die ankers. Uitschieters (valse pieken) vallen
+    zo af. Geeft (offset_functie, beschrijving, n_inliers) of None."""
+    n = len(anchors)
+    if n < 3:
+        return None
+    best = None
+    for i in range(n):
+        for j in range(i + 1, n):
+            k0, o0 = anchors[i]
+            k1, o1 = anchors[j]
+            if k1 - k0 < 300:
+                continue
+            slope = (o1 - o0) / (k1 - k0)
+            if abs(slope) > 0.05:      # >5% tempoverschil is geen realistische drift
+                continue
+            icpt = o0 - slope * k0
+            inl = [a for a in anchors if abs(a[1] - (icpt + slope * a[0])) <= tol]
+            if best is None or len(inl) > len(best):
+                best = inl
+    if best is None or len(best) < max(3, int(0.6 * n + 0.5)):
+        return None
+    ks = [a[0] for a in best]
+    os_ = [a[1] for a in best]
+    m = len(best)
+    mk, mo = sum(ks) / m, sum(os_) / m
+    var = sum((k - mk) ** 2 for k in ks)
+    slope = sum((k - mk) * (o - mo) for k, o in zip(ks, os_)) / var if var > 0 else 0.0
+    icpt = mo - slope * mk
+    span = max(duration, ks[-1])
+    if abs(slope) * span < 2.5:
+        med = sorted(os_)[m // 2]
+        return (lambda t: med), f"constant {med:+.2f}s ({m}/{n} ankers)", m
+    return (lambda t: icpt + slope * t), f"drift {slope * 3600:+.2f}s/uur, start {icpt:+.2f}s ({m}/{n} ankers)", m
+
+
+async def _ref_sync(
+    input_value: str, cues: list[list], is_tv: bool, duration: float, ref_sub_idx: int
+) -> tuple[list[list], int, int] | None:
+    """Sync tegen de ingebakken ondertitel van het bestand zelf: ~9 vensters verspreid over
+    de film, per venster de hoogste onset-correlatiepiek, daarna een robuuste lijn (constant
+    of lineaire drift - bv. 23.976 vs 24 fps geeft enkele seconden per uur) door de ankers."""
+    win = 180.0 if is_tv else 240.0
+    d = duration if duration > 0 else (2700.0 if is_tv else 6600.0)
+    fracs = [0.03, 0.14, 0.25, 0.36, 0.47, 0.58, 0.69, 0.80, 0.90]
+    starts = _pick_window_starts(duration, is_tv, win, fracs)
+    sem = asyncio.Semaphore(3)
+
+    async def one(t0: float):
+        async with sem:
+            ref = await _extract_sub_window(input_value, t0, win, ref_sub_idx)
+            if ref is None:
+                return t0, None
+            return t0, _ref_offset(ref, cues, t0, win, 0.0, 120.0)
+
+    results = await asyncio.gather(*[one(t) for t in starts])
+    anchors = sorted((t0 + win / 2 - off, off) for t0, off in results if off is not None)
+    print("sync ref-ankers (sub-tijd s, offset s): " + ", ".join(f"({k:.0f}, {o:+.1f})" for k, o in anchors))
+    fit = _robust_line(anchors, d)
+    if fit is None:
+        return None
+    offset_at, desc, n_in = fit
+    print(f"sync model: {desc}")
+    shifted = []
+    for st_, en, tx in cues:
+        o = offset_at(st_)
+        shifted.append([max(0.0, st_ + o), max(0.0, en + o), tx])
+    return shifted, n_in, 0
 
 
 def _fit_offset_model(anchors: list[tuple[float, float]], duration: float):
@@ -2020,6 +2090,12 @@ async def _multiwindow_sync(
     _fit_offset_model). Eén globale offset (ffsubsync standaard) mist drift en
     montage-sprongen; blind breed zoeken per venster geeft vals-positieven.
     Geeft (nieuwe cues, aantal geldige ankers, aantal sprongen) of None."""
+    if ref_sub_idx is not None:
+        ref_result = await _ref_sync(input_value, cues, is_tv, duration, ref_sub_idx)
+        if ref_result is not None:
+            return ref_result
+        print("sync: referentie-ondertitel gaf geen consistent resultaat - terugval op audio")
+        ref_sub_idx = None
     sem = asyncio.Semaphore(3)
 
     async def measure(t0, win, center=0.0, pad=_SYNC_WINDOW_PAD, max_off=_SYNC_MAX_OFFSET):
