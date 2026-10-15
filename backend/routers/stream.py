@@ -7,6 +7,8 @@ import hashlib
 import time
 import shutil
 import mimetypes
+import math
+import struct
 import re
 import tempfile
 from datetime import datetime, timezone
@@ -1445,7 +1447,7 @@ _OS_USER_AGENT = "Nova v1.0"
 # parameters, referentie-venster, kandidaat-selectie, ...), anders blijven
 # oude, met de vorige logica gesynchroniseerde resultaten hangen.
 _SUB_CACHE_DIR = "/app/data/subtitles_cache"
-_SUB_CACHE_VERSION = "v7"
+_SUB_CACHE_VERSION = "v8"
 
 
 def _subtitle_cache_path(cache_key: str) -> str:
@@ -1551,37 +1553,75 @@ async def _os_headers() -> dict:
     return headers
 
 
+def _release_tokens(release: str) -> set[str]:
+    toks = set(re.findall(r"[a-z0-9]+", urllib.parse.unquote_plus(release or "").lower()))
+    return {t for t in toks if len(t) >= 3 and t not in {"mkv", "mp4", "avi", "the", "and"}}
+
+
+def _score_subtitle(attrs: dict, rel_tokens: set[str]) -> float:
+    """Rangschikt kandidaten op hoe waarschijnlijk ze bij EXACT dit bestand horen:
+    moviehash-match (bit-exact zelfde bestand) >> overeenkomende release-tokens
+    (resolutie, bron, groep) > vertrouwde uploader > populariteit. Een populaire maar
+    andere montage geeft anders structureel drift."""
+    score = 0.0
+    if attrs.get("moviehash_match"):
+        score += 1000
+    toks = _release_tokens(attrs.get("release") or "")
+    if rel_tokens:
+        score += 100.0 * len(toks & rel_tokens) / len(rel_tokens)
+    if attrs.get("from_trusted"):
+        score += 15
+    dl = attrs.get("download_count") or 0
+    score += min(20.0, 5.0 * math.log10(1 + max(0, dl)))
+    if attrs.get("hearing_impaired"):
+        score -= 10
+    return score
+
+
 async def _search_opensubtitles(
-    tmdb_id: int, media_type: str, language: str, season: int | None, episode: int | None, max_candidates: int = 3
+    tmdb_id: int, media_type: str, language: str, season: int | None, episode: int | None,
+    max_candidates: int = 4, release: str = "", moviehash: str | None = None,
 ) -> list[dict]:
-    """Geeft de top [max_candidates] resultaten terug (meeste downloads eerst),
-    zodat de caller een volgende kan proberen als de beste niet lukt om te
-    downloaden of niet betrouwbaar te synchroniseren is."""
+    """Geeft de beste [max_candidates] kandidaten terug (zie _score_subtitle), zodat de
+    caller een volgende kan proberen als de beste niet lukt of niet betrouwbaar
+    synchroniseert."""
     if not get_opensubtitles_key():
         return []
-    params: dict = {"tmdb_id": tmdb_id, "languages": language}
+    base: dict = {
+        "tmdb_id": tmdb_id, "languages": language,
+        "ai_translated": "exclude", "machine_translated": "exclude",
+    }
+    if moviehash:
+        base["moviehash"] = moviehash
     if media_type == "tv" and season and episode:
-        params["season_number"] = season
-        params["episode_number"] = episode
-    try:
+        base["season_number"] = season
+        base["episode_number"] = episode
+    rel_tokens = _release_tokens(release)
+
+    async def query(params: dict) -> list[dict]:
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
             r = await client.get(f"{_OS_BASE}/subtitles", params=params, headers=await _os_headers())
         if r.status_code != 200:
             print(f"OpenSubtitles zoekfout: {r.status_code} {r.text[:300]}")
             return []
-        items = (r.json().get("data")) or []
+        return (r.json().get("data")) or []
+
+    try:
+        items = await query({**base, "hearing_impaired": "exclude"})
         if not items:
-            return []
-        # Beste match: meeste downloads (proxy voor betrouwbaarheid/kwaliteit).
-        items.sort(key=lambda x: ((x.get("attributes") or {}).get("download_count") or 0), reverse=True)
-        candidates = []
+            items = await query(base)
+        scored = []
         for item in items:
-            files = (item.get("attributes") or {}).get("files") or []
+            attrs = item.get("attributes") or {}
+            files = attrs.get("files") or []
             if files and files[0].get("file_id"):
-                candidates.append({"file_id": files[0]["file_id"]})
-            if len(candidates) >= max_candidates:
-                break
-        return candidates
+                scored.append((_score_subtitle(attrs, rel_tokens), {
+                    "file_id": files[0]["file_id"],
+                    "moviehash_match": bool(attrs.get("moviehash_match")),
+                    "release": attrs.get("release") or "",
+                }))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [c for _, c in scored[:max_candidates]]
     except Exception as e:
         print(f"OpenSubtitles zoekfout: {e}")
         return []
@@ -1618,32 +1658,103 @@ async def _download_opensubtitles(file_id: int) -> str | None:
         return None
 
 
-async def _extract_reference_audio(video_url: str, out_path: str, duration_secs: int = 900, timeout: float = 420.0) -> bool:
-    """
-    ffsubsync valideert zijn referentiebestand met os.access(), wat nooit
-    lukt voor een URL - dus eerst audio naar een lokaal bestand extraheren.
-    Mono/16kHz WAV, beperkt tot de eerste [duration_secs] (genoeg spraak om
-    een betrouwbare sync te berekenen, zonder de hele - vaak 10+ GB - bron
-    te moeten downloaden).
-    """
-    cmd = [
-        "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
-        "-rw_timeout", "20000000",
-        "-i", video_url,
-        "-t", str(duration_secs),
-        "-vn", "-sn",
-        "-ac", "1", "-ar", "16000",
-        "-acodec", "pcm_s16le",
-        "-y", out_path,
-    ]
+async def _osdb_hash(url: str) -> str | None:
+    """OpenSubtitles' 'moviehash' van het bestand achter [url]: bestandsgrootte + som van
+    de eerste en laatste 64KB. Een match betekent dat de ondertitel bit-exact voor DIT
+    bestand gemaakt is (geen montageverschil mogelijk). Leest enkel 2x64KB via
+    Range-requests; None als de bron geen Range ondersteunt."""
+    chunk = 65536
+
+    async def read_range(client: httpx.AsyncClient, rng: str) -> tuple[bytes, int | None]:
+        async with client.stream("GET", url, headers={"Range": rng}) as r:
+            if r.status_code != 206:
+                return b"", None
+            cr = r.headers.get("content-range", "")
+            total = cr.rsplit("/", 1)[-1]
+            size = int(total) if total.isdigit() else None
+            buf = b""
+            async for part in r.aiter_bytes():
+                buf += part
+                if len(buf) >= chunk:
+                    break
+            return buf[:chunk], size
+
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            head, size = await read_range(client, f"bytes=0-{chunk - 1}")
+            if not size or size < chunk * 2 or len(head) < chunk:
+                return None
+            tail, _ = await read_range(client, f"bytes={size - chunk}-{size - 1}")
+            if len(tail) < chunk:
+                return None
+        h = size
+        for buf in (head, tail):
+            for (v,) in struct.iter_unpack("<Q", buf):
+                h = (h + v) & 0xFFFFFFFFFFFFFFFF
+        return f"{h:016x}"
+    except Exception as e:
+        print(f"moviehash fout: {e}")
+        return None
+
+
+_SRT_TS = r"(\d+):(\d{2}):(\d{2})[,.](\d{1,3})"
+
+
+def _srt_parse(text: str) -> list[list]:
+    """SRT -> [[start_s, end_s, tekst], ...] (ook tolerant voor punt i.p.v. komma)."""
+    text = (text or "").replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
+    cues = []
+    for block in re.split(r"\n\s*\n", text.strip()):
+        lines = block.split("\n")
+        for i, line in enumerate(lines):
+            m = re.match(rf"\s*{_SRT_TS}\s*-->\s*{_SRT_TS}", line)
+            if not m:
+                continue
+            g = m.groups()
+            start = int(g[0]) * 3600 + int(g[1]) * 60 + int(g[2]) + int(g[3].ljust(3, "0")) / 1000
+            end = int(g[4]) * 3600 + int(g[5]) * 60 + int(g[6]) + int(g[7].ljust(3, "0")) / 1000
+            body = "\n".join(lines[i + 1:]).strip()
+            if body:
+                cues.append([start, end, body])
+            break
+    return cues
+
+
+def _fmt_ts(sec: float, sep: str) -> str:
+    ms = max(0, int(round(sec * 1000)))
+    return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d}{sep}{ms % 1000:03d}"
+
+
+def _cues_to_srt(cues: list[list]) -> str:
+    return "\n".join(
+        f"{i}\n{_fmt_ts(c[0], ',')} --> {_fmt_ts(c[1], ',')}\n{c[2]}\n" for i, c in enumerate(cues, 1)
+    )
+
+
+def _cues_to_vtt(cues: list[list]) -> str:
+    body = "\n".join(f"{_fmt_ts(c[0], '.')} --> {_fmt_ts(c[1], '.')}\n{c[2]}\n" for c in cues)
+    return "WEBVTT\n\n" + body
+
+
+_SYNC_WINDOW_PAD = 60.0     # cues vanaf [venster - PAD] meenemen (ondertitel mag vóór de audio staan)
+_SYNC_MAX_OFFSET = 100.0    # ffsubsync zoekt offsets binnen +-100s (=> echt bereik -40s .. +160s)
+
+
+async def _extract_audio_window(
+    input_value: str, out_path: str, start: float, dur: float, audio_idx: int | None, timeout: float = 150.0
+) -> bool:
+    cmd = ["nice", "-n", "10", "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin"]
+    if _is_http_url(input_value):
+        cmd += ["-rw_timeout", "20000000", "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "3"]
+    cmd += ["-ss", f"{start:.3f}", "-i", input_value, "-t", f"{dur:.3f}"]
+    cmd += ["-map", f"0:{audio_idx}" if audio_idx is not None else "0:a:0?"]
+    cmd += ["-vn", "-sn", "-ac", "1", "-ar", "16000", "-acodec", "pcm_s16le", "-y", out_path]
     proc = None
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        _out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        if proc.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
-            print(f"Audio-extractie voor ffsubsync mislukt: {(err or b'').decode('utf-8', errors='ignore')[:400]}")
+        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        _o, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        if proc.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) < 32000:
+            print(f"Audio-venster extractie mislukt: {(err or b'').decode('utf-8', errors='ignore')[:300]}")
             return False
         return True
     except asyncio.TimeoutError:
@@ -1652,73 +1763,137 @@ async def _extract_reference_audio(video_url: str, out_path: str, duration_secs:
                 proc.kill()
             except Exception:
                 pass
-        print("Audio-extractie voor ffsubsync: timeout")
+        print("Audio-venster extractie: timeout")
         return False
     except Exception as e:
-        print(f"Audio-extractie voor ffsubsync fout: {e}")
+        print(f"Audio-venster extractie fout: {e}")
         return False
 
 
-def _ffsubsync_params(is_tv: bool) -> tuple[int, int, float]:
-    """max_offset, duration_secs, timeout - zie _run_ffsubsync_with_ref voor
-    waarom deze verschillen tussen films en series."""
-    if is_tv:
-        return 480, 900, 420.0
-    return 90, 300, 160.0
-
-
-async def _run_ffsubsync_with_ref(ref_path: str, srt_text: str, is_tv: bool, timeout: float | None = None) -> str | None:
-    """Zoals _run_ffsubsync, maar met een al-geëxtraheerd referentiebestand -
-    zodat meerdere ondertitel-kandidaten voor dezelfde bron dat bestand
-    kunnen hergebruiken i.p.v. elk apart dezelfde audio opnieuw te
-    downloaden/extraheren."""
-    max_offset, _, default_timeout = _ffsubsync_params(is_tv)
-    if timeout is None:
-        timeout = default_timeout
+async def _window_offset(
+    input_value: str, cues: list[list], t0: float, win: float, audio_idx: int | None
+) -> float | None:
+    """Meet de offset (audio_tijd - ondertitel_tijd) in één venster van de film: audio van
+    [t0, t0+win] tegen de cues rond dat moment. Enkel een pure verschuiving
+    (--no-fix-framerate): drift/montageverschillen volgen uit het verschil tussen vensters."""
+    base = t0 - _SYNC_WINDOW_PAD
+    subset = [
+        [c[0] - base, c[1] - base, c[2]]
+        for c in cues
+        if t0 - _SYNC_WINDOW_PAD <= c[0] <= t0 + win + _SYNC_MAX_OFFSET
+    ]
+    if len(subset) < 8:
+        return None
     with tempfile.TemporaryDirectory() as tmp:
-        in_path = os.path.join(tmp, "in.srt")
-        out_path = os.path.join(tmp, "out.srt")
+        wav = os.path.join(tmp, "win.wav")
+        if not await _extract_audio_window(input_value, wav, t0, win, audio_idx):
+            return None
+        in_path, out_path = os.path.join(tmp, "in.srt"), os.path.join(tmp, "out.srt")
         with open(in_path, "w", encoding="utf-8") as f:
-            f.write(srt_text)
-
+            f.write(_cues_to_srt(subset))
         cmd = [
-            "ffsubsync", ref_path, "-i", in_path, "-o", out_path,
-            "--max-offset-seconds", str(max_offset),
+            "nice", "-n", "10", "ffsubsync", wav, "-i", in_path, "-o", out_path,
+            "--no-fix-framerate", "--max-offset-seconds", str(int(_SYNC_MAX_OFFSET)),
         ]
         proc = None
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-            )
-            _out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            _o, err = await asyncio.wait_for(proc.communicate(), timeout=120.0)
             if proc.returncode != 0 or not os.path.exists(out_path):
-                print(f"ffsubsync fout: {(err or b'').decode('utf-8', errors='ignore')[:600]}")
+                print(f"ffsubsync venster {t0:.0f}s mislukt: {(err or b'').decode('utf-8', errors='ignore')[-300:]}")
                 return None
-            # ffsubsync logt zijn berekende verschuiving via logging (-> stderr),
-            # ook bij succes. Loggen voor diagnose van toekomstige sync-klachten.
-            offset_line = next(
-                (l for l in (err or b"").decode("utf-8", errors="ignore").splitlines() if "offset seconds" in l.lower()),
-                None,
-            )
-            print(f"ffsubsync ok, {offset_line or '(geen offset-regel gevonden in output)'}")
             with open(out_path, "r", encoding="utf-8", errors="ignore") as f:
-                return f.read()
+                out = _srt_parse(f.read())
         except asyncio.TimeoutError:
             if proc:
                 try:
                     proc.kill()
                 except Exception:
                     pass
-            print("ffsubsync: timeout")
+            print(f"ffsubsync venster {t0:.0f}s: timeout")
             return None
         except Exception as e:
-            print(f"ffsubsync fout: {e}")
+            print(f"ffsubsync venster {t0:.0f}s fout: {e}")
             return None
+    if len(out) < len(subset) // 2:
+        return None
+    diffs = sorted(o[0] - i[0] for o, i in zip(out, subset))
+    off_prime = diffs[len(diffs) // 2]
+    # Een resultaat tegen de rand van het zoekbereik is geen echte match.
+    if abs(off_prime) >= _SYNC_MAX_OFFSET - 0.5:
+        return None
+    return off_prime + _SYNC_WINDOW_PAD
 
 
-def _srt_to_vtt(srt_text: str) -> str:
-    body = re.sub(r"(\d{2}:\d{2}:\d{2}),(\d{3})", r"\1.\2", srt_text)
-    return "WEBVTT\n\n" + body.strip() + "\n"
+def _pick_window_starts(duration: float, is_tv: bool, win: float) -> list[float]:
+    d = duration if duration > 0 else (2700.0 if is_tv else 6600.0)
+    fracs = [0.08, 0.30, 0.55, 0.80] if d > 1800 else [0.20, 0.55]
+    starts: list[float] = []
+    for f in fracs:
+        t0 = max(120.0, d * f)
+        if t0 + win > d - 60:
+            t0 = max(0.0, d - win - 60)
+        if all(abs(t0 - x) > win for x in starts):
+            starts.append(t0)
+    return starts
+
+
+async def _multiwindow_sync(
+    input_value: str, cues: list[list], is_tv: bool, duration: float, audio_idx: int | None
+) -> tuple[list[list], int, int] | None:
+    """Synchroniseert op meerdere punten in de film i.p.v. enkel de eerste minuten. Eén
+    globale offset (zoals ffsubsync standaard) mist drift (andere framerate) en montage-
+    verschillen (andere cut/intro) volledig - dan klopt het begin perfect en loopt het
+    einde uit de pas. Per venster wordt de offset gemeten en daartussen lineair
+    geïnterpoleerd. Geeft (nieuwe cues, aantal geldige ankers, aantal sprongen) of None."""
+    win = 180.0 if is_tv else 240.0
+    starts = _pick_window_starts(duration, is_tv, win)
+    sem = asyncio.Semaphore(2)
+
+    async def one(t0: float):
+        async with sem:
+            return t0, await _window_offset(input_value, cues, t0, win, audio_idx)
+
+    results = await asyncio.gather(*[one(t) for t in starts])
+    anchors = [(t0 + win / 2 - off, off) for t0, off in results if off is not None]  # (ondertitel-tijd, offset)
+    if not anchors:
+        return None
+    anchors.sort()
+    print("sync-ankers (sub-tijd s, offset s): " + ", ".join(f"({k:.0f}, {o:+.2f})" for k, o in anchors))
+
+    # Eén afwijkend anker terwijl de rest onderling klopt = waarschijnlijk een venster zonder
+    # bruikbare dialoog (muziek/actie) en geen echte montage-sprong: negeren.
+    if len(anchors) >= 3:
+        offs = sorted(o for _, o in anchors)
+        med = offs[len(offs) // 2]
+        outliers = [a for a in anchors if abs(a[1] - med) > 2.0]
+        rest = [a for a in anchors if abs(a[1] - med) <= 2.0]
+        if len(outliers) == 1 and rest and max(a[1] for a in rest) - min(a[1] for a in rest) <= 1.0:
+            anchors = rest
+
+    jumps = sum(1 for i in range(len(anchors) - 1) if abs(anchors[i + 1][1] - anchors[i][1]) > 2.0)
+    spread = max(a[1] for a in anchors) - min(a[1] for a in anchors)
+    if spread <= 1.0:
+        const = sorted(a[1] for a in anchors)[len(anchors) // 2]
+
+        def offset_at(t: float) -> float:
+            return const
+    else:
+        def offset_at(t: float) -> float:
+            if t <= anchors[0][0]:
+                return anchors[0][1]
+            if t >= anchors[-1][0]:
+                return anchors[-1][1]
+            for (k0, o0), (k1, o1) in zip(anchors, anchors[1:]):
+                if k0 <= t <= k1:
+                    return o0 + (o1 - o0) * (t - k0) / (k1 - k0) if k1 > k0 else o0
+            return anchors[-1][1]
+
+    shifted = []
+    for st, en, tx in cues:
+        o = offset_at(st)
+        shifted.append([max(0.0, st + o), max(0.0, en + o), tx])
+    return shifted, len(anchors), jumps
 
 
 def _release_name_from_url(decoded_url: str) -> str:
@@ -1766,40 +1941,53 @@ async def subtitle_external_vtt(
             detail=f"Dagelijkse OpenSubtitles-limiet bereikt, probeer opnieuw na {reset_str}.",
         )
 
-    candidates = await _search_opensubtitles(tmdb_id, media_type, lang, season, episode)
+    http_src = _is_http_url(input_value)
+    moviehash = await _osdb_hash(input_value) if http_src else None
+    candidates = await _search_opensubtitles(
+        tmdb_id, media_type, lang, season, episode, release=release, moviehash=moviehash
+    )
     if not candidates:
         raise HTTPException(status_code=404, detail=f"Geen {lang}-ondertitels gevonden op OpenSubtitles.")
 
     is_tv = media_type == "tv"
-    fallback_srt = None  # eerste succesvolle download, voor als geen enkele kandidaat wil synchroniseren
+    # Referentie-audio = het Engelse/Nederlandse spoor (zoals het afspelen zelf), niet
+    # zomaar het eerste (kan een andere taalversie met andere montage zijn).
+    probe = await _ffprobe_streams(input_value, is_path=False)
+    audio = _default_audio_stream((probe or {}).get("streams") or [])
+    audio_idx = int(audio["index"]) if audio and audio.get("index") is not None else None
+    duration = await _ffprobe_duration_seconds(input_value, is_path=False) or 0.0
+    print(f"[sync] moviehash={moviehash} duur={duration:.0f}s audio_idx={audio_idx} kandidaten={len(candidates)}")
 
-    # Referentie-audio hoort bij de video, niet bij de ondertitel-kandidaat -
-    # één keer extraheren en hergebruiken voor elke kandidaat i.p.v. dezelfde
-    # audio tot 3x na elkaar opnieuw te downloaden/extraheren.
-    with tempfile.TemporaryDirectory() as tmp:
-        ref_path = os.path.join(tmp, "reference.wav")
-        _, duration_secs, _ = _ffsubsync_params(is_tv)
-        ref_ok = await _extract_reference_audio(input_value, ref_path, duration_secs=duration_secs)
+    fallback_cues = None   # eerste succesvolle download, voor als niets wil synchroniseren
+    best = None            # (kwaliteit, cues)
+    for cand in candidates:
+        srt_text = await _download_opensubtitles(cand["file_id"])
+        if not srt_text:
+            continue
+        cues = _srt_parse(srt_text)
+        if len(cues) < 20:
+            continue
+        if fallback_cues is None or cand["moviehash_match"]:
+            fallback_cues = cues
+        result = await _multiwindow_sync(input_value, cues, is_tv, duration, audio_idx)
+        if result is None:
+            if cand["moviehash_match"]:
+                best = (10_000, cues)   # bit-exact zelfde bestand: ook zonder meting betrouwbaar
+                break
+            continue
+        synced, n_anchors, jumps = result
+        quality = n_anchors * 10 - jumps * 25 + (1000 if cand["moviehash_match"] else 0)
+        print(f"[sync] kandidaat '{cand['release'][:60]}' ankers={n_anchors} sprongen={jumps} kwaliteit={quality}")
+        if best is None or quality > best[0]:
+            best = (quality, synced)
+        # Voldoende bewijs dat het klopt over de héle film: niet nog meer downloads verbranden.
+        if n_anchors >= 3 and jumps == 0:
+            break
 
-        for candidate in candidates:
-            srt_text = await _download_opensubtitles(candidate["file_id"])
-            if not srt_text:
-                continue
-            if fallback_srt is None:
-                fallback_srt = srt_text
-            synced_srt = await _run_ffsubsync_with_ref(ref_path, srt_text, is_tv) if ref_ok else None
-            if synced_srt:
-                vtt = _srt_to_vtt(synced_srt)
-                _subtitle_cache_set(cache_key, vtt)
-                return Response(content=vtt, media_type="text/vtt", headers={"Cache-Control": "no-cache"})
-
-    if fallback_srt is None:
+    final = best[1] if best else fallback_cues
+    if not final:
         raise HTTPException(status_code=502, detail="Kon ondertitel niet downloaden van OpenSubtitles.")
-
-    # Geen enkele kandidaat kon betrouwbaar gesynchroniseerd worden (of de
-    # referentie-audio zelf kon niet geëxtraheerd worden): val terug op de
-    # ongesynchroniseerde beste match in plaats van niets te tonen.
-    vtt = _srt_to_vtt(fallback_srt)
+    vtt = _cues_to_vtt(final)
     _subtitle_cache_set(cache_key, vtt)
     return Response(content=vtt, media_type="text/vtt", headers={"Cache-Control": "no-cache"})
 

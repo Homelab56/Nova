@@ -10,6 +10,32 @@ function formatTime(sec) {
   return `${m}:${String(r).padStart(2, "0")}`;
 }
 
+// Verschuift alle cue-tijden van een WebVTT-tekst met [shift] seconden (cues die volledig
+// vóór 0 vallen verdwijnen). Nodig voor externe ondertitels: die hebben tijden t.o.v. de
+// film, terwijl de video na hervatten/spoelen opnieuw bij 0 begint (transcode met -ss).
+function shiftVtt(text, shift) {
+  if (!shift) return text;
+  const fmt = (t) => {
+    const ms = Math.max(0, Math.round(t * 1000));
+    const h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60, s = Math.floor(ms / 1000) % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(ms % 1000).padStart(3, "0")}`;
+  };
+  const parse = (h, m, s, ms) => Number(h || 0) * 3600 + Number(m) * 60 + Number(s) + Number(ms) / 1000;
+  const re = /(?:(\d+):)?(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(?:(\d+):)?(\d{2}):(\d{2})\.(\d{3})/;
+  const out = ["WEBVTT", ""];
+  for (const block of text.replace(/\r/g, "").split(/\n\s*\n/)) {
+    const lines = block.split("\n");
+    const i = lines.findIndex((l) => re.test(l));
+    if (i < 0) continue;
+    const m = lines[i].match(re);
+    const start = parse(m[1], m[2], m[3], m[4]) + shift;
+    const end = parse(m[5], m[6], m[7], m[8]) + shift;
+    if (end <= 0) continue;
+    out.push(`${fmt(start)} --> ${fmt(end)}`, ...lines.slice(i + 1), "");
+  }
+  return out.join("\n");
+}
+
 export default function Player({ url, media, onProgress, startAt = 0, durationHint = 0, onEnded, onNext }) {
   const containerRef = useRef(null);
   const videoRef = useRef(null);
@@ -30,7 +56,6 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const totalRef = useRef(0);
   const lastReportRef = useRef({ t: 0, d: 0, ts: 0 });
   const userChangedSubtitleRef = useRef(false);
-  const externalBlobUrlRef = useRef(null);
   const [error, setError] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [buffering, setBuffering] = useState(false);
@@ -40,6 +65,8 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const [showControls, setShowControls] = useState(true);
   const [flashIcon, setFlashIcon] = useState(null);
   const [seekHint, setSeekHint] = useState("");
+  const [subOffset, setSubOffset] = useState(0);
+  const [extVttUrl, setExtVttUrl] = useState(null);
   const keySeekRef = useRef({ target: null, timer: null, hintTimer: null });
   const [subtitleTracks, setSubtitleTracks] = useState([]);
   const [subtitleSelected, setSubtitleSelected] = useState(null);
@@ -127,7 +154,6 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       clearTimeout(flashTimer.current);
       clearTimeout(bufferingTimerRef.current);
       if (subsAbortRef.current) subsAbortRef.current.abort();
-      if (externalBlobUrlRef.current) URL.revokeObjectURL(externalBlobUrlRef.current);
       reportProgress();
     };
   }, []);
@@ -241,7 +267,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     } else if (url) {
       u.searchParams.set("url", String(url));
     }
-    const start = Math.max(0, Number(startAt) || Number(startOffsetRef.current) || 0);
+    const start = Math.max(0, Number(startOffsetRef.current) || 0);
     if (start > 0) u.searchParams.set("start", String(start.toFixed(3)));
     u.searchParams.set("stream_index", String(streamIndex));
     if (subtitleDelay && Math.abs(subtitleDelay) > 0.0005) {
@@ -451,6 +477,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     if (!v) return;
     const t = Math.max(0, Number(seconds) || 0);
     startOffsetRef.current = t;
+    setSubOffset(t);
     absTimeRef.current = t;
     const src = buildSrc(t);
     baseUrlRef.current = src;
@@ -478,6 +505,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     setError(null);
     hlsFallbackRef.current = false;
     startOffsetRef.current = Math.max(0, Number(startAt) || 0);
+    setSubOffset(startOffsetRef.current);
     // Gebruik de url direct voor externe URLs om URL-encoding problemen te vermijden
     const src = url;
     baseUrlRef.current = src;
@@ -501,10 +529,6 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     const ac = new AbortController();
     subsAbortRef.current = ac;
     userChangedSubtitleRef.current = false;
-    if (externalBlobUrlRef.current) {
-      URL.revokeObjectURL(externalBlobUrlRef.current);
-      externalBlobUrlRef.current = null;
-    }
     setSubtitleTracks([]);
     setSubtitleSelected(null);
     setSubtitleLabel("");
@@ -544,15 +568,13 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
               .then(r => r.ok ? r.text() : null)
               .then(vtt => {
                 if (ac.signal.aborted || !vtt) return;
-                const blobUrl = URL.createObjectURL(new Blob([vtt], { type: "text/vtt" }));
-                externalBlobUrlRef.current = blobUrl;
                 const trackKey = `external-${osLang}`;
                 const extTrack = {
                   stream_index: trackKey,
                   language: osLang,
                   title: "OpenSubtitles",
                   external: true,
-                  vttBlobUrl: blobUrl,
+                  vttText: vtt,
                 };
                 setSubtitleTracks(prev => [...prev, extTrack]);
                 if (!userChangedSubtitleRef.current) {
@@ -589,8 +611,15 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const selectedTrackObj = subtitleSelected !== null
     ? subtitleTracks.find(t => t.stream_index === subtitleSelected) || null
     : null;
+  const extVttText = selectedTrackObj?.external ? selectedTrackObj.vttText : null;
+  useEffect(() => {
+    if (!extVttText) { setExtVttUrl(null); return; }
+    const u = URL.createObjectURL(new Blob([shiftVtt(extVttText, subtitleDelay - subOffset)], { type: "text/vtt" }));
+    setExtVttUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [extVttText, subtitleDelay, subOffset]);
   const vttSrc = selectedTrackObj
-    ? (selectedTrackObj.external ? selectedTrackObj.vttBlobUrl : buildSubtitleVttUrl(selectedTrackObj.stream_index))
+    ? (selectedTrackObj.external ? extVttUrl : buildSubtitleVttUrl(selectedTrackObj.stream_index))
     : null;
 
   // Reload video when audio selection changes (alleen voor backend proxy URLs, niet externe redirect URLs)
