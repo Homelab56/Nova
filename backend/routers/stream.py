@@ -1447,7 +1447,7 @@ _OS_USER_AGENT = "Nova v1.0"
 # parameters, referentie-venster, kandidaat-selectie, ...), anders blijven
 # oude, met de vorige logica gesynchroniseerde resultaten hangen.
 _SUB_CACHE_DIR = "/app/data/subtitles_cache"
-_SUB_CACHE_VERSION = "v8"
+_SUB_CACHE_VERSION = "v9"
 
 
 def _subtitle_cache_path(cache_key: str) -> str:
@@ -1628,6 +1628,27 @@ async def _search_opensubtitles(
 
 
 async def _download_opensubtitles(file_id: int) -> str | None:
+    # Ruwe SRT lokaal bewaren: spaart de (beperkte) OpenSubtitles-downloadquota bij
+    # herberekeningen (nieuwe sync-logica) en maakt sync-diagnose mogelijk.
+    raw_path = os.path.join(_SUB_CACHE_DIR, f"raw_{file_id}.srt")
+    try:
+        if os.path.exists(raw_path):
+            with open(raw_path, "r", encoding="utf-8", errors="ignore") as f:
+                return f.read()
+    except Exception:
+        pass
+    text = await _download_opensubtitles_remote(file_id)
+    if text:
+        try:
+            os.makedirs(_SUB_CACHE_DIR, exist_ok=True)
+            with open(raw_path, "w", encoding="utf-8") as f:
+                f.write(text)
+        except Exception:
+            pass
+    return text
+
+
+async def _download_opensubtitles_remote(file_id: int) -> str | None:
     try:
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
             r = await client.post(f"{_OS_BASE}/download", json={"file_id": file_id}, headers=await _os_headers())
@@ -1771,16 +1792,20 @@ async def _extract_audio_window(
 
 
 async def _window_offset(
-    input_value: str, cues: list[list], t0: float, win: float, audio_idx: int | None
+    input_value: str, cues: list[list], t0: float, win: float, audio_idx: int | None,
+    center: float = 0.0, pad: float = _SYNC_WINDOW_PAD, max_off: float = _SYNC_MAX_OFFSET,
 ) -> float | None:
-    """Meet de offset (audio_tijd - ondertitel_tijd) in één venster van de film: audio van
-    [t0, t0+win] tegen de cues rond dat moment. Enkel een pure verschuiving
-    (--no-fix-framerate): drift/montageverschillen volgen uit het verschil tussen vensters."""
-    base = t0 - _SYNC_WINDOW_PAD
+    """Meet de offset (audio_tijd - ondertitel_tijd) in één venster: audio van [t0, t0+win]
+    tegen de cues rond dat moment. Enkel een pure verschuiving (--no-fix-framerate):
+    drift/montageverschillen volgen uit het verschil tussen vensters. Met [center] worden de
+    cues eerst met die waarde voorverschoven zodat ffsubsync slechts een smal bereik
+    (+-max_off) rond de verwachte offset hoeft af te zoeken - veel minder vals-positieven
+    dan blind +-100s zoeken op actiefilms vol muziek."""
+    base = t0 - pad
     subset = [
-        [c[0] - base, c[1] - base, c[2]]
+        [c[0] + center - base, c[1] + center - base, c[2]]
         for c in cues
-        if t0 - _SYNC_WINDOW_PAD <= c[0] <= t0 + win + _SYNC_MAX_OFFSET
+        if t0 - pad <= c[0] + center <= t0 + win + max_off and c[0] + center - base >= 0
     ]
     if len(subset) < 8:
         return None
@@ -1793,7 +1818,7 @@ async def _window_offset(
             f.write(_cues_to_srt(subset))
         cmd = [
             "nice", "-n", "10", "ffsubsync", wav, "-i", in_path, "-o", out_path,
-            "--no-fix-framerate", "--max-offset-seconds", str(int(_SYNC_MAX_OFFSET)),
+            "--no-fix-framerate", "--max-offset-seconds", str(int(max_off)),
         ]
         proc = None
         try:
@@ -1820,14 +1845,15 @@ async def _window_offset(
     diffs = sorted(o[0] - i[0] for o, i in zip(out, subset))
     off_prime = diffs[len(diffs) // 2]
     # Een resultaat tegen de rand van het zoekbereik is geen echte match.
-    if abs(off_prime) >= _SYNC_MAX_OFFSET - 0.5:
+    if abs(off_prime) >= max_off - 0.5:
         return None
-    return off_prime + _SYNC_WINDOW_PAD
+    return center + off_prime + pad
 
 
-def _pick_window_starts(duration: float, is_tv: bool, win: float) -> list[float]:
+def _pick_window_starts(duration: float, is_tv: bool, win: float, fracs: list[float] | None = None) -> list[float]:
     d = duration if duration > 0 else (2700.0 if is_tv else 6600.0)
-    fracs = [0.08, 0.30, 0.55, 0.80] if d > 1800 else [0.20, 0.55]
+    if fracs is None:
+        fracs = [0.08, 0.30, 0.55, 0.80] if d > 1800 else [0.20, 0.55]
     starts: list[float] = []
     for f in fracs:
         t0 = max(120.0, d * f)
@@ -1838,62 +1864,99 @@ def _pick_window_starts(duration: float, is_tv: bool, win: float) -> list[float]
     return starts
 
 
+def _fit_offset_model(anchors: list[tuple[float, float]], duration: float):
+    """anchors = [(ondertitel-tijd, offset)] gesorteerd. Kiest het eenvoudigste model dat de
+    metingen verklaart: constant, lineaire drift (andere framerate) of één montage-sprong.
+    Onverklaarbare ruis -> constante mediaan (nooit tussen ruiswaarden heen en weer
+    interpoleren). Geeft (functie, beschrijving)."""
+    ks = [a[0] for a in anchors]
+    os_ = [a[1] for a in anchors]
+    med = sorted(os_)[len(os_) // 2]
+    if max(os_) - min(os_) <= 2.0 or len(anchors) < 3:
+        return (lambda t: med), f"constant {med:+.2f}s"
+
+    # lineaire drift
+    n = len(anchors)
+    mk, mo = sum(ks) / n, sum(os_) / n
+    var = sum((k - mk) ** 2 for k in ks)
+    slope = sum((k - mk) * (o - mo) for k, o in zip(ks, os_)) / var if var > 0 else 0.0
+    icpt = mo - slope * mk
+    resid = max(abs(o - (icpt + slope * k)) for k, o in zip(ks, os_))
+    if resid <= 1.5 and abs(slope) * max(duration, ks[-1]) >= 2.5:
+        return (lambda t: icpt + slope * t), f"drift {slope * 3600:+.2f}s/uur (rest {resid:.2f}s)"
+
+    # één sprong: twee plateaus met elk >= 2 ankers
+    best = None
+    for i in range(2, n - 1):
+        left, right = os_[:i], os_[i:]
+        if len(right) < 2 or max(left) - min(left) > 1.5 or max(right) - min(right) > 1.5:
+            continue
+        ml, mr = sorted(left)[len(left) // 2], sorted(right)[len(right) // 2]
+        if abs(mr - ml) >= 2.5:
+            best = (i, ml, mr)
+            break
+    if best:
+        i, ml, mr = best
+        boundary = (ks[i - 1] + ks[i]) / 2
+        return (lambda t: ml if t < boundary else mr), f"sprong {ml:+.2f}s -> {mr:+.2f}s bij {boundary:.0f}s"
+
+    return (lambda t: med), f"ruis -> constant {med:+.2f}s (spreiding {max(os_) - min(os_):.1f}s)"
+
+
 async def _multiwindow_sync(
     input_value: str, cues: list[list], is_tv: bool, duration: float, audio_idx: int | None
 ) -> tuple[list[list], int, int] | None:
-    """Synchroniseert op meerdere punten in de film i.p.v. enkel de eerste minuten. Eén
-    globale offset (zoals ffsubsync standaard) mist drift (andere framerate) en montage-
-    verschillen (andere cut/intro) volledig - dan klopt het begin perfect en loopt het
-    einde uit de pas. Per venster wordt de offset gemeten en daartussen lineair
-    geïnterpoleerd. Geeft (nieuwe cues, aantal geldige ankers, aantal sprongen) of None."""
-    win = 180.0 if is_tv else 240.0
-    starts = _pick_window_starts(duration, is_tv, win)
-    sem = asyncio.Semaphore(2)
+    """Twee stappen. 1) Grof: een paar brede vensters (+-100s) geven de globale offset (de
+    ondertitel hoort vaak bij een andere montage, bv. 60s extra studio-logo's). 2) Fijn:
+    meer vensters verspreid over de film, elk met een smal zoekbereik (+-18s) rond die
+    schatting, daarna het eenvoudigste model dat de metingen verklaart (zie
+    _fit_offset_model). Eén globale offset (ffsubsync standaard) mist drift en
+    montage-sprongen; blind breed zoeken per venster geeft vals-positieven.
+    Geeft (nieuwe cues, aantal geldige ankers, aantal sprongen) of None."""
+    sem = asyncio.Semaphore(3)
 
-    async def one(t0: float):
-        async with sem:
-            return t0, await _window_offset(input_value, cues, t0, win, audio_idx)
+    async def run(starts, win, **kw):
+        async def one(t0):
+            async with sem:
+                return t0, await _window_offset(input_value, cues, t0, win, audio_idx, **kw)
+        return await asyncio.gather(*[one(t) for t in starts])
 
-    results = await asyncio.gather(*[one(t) for t in starts])
-    anchors = [(t0 + win / 2 - off, off) for t0, off in results if off is not None]  # (ondertitel-tijd, offset)
-    if not anchors:
+    # --- stap 1: grove schatting ---
+    win1 = 300.0 if not is_tv else 240.0
+    coarse = [(t0, o) for t0, o in await run(
+        _pick_window_starts(duration, is_tv, win1, [0.12, 0.45, 0.78]), win1) if o is not None]
+    if not coarse:
         return None
-    anchors.sort()
-    print("sync-ankers (sub-tijd s, offset s): " + ", ".join(f"({k:.0f}, {o:+.2f})" for k, o in anchors))
+    offs = sorted(o for _, o in coarse)
+    center = offs[len(offs) // 2]
+    agree = [o for o in offs if abs(o - center) <= 15.0]
+    print(f"sync grof: {[round(o, 1) for o in offs]} -> centrum {center:+.1f}s ({len(agree)}/{len(offs)} akkoord)")
+    if len(offs) >= 2 and len(agree) < 2:
+        return None  # geen onderling consistente schatting: liever niets dan gokken
+    center = sorted(agree)[len(agree) // 2]
 
-    # Eén afwijkend anker terwijl de rest onderling klopt = waarschijnlijk een venster zonder
-    # bruikbare dialoog (muziek/actie) en geen echte montage-sprong: negeren.
-    if len(anchors) >= 3:
-        offs = sorted(o for _, o in anchors)
-        med = offs[len(offs) // 2]
-        outliers = [a for a in anchors if abs(a[1] - med) > 2.0]
-        rest = [a for a in anchors if abs(a[1] - med) <= 2.0]
-        if len(outliers) == 1 and rest and max(a[1] for a in rest) - min(a[1] for a in rest) <= 1.0:
-            anchors = rest
-
-    jumps = sum(1 for i in range(len(anchors) - 1) if abs(anchors[i + 1][1] - anchors[i][1]) > 2.0)
-    spread = max(a[1] for a in anchors) - min(a[1] for a in anchors)
-    if spread <= 1.0:
-        const = sorted(a[1] for a in anchors)[len(anchors) // 2]
-
-        def offset_at(t: float) -> float:
-            return const
+    # --- stap 2: fijn, smal bereik rond het centrum ---
+    win2 = 180.0
+    fine_fracs = [0.06, 0.20, 0.34, 0.48, 0.62, 0.76, 0.90]
+    fine = await run(_pick_window_starts(duration, is_tv, win2, fine_fracs), win2,
+                     center=center, pad=0.0, max_off=18.0)
+    anchors = sorted((t0 + win2 / 2 - off, off) for t0, off in fine if off is not None)
+    print("sync fijn (sub-tijd s, offset s): " + ", ".join(f"({k:.0f}, {o:+.2f})" for k, o in anchors))
+    if len(anchors) < 2:
+        const = center
+        offset_at = lambda t: const
+        desc, n_anchors, jumps = f"alleen grof centrum {center:+.2f}s", len(agree), 0
     else:
-        def offset_at(t: float) -> float:
-            if t <= anchors[0][0]:
-                return anchors[0][1]
-            if t >= anchors[-1][0]:
-                return anchors[-1][1]
-            for (k0, o0), (k1, o1) in zip(anchors, anchors[1:]):
-                if k0 <= t <= k1:
-                    return o0 + (o1 - o0) * (t - k0) / (k1 - k0) if k1 > k0 else o0
-            return anchors[-1][1]
+        offset_at, desc = _fit_offset_model(anchors, duration)
+        n_anchors = len(anchors)
+        jumps = 1 if desc.startswith("sprong") else 0
+    print(f"sync model: {desc}")
 
     shifted = []
     for st, en, tx in cues:
         o = offset_at(st)
         shifted.append([max(0.0, st + o), max(0.0, en + o), tx])
-    return shifted, len(anchors), jumps
+    return shifted, n_anchors, jumps
 
 
 def _release_name_from_url(decoded_url: str) -> str:
@@ -1976,12 +2039,12 @@ async def subtitle_external_vtt(
                 break
             continue
         synced, n_anchors, jumps = result
-        quality = n_anchors * 10 - jumps * 25 + (1000 if cand["moviehash_match"] else 0)
+        quality = n_anchors * 10 - jumps * 15 + (1000 if cand["moviehash_match"] else 0)
         print(f"[sync] kandidaat '{cand['release'][:60]}' ankers={n_anchors} sprongen={jumps} kwaliteit={quality}")
         if best is None or quality > best[0]:
             best = (quality, synced)
         # Voldoende bewijs dat het klopt over de héle film: niet nog meer downloads verbranden.
-        if n_anchors >= 3 and jumps == 0:
+        if n_anchors >= 5:
             break
 
     final = best[1] if best else fallback_cues
