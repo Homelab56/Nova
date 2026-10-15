@@ -2220,15 +2220,9 @@ async def _multiwindow_sync(
         if ref_result is not None:
             return ref_result
         print("sync: referentie-ondertitel gaf geen consistent resultaat - terugval op audio")
-        ref_sub_idx = None
     sem = asyncio.Semaphore(3)
 
     async def measure(t0, win, center=0.0, pad=_SYNC_WINDOW_PAD, max_off=_SYNC_MAX_OFFSET):
-        if ref_sub_idx is not None:
-            # Beste meetmethode: vergelijk met de ingebakken ondertitel van dit bestand.
-            ref = await _extract_sub_window(input_value, t0, win, ref_sub_idx)
-            if ref is not None:
-                return _ref_offset(ref, cues, t0, win, center, max_off if center else 120.0)
         return await _window_offset(input_value, cues, t0, win, audio_idx, center=center, pad=pad, max_off=max_off)
 
     async def run(starts, win, **kw):
@@ -2238,7 +2232,7 @@ async def _multiwindow_sync(
         return await asyncio.gather(*[one(t) for t in starts])
 
     # --- stap 1: grove schatting ---
-    win1 = (180.0 if ref_sub_idx is not None else 300.0) if not is_tv else 240.0
+    win1 = 300.0 if not is_tv else 240.0
     coarse = [(t0, o) for t0, o in await run(
         _pick_window_starts(duration, is_tv, win1, [0.12, 0.45, 0.78]), win1) if o is not None]
     if not coarse:
@@ -2252,7 +2246,7 @@ async def _multiwindow_sync(
     center = sorted(agree)[len(agree) // 2]
 
     # --- stap 2: fijn, smal bereik rond het centrum ---
-    win2 = 150.0 if ref_sub_idx is not None else 180.0
+    win2 = 180.0
     fine_fracs = [0.06, 0.20, 0.34, 0.48, 0.62, 0.76, 0.90]
     fine = await run(_pick_window_starts(duration, is_tv, win2, fine_fracs), win2,
                      center=center, pad=0.0, max_off=18.0)
