@@ -39,6 +39,8 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [flashIcon, setFlashIcon] = useState(null);
+  const [seekHint, setSeekHint] = useState("");
+  const keySeekRef = useRef({ target: null, timer: null, hintTimer: null });
   const [subtitleTracks, setSubtitleTracks] = useState([]);
   const [subtitleSelected, setSubtitleSelected] = useState(null);
   const [subtitleLabel, setSubtitleLabel] = useState("");
@@ -858,6 +860,46 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     await tryPlay();
   };
 
+  // Pijltjestoetsen: links/rechts = 10s terug/vooruit (Shift = 30s). Elke seek herlaadt
+  // de bron (transcode herstart), dus snel herhaald drukken wordt opgeteld en pas na een
+  // korte pauze als één seek uitgevoerd.
+  const latestRef = useRef({});
+  latestRef.current = { seekTo, effectiveTotal };
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+      const el = e.target;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable) return;
+      if (!videoRef.current) return;
+      e.preventDefault();
+      const ks = keySeekRef.current;
+      const step = (e.shiftKey ? 30 : 10) * (e.key === "ArrowRight" ? 1 : -1);
+      const { effectiveTotal: total } = latestRef.current;
+      let target = (ks.target ?? absTimeRef.current) + step;
+      target = Math.max(0, total > 0 ? Math.min(total - 1, target) : target);
+      ks.target = target;
+      const delta = Math.round(target - absTimeRef.current);
+      setSeekHint(`${delta >= 0 ? "+" : "−"}${Math.abs(delta)}s · ${formatTime(target)}`);
+      clearTimeout(ks.hintTimer);
+      ks.hintTimer = setTimeout(() => setSeekHint(""), 1200);
+      setShowControls(true);
+      clearTimeout(ks.timer);
+      ks.timer = setTimeout(() => {
+        const t = ks.target;
+        ks.target = null;
+        if (t != null) latestRef.current.seekTo(t);
+      }, 450);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      clearTimeout(keySeekRef.current.timer);
+      clearTimeout(keySeekRef.current.hintTimer);
+    };
+  }, []);
+
   const toggleFullscreen = async () => {
     const el = containerRef.current;
     if (!el) return;
@@ -1195,6 +1237,12 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
           <div className="bg-black/45 border border-white/10 text-white rounded-full w-20 h-20 flex items-center justify-center text-3xl">
             {flashIcon === "pause" ? "⏸" : "▶"}
           </div>
+        </div>
+      )}
+
+      {seekHint && (
+        <div className="absolute top-6 left-1/2 -translate-x-1/2 pointer-events-none bg-black/60 border border-white/10 text-white text-sm font-semibold rounded-full px-4 py-1.5 tabular-nums">
+          {seekHint}
         </div>
       )}
 
