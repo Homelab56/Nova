@@ -730,7 +730,8 @@ async def suggest(q: str = Query(..., min_length=1)):
         names = [n for n in names if n]
         if any(n.startswith(needle) for n in names):
             return 0
-        if any(any(w.startswith(needle) for w in n.split()) for n in names):
+        # begint een woord (of een reeks woorden, bv. "super m" in "The Super Mario Bros.") ermee?
+        if any((" " + needle) in (" " + n) for n in names):
             return 1
         return 2
 
