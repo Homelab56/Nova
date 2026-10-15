@@ -381,7 +381,7 @@ async def _ffprobe_subtitle_streams(input_value: str, is_path: bool) -> list[dic
         "-select_streams",
         "s",
         "-show_entries",
-        "stream=index,codec_name:stream_tags=language,title",
+        "stream=index,codec_name:stream_tags=language,title:stream_disposition=forced,hearing_impaired",
         "-of",
         "json",
     ]
@@ -1447,7 +1447,7 @@ _OS_USER_AGENT = "Nova v1.0"
 # parameters, referentie-venster, kandidaat-selectie, ...), anders blijven
 # oude, met de vorige logica gesynchroniseerde resultaten hangen.
 _SUB_CACHE_DIR = "/app/data/subtitles_cache"
-_SUB_CACHE_VERSION = "v9"
+_SUB_CACHE_VERSION = "v10"
 
 
 def _subtitle_cache_path(cache_key: str) -> str:
@@ -1864,6 +1864,105 @@ def _pick_window_starts(duration: float, is_tv: bool, win: float, fracs: list[fl
     return starts
 
 
+_TEXT_SUB_CODECS = {"subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text"}
+
+
+async def _pick_reference_subtitle(input_value: str) -> int | None:
+    """Stream-index van een ingebakken TEKST-ondertitel (Engels > Nederlands > andere; geen
+    forced/SDH). Die loopt per definitie exact synchroon met het beeld van dit bestand en
+    is een veel betere ijkpunt dan spraakdetectie op de audio (muziek/actie telt daar
+    als spraak mee en geeft ruis van meerdere seconden)."""
+    streams = await _ffprobe_subtitle_streams(input_value, is_path=False)
+    best = None
+    for st_ in streams:
+        if (st_.get("codec_name") or "").lower() not in _TEXT_SUB_CODECS:
+            continue
+        tags = st_.get("tags") or {}
+        disp = st_.get("disposition") or {}
+        lang = _norm_lang(tags.get("language") or "")
+        title = (tags.get("title") or "").lower()
+        if disp.get("forced") or disp.get("hearing_impaired") or "forced" in title or "sdh" in title or "commentary" in title:
+            continue
+        rank = 0 if lang.split("-")[0] in {"en", "eng"} else 1 if lang.split("-")[0] in {"nl", "nld", "dut"} else 2
+        if "british" in title:
+            rank += 0.5
+        if best is None or rank < best[0]:
+            best = (rank, int(st_["index"]))
+    return best[1] if best else None
+
+
+async def _extract_sub_window(input_value: str, t0: float, win: float, idx: int, timeout: float = 150.0) -> list[list] | None:
+    """Cues van ingebakken ondertitelstream [idx] in [t0, t0+win] (absolute filmtijd)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        out_path = os.path.join(tmp, "ref.srt")
+        cmd = ["nice", "-n", "10", "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin"]
+        if _is_http_url(input_value):
+            cmd += ["-rw_timeout", "20000000", "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "3"]
+        cmd += ["-ss", f"{t0:.3f}", "-i", input_value, "-t", f"{win:.3f}", "-map", f"0:{idx}",
+                "-vn", "-an", "-c:s", "srt", "-f", "srt", "-y", out_path]
+        proc = None
+        try:
+            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            _o, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            if proc.returncode != 0 or not os.path.exists(out_path):
+                print(f"Referentie-ondertitel venster {t0:.0f}s mislukt: {(err or b'').decode('utf-8', errors='ignore')[:200]}")
+                return None
+            with open(out_path, "r", encoding="utf-8", errors="ignore") as f:
+                cues = _srt_parse(f.read())
+        except asyncio.TimeoutError:
+            if proc:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            print(f"Referentie-ondertitel venster {t0:.0f}s: timeout")
+            return None
+        except Exception as e:
+            print(f"Referentie-ondertitel venster {t0:.0f}s fout: {e}")
+            return None
+    return [[c[0] + t0, c[1] + t0, c[2]] for c in cues]
+
+
+def _ref_offset(ref_cues: list[list], cues: list[list], t0: float, win: float, center: float, max_off: float) -> float | None:
+    """Offset (referentietijd - ondertitel-tijd) via kruiscorrelatie van de 'er staat een
+    ondertitel'-signalen (10 Hz) van de referentie in [t0, t0+win] en de te synchroniseren
+    ondertitel, binnen center +- max_off. Werkt op alle cues in het venster i.p.v. op ruis."""
+    import numpy as np
+
+    dt = 0.1
+    if len(ref_cues) < 6:
+        return None
+    n_ref = int(win / dt)
+    ref = np.zeros(n_ref, dtype=np.float32)
+    for st_, en, _ in ref_cues:
+        a, b = int((st_ - t0) / dt), int((en - t0) / dt)
+        if b > 0 and a < n_ref:
+            ref[max(0, a):min(n_ref, b + 1)] = 1.0
+    if ref.sum() < 20:
+        return None
+
+    t_s = t0 - (center + max_off)
+    t_e = t0 + win - (center - max_off)
+    n_d = int((t_e - t_s) / dt) + 2
+    dut = np.zeros(n_d, dtype=np.float32)
+    for st_, en, _ in cues:
+        a, b = int((st_ - t_s) / dt), int((en - t_s) / dt)
+        if b >= 0 and a < n_d:
+            dut[max(0, a):min(n_d, b + 1)] = 1.0
+    if n_d <= n_ref:
+        return None
+    corr = np.correlate(dut, ref, mode="valid")  # corr[k] = sum_i dut[k+i] * ref[i]
+    k = int(np.argmax(corr))
+    peak = float(corr[k])
+    # betrouwbaarheid: duidelijke piek t.o.v. de rest, en een groot deel van de referentie gedekt
+    others = np.concatenate([corr[:max(0, k - 20)], corr[k + 21:]])
+    base = float(np.median(others)) if others.size else 0.0
+    coverage = peak / float(ref.sum())
+    if coverage < 0.45 or peak < 1.35 * max(base, 1.0):
+        return None
+    return (t0 - t_s) - k * dt
+
+
 def _fit_offset_model(anchors: list[tuple[float, float]], duration: float):
     """anchors = [(ondertitel-tijd, offset)] gesorteerd. Kiest het eenvoudigste model dat de
     metingen verklaart: constant, lineaire drift (andere framerate) of één montage-sprong.
@@ -1904,7 +2003,8 @@ def _fit_offset_model(anchors: list[tuple[float, float]], duration: float):
 
 
 async def _multiwindow_sync(
-    input_value: str, cues: list[list], is_tv: bool, duration: float, audio_idx: int | None
+    input_value: str, cues: list[list], is_tv: bool, duration: float, audio_idx: int | None,
+    ref_sub_idx: int | None = None,
 ) -> tuple[list[list], int, int] | None:
     """Twee stappen. 1) Grof: een paar brede vensters (+-100s) geven de globale offset (de
     ondertitel hoort vaak bij een andere montage, bv. 60s extra studio-logo's). 2) Fijn:
@@ -1915,14 +2015,22 @@ async def _multiwindow_sync(
     Geeft (nieuwe cues, aantal geldige ankers, aantal sprongen) of None."""
     sem = asyncio.Semaphore(3)
 
+    async def measure(t0, win, center=0.0, pad=_SYNC_WINDOW_PAD, max_off=_SYNC_MAX_OFFSET):
+        if ref_sub_idx is not None:
+            # Beste meetmethode: vergelijk met de ingebakken ondertitel van dit bestand.
+            ref = await _extract_sub_window(input_value, t0, win, ref_sub_idx)
+            if ref is not None:
+                return _ref_offset(ref, cues, t0, win, center, max_off if center else 120.0)
+        return await _window_offset(input_value, cues, t0, win, audio_idx, center=center, pad=pad, max_off=max_off)
+
     async def run(starts, win, **kw):
         async def one(t0):
             async with sem:
-                return t0, await _window_offset(input_value, cues, t0, win, audio_idx, **kw)
+                return t0, await measure(t0, win, **kw)
         return await asyncio.gather(*[one(t) for t in starts])
 
     # --- stap 1: grove schatting ---
-    win1 = 300.0 if not is_tv else 240.0
+    win1 = (180.0 if ref_sub_idx is not None else 300.0) if not is_tv else 240.0
     coarse = [(t0, o) for t0, o in await run(
         _pick_window_starts(duration, is_tv, win1, [0.12, 0.45, 0.78]), win1) if o is not None]
     if not coarse:
@@ -1936,7 +2044,7 @@ async def _multiwindow_sync(
     center = sorted(agree)[len(agree) // 2]
 
     # --- stap 2: fijn, smal bereik rond het centrum ---
-    win2 = 180.0
+    win2 = 150.0 if ref_sub_idx is not None else 180.0
     fine_fracs = [0.06, 0.20, 0.34, 0.48, 0.62, 0.76, 0.90]
     fine = await run(_pick_window_starts(duration, is_tv, win2, fine_fracs), win2,
                      center=center, pad=0.0, max_off=18.0)
@@ -2019,7 +2127,8 @@ async def subtitle_external_vtt(
     audio = _default_audio_stream((probe or {}).get("streams") or [])
     audio_idx = int(audio["index"]) if audio and audio.get("index") is not None else None
     duration = await _ffprobe_duration_seconds(input_value, is_path=False) or 0.0
-    print(f"[sync] moviehash={moviehash} duur={duration:.0f}s audio_idx={audio_idx} kandidaten={len(candidates)}")
+    ref_sub_idx = await _pick_reference_subtitle(input_value)
+    print(f"[sync] moviehash={moviehash} duur={duration:.0f}s audio_idx={audio_idx} ref_sub={ref_sub_idx} kandidaten={len(candidates)}")
 
     fallback_cues = None   # eerste succesvolle download, voor als niets wil synchroniseren
     best = None            # (kwaliteit, cues)
@@ -2032,7 +2141,7 @@ async def subtitle_external_vtt(
             continue
         if fallback_cues is None or cand["moviehash_match"]:
             fallback_cues = cues
-        result = await _multiwindow_sync(input_value, cues, is_tv, duration, audio_idx)
+        result = await _multiwindow_sync(input_value, cues, is_tv, duration, audio_idx, ref_sub_idx)
         if result is None:
             if cand["moviehash_match"]:
                 best = (10_000, cues)   # bit-exact zelfde bestand: ook zonder meting betrouwbaar
