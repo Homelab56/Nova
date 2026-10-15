@@ -440,6 +440,55 @@ async def by_genre(genre_id: int, type: str = "movie", page: int = 1):
         "total_results": data.get("total_results", 0),
     }
 
+# Themarijen die geen TMDB-genre zijn maar een keyword (Kerst, Halloween) - zelfde
+# aanpak als de tv-app (TmdbCatalogService.resolveKeywordId): keyword-id eenmalig
+# opzoeken via /search/keyword en cachen, dan /discover met with_keywords.
+_KEYWORD_CACHE: dict[str, int | None] = {}
+_KEYWORD_ALLOWED = {"christmas", "halloween"}
+
+async def _resolve_keyword_id(name: str) -> int | None:
+    if name in _KEYWORD_CACHE:
+        return _KEYWORD_CACHE[name]
+    kid = None
+    try:
+        data = await tmdb_get("/search/keyword", {"query": name})
+        for r in data.get("results", []) or []:
+            if str(r.get("name", "")).lower() == name:
+                kid = r.get("id")
+                break
+    except Exception:
+        return None  # niet cachen bij een (tijdelijke) fout
+    _KEYWORD_CACHE[name] = kid
+    return kid
+
+@router.get("/keyword/{name}")
+async def by_keyword(name: str, type: str = "movie", page: int = 1):
+    name = name.lower()
+    if name not in _KEYWORD_ALLOWED or type not in ("movie", "tv"):
+        raise HTTPException(status_code=404, detail="Onbekend thema")
+    kid = await _resolve_keyword_id(name)
+    empty = {"items": [], "page": page, "total_pages": 1, "total_results": 0}
+    if not kid:
+        return empty
+    pages_to_fetch = range(1, 6) if page == 1 else [page]
+    pages = await asyncio.gather(*[
+        tmdb_get(f"/discover/{type}", {"with_keywords": kid, "sort_by": "popularity.desc", "page": p})
+        for p in pages_to_fetch
+    ])
+    items, seen = [], set()
+    for pg in pages:
+        for item in pg.get("results", []) or []:
+            if item["id"] not in seen:
+                seen.add(item["id"])
+                items.append(item)
+    first = pages[0]
+    return {
+        "items": _filter_items(_tag_media_type(items, type), media_type=type, suggestion_mode=False, allow_kids=True),
+        "page": 5 if page == 1 else page,
+        "total_pages": first.get("total_pages", 1),
+        "total_results": first.get("total_results", 0),
+    }
+
 @router.get("/genre-rows")
 async def genre_rows(type: str = "all"):
     """Geeft voor elk genre een rij terug. type = all | movie | tv"""

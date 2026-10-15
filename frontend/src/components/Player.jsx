@@ -130,24 +130,28 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     };
   }, []);
 
-  const ALLOWED_LANGS = [
-    "en", "eng", "english",
-    "nl", "nld", "dut", "vla", "vlaams", "nl-be", "nl_be", "nld-be", "flemish",
-  ];
-
   const normLang = (s) => String(s || "").toLowerCase().trim().replaceAll("_", "-");
 
-  const isAllowedLang = (lang, title = "") => {
+  // Classificeert een spoor als "en" | "nl" | "und" (geen taalinfo) | "other".
+  // Eerst de taal-tag; enkel bij ontbrekende/"und" tag telt de titel, en dan alleen
+  // als heel woord - losse substring-matches ("en" in "Spanish ... Atmos") lieten
+  // eerder anderstalige sporen (bv. Spaans) als Engels doorgaan.
+  const classifyLang = (lang, title = "") => {
     const l = normLang(lang);
-    const t = normLang(title);
-    if (!l && !t) return true;
-    for (const a of ALLOWED_LANGS) {
-      if (l && l.startsWith(a)) return true;
-      if (l && a.startsWith(l) && l.length >= 2) return true;
-      if (t.includes(a)) return true;
+    if (l && l !== "und" && l !== "unk" && l !== "mis" && l !== "zxx") {
+      const base = l.split("-")[0];
+      if (base === "en" || base === "eng") return "en";
+      if (["nl", "nld", "dut", "vla"].includes(base)) return "nl";
+      return "other";
     }
-    return false;
+    const t = normLang(title);
+    if (/\b(english|engels|eng)\b/.test(t)) return "en";
+    if (/\b(nederlands|dutch|vlaams|flemish|nld|dut)\b/.test(t)) return "nl";
+    if (t && /\b(spanish|espanol|español|castellano|latino|french|francais|german|deutsch|italian|italiano|portuguese|russian|japanese|korean|chinese)\b/.test(t)) return "other";
+    return "und";
   };
+
+  const isAllowedLang = (lang, title = "") => classifyLang(lang, title) !== "other";
 
   const prettyLang = (lang, title = "") => {
     const l = normLang(lang);
@@ -293,21 +297,15 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
 
   const chooseDefaultAudio = (tracks) => {
     if (!tracks || tracks.length === 0) return null;
-    const prefer = [
-      prefs.default_audio_lang,
-      "en",
-      "eng",
-      "nl",
-      "nld",
-      "dut",
-    ].filter(Boolean);
-    const norm = (s) => String(s || "").toLowerCase().trim().replaceAll("_", "-");
-    const prefNorm = prefer.map(norm);
-    const byLang = tracks.find(t => prefNorm.includes(norm(t.language)));
-    if (byLang) return byLang;
-    const byTitle = tracks.find(t => prefNorm.some(p => norm(t.title).includes(p)));
-    if (byTitle) return byTitle;
-    return tracks[0];
+    // Gesproken taal: altijd Engels of Nederlands (nooit een willekeurig eerste spoor).
+    // Voorkeur uit Instellingen telt alleen als het zelf en/nl is; verder en > nl.
+    const prefClass = classifyLang(prefs.default_audio_lang, "");
+    const order = [prefClass === "nl" ? "nl" : "en", prefClass === "nl" ? "en" : "nl"];
+    for (const cls of order) {
+      const hits = tracks.filter(t => classifyLang(t.language, t.title) === cls);
+      if (hits.length) return hits.reduce((best, t) => ((t.channels || 0) > (best.channels || 0) ? t : best), hits[0]);
+    }
+    return tracks.find(t => classifyLang(t.language, t.title) === "und") || null;
   };
 
   const buildSrc = (startSeconds, audioOverride = undefined) => {

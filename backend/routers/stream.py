@@ -42,17 +42,65 @@ def _norm_lang(s: str) -> str:
     return (s or "").lower().strip().replace("_", "-")
 
 
-def _is_allowed_lang(language: str, title: str = "") -> bool:
+def _lang_class(language: str, title: str = "") -> str:
+    """"en" | "nl" | "und" (geen taalinfo) | "other". Taal-tag gaat voor; enkel bij
+    ontbrekende/"und" tag telt de titel, en dan als heel woord (losse substring-matches
+    liet anderstalige sporen, bv. Spaans, als Engels doorgaan)."""
     l = _norm_lang(language)
+    if l and l not in {"und", "unk", "mis", "zxx"}:
+        base = l.split("-")[0]
+        if base in {"en", "eng"}:
+            return "en"
+        if base in {"nl", "nld", "dut", "vla"}:
+            return "nl"
+        return "other"
     t = _norm_lang(title)
-    if not l and not t:
-        return True
-    for a in _ALLOWED_LANG_PREFIXES:
-        if l and (l.startswith(a) or a.startswith(l) and len(l) >= 2):
-            return True
-        if t and a in t:
-            return True
-    return False
+    if re.search(r"(english|engels|eng)", t):
+        return "en"
+    if re.search(r"(nederlands|dutch|vlaams|flemish|nld|dut)", t):
+        return "nl"
+    if t and re.search(r"(spanish|espanol|español|castellano|latino|french|francais|german|deutsch|italian|italiano|portuguese|russian|japanese|korean|chinese)", t):
+        return "other"
+    return "und"
+
+
+def _is_allowed_lang(language: str, title: str = "") -> bool:
+    return _lang_class(language, title) != "other"
+
+
+def _default_audio_stream(streams: list[dict]) -> dict | None:
+    """Gesproken taal moet altijd Engels of Nederlands zijn (nooit zomaar het eerste
+    spoor). Voorkeur en > nl (meeste kanalen), dan sporen zonder taalinfo."""
+    audio = [x for x in streams if isinstance(x, dict) and x.get("codec_type") == "audio"]
+
+    def tags_of(x):
+        t = x.get("tags") or {}
+        return (t.get("language") or "", t.get("title") or "") if isinstance(t, dict) else ("", "")
+
+    def ch(x):
+        try:
+            return int(x.get("channels") or 0)
+        except Exception:
+            return 0
+
+    for cls in ("en", "nl", "und"):
+        hits = [x for x in audio if _lang_class(*tags_of(x)) == cls]
+        if hits:
+            return max(hits, key=ch)
+    return None
+
+
+def _resolve_audio(streams: list[dict], audio_stream: int | None) -> tuple[dict, int | None]:
+    """Geeft (audio-stream-dict, stream-index) terug. Expliciete keuze wint; anders
+    het beste Engels/Nederlands spoor (zie _default_audio_stream); anders het eerste."""
+    audio = [x for x in streams if isinstance(x, dict) and x.get("codec_type") == "audio"]
+    if audio_stream is not None:
+        chosen = next((x for x in audio if x.get("index") == int(audio_stream)), None)
+        return (chosen or {}), audio_stream
+    best = _default_audio_stream(streams)
+    if best is not None and best.get("index") is not None:
+        return best, int(best["index"])
+    return (audio[0] if audio else {}), None
 
 
 def _hls_cleanup():
@@ -757,7 +805,7 @@ async def _ffprobe_streams(input_value: str, is_path: bool) -> dict:
         "-v",
         "error",
         "-show_entries",
-        "stream=index,codec_type,codec_name,width,height,channels",
+        "stream=index,codec_type,codec_name,width,height,channels:stream_tags=language,title",
         "-of",
         "json",
         input_value,
@@ -842,7 +890,7 @@ async def _ffmpeg_stream(input_value: str, is_path: bool, start: float = 0.0, au
     probe = await _ffprobe_streams(input_value, is_path=is_path)
     streams = (probe or {}).get("streams") or []
     v = next((s for s in streams if s.get("codec_type") == "video"), None) or {}
-    a = next((s for s in streams if s.get("codec_type") == "audio"), None) or {}
+    a, audio_stream = _resolve_audio(streams, audio_stream)
     v_codec = (v.get("codec_name") or "").lower()
     a_codec = (a.get("codec_name") or "").lower()
     try:
@@ -1784,7 +1832,7 @@ async def _ensure_hls_session(session_id: str, input_value: str):
     probe = await _ffprobe_streams(input_value, is_path=is_path)
     streams = (probe or {}).get("streams") or []
     v = next((st for st in streams if st.get("codec_type") == "video"), None) or {}
-    a = next((st for st in streams if st.get("codec_type") == "audio"), None) or {}
+    a, audio_stream = _resolve_audio(streams, audio_stream)
     v_codec = (v.get("codec_name") or "").lower()
     a_codec = (a.get("codec_name") or "").lower()
     try:

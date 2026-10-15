@@ -9,6 +9,10 @@ const GENRES = [
   { id: 18, name: "Drama" }, { id: 10751, name: "Familie" }, { id: 14, name: "Fantasy" },
   { id: 27, name: "Horror" }, { id: 9648, name: "Mystery" }, { id: 10749, name: "Romantiek" },
   { id: 878, name: "Sci-Fi" }, { id: 53, name: "Thriller" }, { id: 10752, name: "Oorlog" },
+  { id: 36, name: "Historisch" }, { id: 10402, name: "Muziek" }, { id: 37, name: "Western" },
+  // Thema's (TMDB-keywords i.p.v. genres) - zoals "Kerstfilms"/"Halloween" op de tv
+  { id: "kw-christmas", name: "Kerstfilms", keyword: "christmas" },
+  { id: "kw-halloween", name: "Halloween", keyword: "halloween" },
 ];
 
 const NAV_ITEMS = [

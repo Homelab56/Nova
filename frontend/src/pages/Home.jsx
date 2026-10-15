@@ -107,6 +107,11 @@ function _mergeUnique(prev = [], next = []) {
   return out;
 }
 
+function genreUrl(g, type, page) {
+  if (g.keyword) return `/api/search/keyword/${g.keyword}?type=${type}&page=${page}`;
+  return `/api/search/genre/${g.id}?type=${type}&page=${page}`;
+}
+
 function _withPage(path, page) {
   const u = new URL(path, window.location.origin);
   u.searchParams.set("page", String(page));
@@ -337,13 +342,13 @@ export default function Home() {
 
     const fetchGenre = async (g, page) => {
       if (mode === "movie") {
-        return fetch(`/api/search/genre/${g.id}?type=movie&page=${page}`).then(r => r.json());
+        return fetch(genreUrl(g, "movie", page)).then(r => r.json());
       } else if (mode === "tv") {
-        return fetch(`/api/search/genre/${g.id}?type=tv&page=${page}`).then(r => r.json());
+        return fetch(genreUrl(g, "tv", page)).then(r => r.json());
       } else {
         const [m, t] = await Promise.all([
-          fetch(`/api/search/genre/${g.id}?type=movie&page=${page}`).then(r => r.json()),
-          fetch(`/api/search/genre/${g.id}?type=tv&page=${page}`).then(r => r.json()),
+          fetch(genreUrl(g, "movie", page)).then(r => r.json()),
+          fetch(genreUrl(g, "tv", page)).then(r => r.json()),
         ]);
         return { items: [...m.items, ...t.items], total_pages: Math.max(m.total_pages, t.total_pages), total_results: m.total_results + t.total_results, page };
       }
@@ -380,13 +385,13 @@ export default function Home() {
       const { genre } = overlayMeta.current;
       let items;
       if (mode === "movie") {
-        items = await fetchPages(p => `/api/search/genre/${genre.id}?type=movie&page=${p}`);
+        items = await fetchPages(p => genreUrl(genre, "movie", p));
       } else if (mode === "tv") {
-        items = await fetchPages(p => `/api/search/genre/${genre.id}?type=tv&page=${p}`);
+        items = await fetchPages(p => genreUrl(genre, "tv", p));
       } else {
         const [m, t] = await Promise.all([
-          fetchPages(p => `/api/search/genre/${genre.id}?type=movie&page=${p}`),
-          fetchPages(p => `/api/search/genre/${genre.id}?type=tv&page=${p}`),
+          fetchPages(p => genreUrl(genre, "movie", p)),
+          fetchPages(p => genreUrl(genre, "tv", p)),
         ]);
         items = [...m, ...t];
       }
