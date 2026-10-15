@@ -489,6 +489,72 @@ async def by_keyword(name: str, type: str = "movie", page: int = 1):
         "total_results": first.get("total_results", 0),
     }
 
+# Sorteren/filteren van de volledige catalogus via TMDB /discover. Let op: de score is
+# TMDB's eigen gebruikersscore (vote_average) - IMDb- en Rotten Tomatoes-scores zitten
+# niet in TMDB en laten zich niet over een hele catalogus sorteren. Voor "beste score"
+# is een minimum aantal stemmen nodig, anders staan obscure titels met 1 stem van 10/10 bovenaan.
+_SORTS = {
+    "popularity": {"movie": ("popularity.desc", {}), "tv": ("popularity.desc", {})},
+    "rating": {
+        "movie": ("vote_average.desc", {"vote_count.gte": 500}),
+        "tv": ("vote_average.desc", {"vote_count.gte": 300}),
+    },
+    "newest": {
+        "movie": ("primary_release_date.desc", {"vote_count.gte": 30}),
+        "tv": ("first_air_date.desc", {"vote_count.gte": 20}),
+    },
+    "oldest": {
+        "movie": ("primary_release_date.asc", {"vote_count.gte": 500}),
+        "tv": ("first_air_date.asc", {"vote_count.gte": 200}),
+    },
+    "az": {
+        "movie": ("title.asc", {"vote_count.gte": 200}),
+        "tv": ("name.asc", {"vote_count.gte": 100}),
+    },
+}
+
+@router.get("/discover")
+async def discover(
+    type: str = "movie",
+    sort: str = "popularity",
+    genre: int | None = None,
+    keyword: str | None = None,
+    page: int = 1,
+):
+    if type not in ("movie", "tv") or sort not in _SORTS:
+        raise HTTPException(status_code=400, detail="Ongeldig type of sortering")
+    sort_by, extra = _SORTS[sort][type]
+    params: dict = {"sort_by": sort_by, **extra}
+    if sort in ("newest",):
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        params["primary_release_date.lte" if type == "movie" else "first_air_date.lte"] = today
+    if genre:
+        params["with_genres"] = genre
+    if keyword:
+        if keyword.lower() not in _KEYWORD_ALLOWED:
+            raise HTTPException(status_code=404, detail="Onbekend thema")
+        kid = await _resolve_keyword_id(keyword.lower())
+        if not kid:
+            return {"items": [], "page": page, "total_pages": 1, "total_results": 0}
+        params["with_keywords"] = kid
+    pages_to_fetch = range(1, 6) if page == 1 else [page]
+    pages = await asyncio.gather(*[
+        tmdb_get(f"/discover/{type}", {**params, "page": p}) for p in pages_to_fetch
+    ])
+    items, seen = [], set()
+    for pg in pages:
+        for item in pg.get("results", []) or []:
+            if item["id"] not in seen:
+                seen.add(item["id"])
+                items.append(item)
+    first = pages[0]
+    return {
+        "items": _filter_items(_tag_media_type(items, type), media_type=type, suggestion_mode=False, allow_kids=True),
+        "page": 5 if page == 1 else page,
+        "total_pages": first.get("total_pages", 1),
+        "total_results": first.get("total_results", 0),
+    }
+
 @router.get("/genre-rows")
 async def genre_rows(type: str = "all"):
     """Geeft voor elk genre een rij terug. type = all | movie | tv"""

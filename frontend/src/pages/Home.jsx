@@ -107,6 +107,23 @@ function _mergeUnique(prev = [], next = []) {
   return out;
 }
 
+const SORT_OPTIONS = [
+  { key: "", label: "Aanbevolen" },
+  { key: "popularity", label: "Populair" },
+  { key: "rating", label: "Beste score" },
+  { key: "newest", label: "Nieuwste" },
+  { key: "oldest", label: "Oudste" },
+  { key: "az", label: "A-Z" },
+];
+
+// Sortering loopt via /discover (optioneel gecombineerd met het gekozen genre/thema).
+function browseUrl(g, type, page, sort) {
+  let u = `/api/search/discover?type=${type}&sort=${sort}&page=${page}`;
+  if (g?.keyword) u += `&keyword=${g.keyword}`;
+  else if (g?.id) u += `&genre=${g.id}`;
+  return u;
+}
+
 function genreUrl(g, type, page) {
   if (g.keyword) return `/api/search/keyword/${g.keyword}?type=${type}&page=${page}`;
   return `/api/search/genre/${g.id}?type=${type}&page=${page}`;
@@ -131,6 +148,7 @@ export default function Home() {
   const [personResults, setPersonResults] = useState([]);
   const [genreResults, setGenreResults] = useState(null);
   const [activeGenre, setActiveGenre] = useState(null);
+  const [sortKey, setSortKey] = useState("");
   const [overlayPage, setOverlayPage] = useState(1);
   const [overlayTotalPages, setOverlayTotalPages] = useState(1);
   const [overlayTotal, setOverlayTotal] = useState(0);
@@ -331,24 +349,25 @@ export default function Home() {
       .catch(() => setPersonResults([]));
   }
 
-  async function handleGenre(genre) {
+  async function loadOverlay(genre, sort) {
     setActiveGenre(genre);
     setSearchResults(null);
     setSearchQuery("");
     setPersonResults([]);
     setOverlayPage(1);
     overlayType.current = "genre";
-    overlayMeta.current = { genre };
+    overlayMeta.current = { genre, sort };
 
+    const urlFor = (g, type, page) => (sort ? browseUrl(g, type, page, sort) : genreUrl(g, type, page));
     const fetchGenre = async (g, page) => {
       if (mode === "movie") {
-        return fetch(genreUrl(g, "movie", page)).then(r => r.json());
+        return fetch(urlFor(g, "movie", page)).then(r => r.json());
       } else if (mode === "tv") {
-        return fetch(genreUrl(g, "tv", page)).then(r => r.json());
+        return fetch(urlFor(g, "tv", page)).then(r => r.json());
       } else {
         const [m, t] = await Promise.all([
-          fetch(genreUrl(g, "movie", page)).then(r => r.json()),
-          fetch(genreUrl(g, "tv", page)).then(r => r.json()),
+          fetch(urlFor(g, "movie", page)).then(r => r.json()),
+          fetch(urlFor(g, "tv", page)).then(r => r.json()),
         ]);
         return { items: [...m.items, ...t.items], total_pages: Math.max(m.total_pages, t.total_pages), total_results: m.total_results + t.total_results, page };
       }
@@ -359,6 +378,16 @@ export default function Home() {
     setOverlayTotalPages(data.total_pages);
     setOverlayTotal(data.total_results);
     setOverlayPage(data.page ?? 1);
+  }
+
+  function handleGenre(genre) {
+    return loadOverlay(genre, (mode === "movie" || mode === "tv") ? sortKey : "");
+  }
+
+  function applySort(key) {
+    setSortKey(key);
+    if (!key && !activeGenre) { handleClear(); return; }
+    loadOverlay(activeGenre, key);
   }
 
   async function loadMore() {
@@ -382,16 +411,17 @@ export default function Home() {
       const items = await fetchPages(p => `/api/search/multi?q=${encodeURIComponent(query)}&page=${p}`);
       setSearchResults(prev => [...prev, ...items]);
     } else {
-      const { genre } = overlayMeta.current;
+      const { genre, sort } = overlayMeta.current;
+      const urlFor = (g, type, p) => (sort ? browseUrl(g, type, p, sort) : genreUrl(g, type, p));
       let items;
       if (mode === "movie") {
-        items = await fetchPages(p => genreUrl(genre, "movie", p));
+        items = await fetchPages(p => urlFor(genre, "movie", p));
       } else if (mode === "tv") {
-        items = await fetchPages(p => genreUrl(genre, "tv", p));
+        items = await fetchPages(p => urlFor(genre, "tv", p));
       } else {
         const [m, t] = await Promise.all([
-          fetchPages(p => genreUrl(genre, "movie", p)),
-          fetchPages(p => genreUrl(genre, "tv", p)),
+          fetchPages(p => urlFor(genre, "movie", p)),
+          fetchPages(p => urlFor(genre, "tv", p)),
         ]);
         items = [...m, ...t];
       }
@@ -407,6 +437,7 @@ export default function Home() {
     setGenreResults(null);
     setSearchQuery("");
     setActiveGenre(null);
+    setSortKey("");
     setOverlayPage(1);
     setOverlayTotalPages(1);
     setOverlayTotal(0);
@@ -421,7 +452,30 @@ export default function Home() {
   const showOverlay = searchResults || genreResults;
   const overlayItems = searchResults || genreResults || [];
   const modeLabel = searchResults ? "" : (mode === "movie" ? "Films" : mode === "tv" ? "Series" : "");
-  const overlayTitle = searchResults ? `Resultaten voor "${searchQuery}"` : activeGenre?.name || "";
+  const sortLabel = SORT_OPTIONS.find(o => o.key === sortKey)?.label || "";
+  const overlayTitle = searchResults
+    ? `Resultaten voor "${searchQuery}"`
+    : [activeGenre?.name, sortKey ? sortLabel : ""].filter(Boolean).join(" · ");
+  const showSortBar = (mode === "movie" || mode === "tv") && !searchResults;
+  const sortBar = showSortBar ? (
+    <div className="px-4 md:px-10 pt-6 pb-2 flex flex-wrap items-center gap-2 relative z-20">
+      <span className="text-sm text-gray-500 mr-1">Sorteer op:</span>
+      {SORT_OPTIONS.map(o => (
+        <button
+          key={o.key || "default"}
+          onClick={() => applySort(o.key)}
+          title={o.key === "rating" ? "TMDB-gebruikersscore (min. aantal stemmen)" : undefined}
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+            sortKey === o.key
+              ? "border-nova-accent text-nova-accent bg-nova-accent/10"
+              : "border-gray-700 text-gray-400 hover:text-white hover:border-gray-500"
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  ) : null;
 
   const heroItems = mode === "movie"
     ? (rowData.popularMovies?.items || [])
@@ -457,8 +511,9 @@ export default function Home() {
     <div className="min-h-screen bg-nova-bg pl-20 md:pl-60">
       <Sidebar onSearch={handleSearch} onClear={handleClear} onGenre={handleGenre} mode={mode} onMode={handleMode} />
 
+      {sortBar}
       {showOverlay ? (
-        <div className="pt-8 px-4 md:px-10 pb-16">
+        <div className="pt-4 px-4 md:px-10 pb-16">
           <div className="flex items-baseline gap-3 mb-6">
             <h2 className="text-xl md:text-2xl font-bold">{overlayTitle}</h2>
             {modeLabel && <span className="text-sm text-nova-accent border border-nova-accent/40 px-2 py-0.5 rounded-full">{modeLabel}</span>}
