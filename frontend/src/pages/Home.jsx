@@ -197,9 +197,10 @@ export default function Home() {
       const q = (params.get("q") || "").trim();
       if (m && ["all", "movie", "tv", "watchlist"].includes(m)) setMode(m);
       if (q) {
-        handleSearch(q);
+        navigate(`/search?q=${encodeURIComponent(q)}`, { replace: true });
+        return;
       }
-      if (m || q) navigate("/", { replace: true });
+      if (m) navigate("/", { replace: true });
     } catch {}
   }, []);
 

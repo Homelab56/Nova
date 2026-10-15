@@ -703,6 +703,17 @@ async def _build_pool():
         _POOL["building"] = False
 
 
+def _title_tier(it: dict, needle: str) -> int:
+    """0 = titel begint met de tekst, 1 = een woord (of woordreeks) begint ermee, 2 = overig."""
+    names = [_norm_text(it.get(k) or "") for k in ("title", "name", "original_title", "original_name")]
+    names = [n for n in names if n]
+    if any(n.startswith(needle) for n in names):
+        return 0
+    if any((" " + needle) in (" " + n) for n in names):
+        return 1
+    return 2
+
+
 @router.get("/suggest")
 async def suggest(q: str = Query(..., min_length=1)):
     """Live-suggesties tijdens het typen. Titels die met de getypte tekst beginnen (of
@@ -726,14 +737,7 @@ async def suggest(q: str = Query(..., min_length=1)):
     needle = _norm_text(q)
 
     def tier(it: dict) -> int:
-        names = [_norm_text(it.get(k) or "") for k in ("title", "name", "original_title", "original_name")]
-        names = [n for n in names if n]
-        if any(n.startswith(needle) for n in names):
-            return 0
-        # begint een woord (of een reeks woorden, bv. "super m" in "The Super Mario Bros.") ermee?
-        if any((" " + needle) in (" " + n) for n in names):
-            return 1
-        return 2
+        return _title_tier(it, needle)
 
     titles = [r for r in results if r.get("media_type") in ("movie", "tv")]
     # lokale lijst: enkel echte prefix-matches (tier 0/1)
@@ -757,6 +761,54 @@ async def suggest(q: str = Query(..., min_length=1)):
         ],
         "people": [{k: p.get(k) for k in ("id", "name", "profile_path", "known_for_department")} for p in people],
     }
+
+_FIND_CACHE: dict = {}
+
+@router.get("/find")
+async def find(q: str = Query(..., min_length=1)):
+    """Zoekpagina: ALLE films/series met de getypte woorden of namen. Combineert 5 pagina's
+    TMDB-zoek met een prefix-zoekactie in de lokale populaire-titels-lijst (zie /suggest),
+    gesorteerd op: begint met de tekst > woord begint ermee > overig, daarna populariteit."""
+    key = q.strip().lower()
+    hit = _FIND_CACHE.get(key)
+    if hit and time.time() - hit[0] < 300:
+        return hit[1]
+    if (not _POOL["items"] or time.time() - _POOL["built_at"] > _POOL_TTL) and not _POOL["building"]:
+        asyncio.create_task(_build_pool())
+
+    pages = await asyncio.gather(*[
+        tmdb_get("/search/multi", {"query": q, "page": p, "include_adult": "false"}) for p in range(1, 6)
+    ], return_exceptions=True)
+    results, seen = [], set()
+    for pg in pages:
+        if isinstance(pg, Exception):
+            continue
+        for r in pg.get("results") or []:
+            if isinstance(r, dict) and (r.get("media_type"), r.get("id")) not in seen:
+                seen.add((r.get("media_type"), r.get("id")))
+                results.append(r)
+    needle = _norm_text(q)
+    titles = [r for r in results if r.get("media_type") in ("movie", "tv")]
+    have = {(t.get("media_type"), t.get("id")) for t in titles}
+    for it in _POOL["items"]:
+        if (it["media_type"], it["id"]) not in have and _title_tier(it, needle) <= 1:
+            titles.append(it)
+            have.add((it["media_type"], it["id"]))
+    titles = _filter_items(titles, media_type=None, suggestion_mode=False, allow_kids=True)
+    titles = [t for t in titles if t.get("poster_path")]
+    titles.sort(key=lambda t: (_title_tier(t, needle), -(t.get("popularity") or 0)))
+    people = sorted(
+        [r for r in results if r.get("media_type") == "person" and r.get("profile_path")],
+        key=lambda r: -(r.get("popularity") or 0),
+    )[:12]
+    out = {
+        "items": titles[:200],
+        "people": [{k: p.get(k) for k in ("id", "name", "profile_path", "known_for_department")} for p in people],
+    }
+    if len(_FIND_CACHE) > 300:
+        _FIND_CACHE.clear()
+    _FIND_CACHE[key] = (time.time(), out)
+    return out
 
 @router.get("/multi")
 async def search_multi(q: str = Query(..., min_length=1), page: int = 1):

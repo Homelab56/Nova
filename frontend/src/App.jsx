@@ -4,6 +4,7 @@ import Watch from "./pages/Watch";
 import Settings from "./pages/Settings";
 import Kids from "./pages/Kids";
 import Person from "./pages/Person";
+import Search from "./pages/Search";
 import Login from "./pages/Login";
 import ProfileSelect from "./pages/ProfileSelect";
 import { useAuth } from "./context/AuthContext";
@@ -39,6 +40,7 @@ function SignedInApp() {
       <Route path="/settings" element={<Settings />} />
       <Route path="/kids" element={<Kids />} />
       <Route path="/person" element={<Person />} />
+      <Route path="/search" element={<Search />} />
     </Routes>
   );
 }
