@@ -236,7 +236,10 @@ export default function Watch() {
   const heroActive = !streamUrl && !resolving;
   const overlayVisible = resolving || (!!streamUrl && !playerStarted);
 
-  useEffect(() => { setPlayerStarted(false); }, [streamUrl]);
+  useEffect(() => {
+    setPlayerStarted(false);
+    if (streamUrl) window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [streamUrl]);
 
   useEffect(() => {
     const onScroll = () => setScrolledPast(window.scrollY > window.innerHeight * 0.5);
@@ -734,14 +737,16 @@ export default function Watch() {
   const playBusy = loading || requestBusy;
 
   return (
-    <div className="min-h-screen bg-nova-bg pl-20 md:pl-60">
-      <Sidebar
-        onSearch={(q) => navigate(`/?mode=all&q=${encodeURIComponent(q)}`)}
-        onClear={() => navigate("/")}
-        onGenre={() => navigate("/")}
-        mode={type}
-        onMode={(m) => navigate(`/?mode=${encodeURIComponent(m)}`)}
-      />
+    <div className={`min-h-screen bg-nova-bg ${streamUrl ? "" : "pl-20 md:pl-60"}`}>
+      {!streamUrl && (
+        <Sidebar
+          onSearch={(q) => navigate(`/?mode=all&q=${encodeURIComponent(q)}`)}
+          onClear={() => navigate("/")}
+          onGenre={() => navigate("/")}
+          mode={type}
+          onMode={(m) => navigate(`/?mode=${encodeURIComponent(m)}`)}
+        />
+      )}
       {overlayVisible && (
         <StreamLoadingOverlay
           backdropPath={media.backdrop_path}
@@ -792,28 +797,32 @@ export default function Watch() {
         </div>
       )}
 
-      <div className={streamUrl ? "relative z-10 px-4 md:px-10 pb-20 pt-24" : "relative z-10 px-4 md:px-12 pb-20"}>
-        <button
-          onClick={() => navigate(-1)}
-          className={`text-gray-300 hover:text-white text-sm flex items-center gap-1 ${streamUrl ? "mb-6" : "absolute top-6 left-4 md:left-12 z-20"}`}
-        >
-          ← Terug
-        </button>
+      <div className={streamUrl ? "relative z-10 px-4 md:px-10 pb-20" : "relative z-10 px-4 md:px-12 pb-20"}>
+        {!streamUrl && (
+          <button
+            onClick={() => navigate(-1)}
+            className="text-gray-300 hover:text-white text-sm flex items-center gap-1 absolute top-6 left-4 md:left-12 z-20"
+          >
+            ← Terug
+          </button>
+        )}
 
         {streamUrl && (
           <div className="mb-10">
-            <div className="max-w-5xl mx-auto">
-              <div className="mb-3">
-                <h1 className="text-lg md:text-2xl font-black leading-tight">
-                  {progressItem?.title || title}
-                </h1>
-              </div>
-              <Player url={streamUrl} media={progressItem || media} startAt={startAt} durationHint={durationHint} onProgress={(t, d) => saveProgress(progressItem || media, t, d)} onEnded={handleEnded} onNext={hasNext ? handleNext : null} onReady={() => setPlayerStarted(true)} />
-            </div>
-            <div className="mt-4 flex flex-wrap items-center gap-4">
-              <button onClick={() => { setStreamUrl(null); setStatus(""); setStartAt(0); setDurationHint(0); }} className="text-sm text-gray-500 hover:text-white flex items-center gap-1">
-                ← Terug naar info
-              </button>
+            <div className="-mx-4 md:-mx-10 h-screen bg-black">
+              <Player
+                url={streamUrl}
+                media={progressItem || media}
+                startAt={startAt}
+                durationHint={durationHint}
+                onProgress={(t, d) => saveProgress(progressItem || media, t, d)}
+                onEnded={handleEnded}
+                onNext={hasNext ? handleNext : null}
+                onReady={() => setPlayerStarted(true)}
+                immersive
+                title={progressItem?.title || title}
+                onBack={() => { setStreamUrl(null); setStatus(""); setStartAt(0); setDurationHint(0); }}
+              />
             </div>
 
             {!isMovie && seasons.length > 0 && (

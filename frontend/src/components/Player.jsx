@@ -36,7 +36,7 @@ function shiftVtt(text, shift) {
   return out.join("\n");
 }
 
-export default function Player({ url, media, onProgress, startAt = 0, durationHint = 0, onEnded, onNext, onReady }) {
+export default function Player({ url, media, onProgress, startAt = 0, durationHint = 0, onEnded, onNext, onReady, immersive: immersiveProp = false, title: playerTitle, onBack }) {
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
   const containerRef = useRef(null);
@@ -65,6 +65,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const [dragValue, setDragValue] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
+  const immersive = isFullscreen || immersiveProp;
   const [flashIcon, setFlashIcon] = useState(null);
   const [seekHint, setSeekHint] = useState("");
   const [subOffset, setSubOffset] = useState(0);
@@ -491,7 +492,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   };
 
   const showControlsTemporarily = () => {
-    if (!isFullscreen) return;
+    if (!immersive) return;
     setShowControls(true);
     clearTimeout(controlsTimer.current);
     if (playing) {
@@ -500,6 +501,11 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       }, 2000);
     }
   };
+
+  useEffect(() => {
+    if (immersive && playing) showControlsTemporarily();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing, immersive]);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -964,7 +970,9 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   return (
     <div
       ref={containerRef}
-      className="w-full aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl relative"
+      className={immersiveProp
+        ? `w-full h-full bg-black overflow-hidden relative ${showControls || !playing ? "" : "cursor-none"}`
+        : "w-full aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl relative"}
       onMouseMove={showControlsTemporarily}
       onTouchStart={showControlsTemporarily}
     >
@@ -1000,7 +1008,25 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
         Je browser ondersteunt geen video afspelen.
       </video>
 
-      {(showControls || !isFullscreen || !playing) && (
+      {(onBack || playerTitle) && (showControls || !immersive || !playing) && (
+        <div
+          className="absolute inset-x-0 top-0 z-20 flex items-center gap-4 bg-gradient-to-b from-black/75 to-transparent px-5 pt-5 pb-12"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="flex-shrink-0 w-10 h-10 rounded-full bg-white/10 hover:bg-white/25 border border-white/15 text-white flex items-center justify-center text-lg transition-colors"
+              title="Terug naar info"
+            >
+              ←
+            </button>
+          )}
+          {playerTitle && <h1 className="text-lg md:text-xl font-semibold text-white truncate drop-shadow">{playerTitle}</h1>}
+        </div>
+      )}
+
+      {(showControls || !immersive || !playing) && (
       <div
         className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-4 pb-4 pt-10"
         onClick={(e) => e.stopPropagation()}
