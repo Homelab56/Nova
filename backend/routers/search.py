@@ -669,8 +669,19 @@ async def suggest(q: str = Query(..., min_length=1)):
     """Snelle live-suggesties tijdens het typen: één TMDB-pagina i.p.v. de 5 pagina's van
     /multi. Titels die met de getypte tekst beginnen (of waarvan een woord ermee begint)
     komen eerst ("super" -> Superman, Super Mario...), daarna op populariteit."""
-    data = await tmdb_get("/search/multi", {"query": q, "page": 1, "include_adult": "false"})
-    results = [r for r in (data.get("results") or []) if isinstance(r, dict)]
+    # Eén pagina bevat bij korte, algemene queries ("super") vooral obscure titels; een paar
+    # pagina's parallel geeft de populaire (Superman, Super Mario) ook een kans.
+    pages = await asyncio.gather(*[
+        tmdb_get("/search/multi", {"query": q, "page": p, "include_adult": "false"}) for p in (1, 2, 3)
+    ], return_exceptions=True)
+    results, seen = [], set()
+    for pg in pages:
+        if isinstance(pg, Exception):
+            continue
+        for r in pg.get("results") or []:
+            if isinstance(r, dict) and (r.get("media_type"), r.get("id")) not in seen:
+                seen.add((r.get("media_type"), r.get("id")))
+                results.append(r)
     needle = _norm_text(q)
 
     def rank(it: dict) -> tuple:
