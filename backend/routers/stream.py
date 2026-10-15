@@ -2258,7 +2258,9 @@ async def _multiwindow_sync(
         desc, n_anchors, jumps = f"alleen grof centrum {center:+.2f}s", len(agree), 0
     else:
         offset_at, desc = _fit_offset_model(anchors, duration)
-        n_anchors = len(anchors)
+        # Onverklaarbare ruis (audio-spraakdetectie op muziek/actie) = lage betrouwbaarheid,
+        # zodat een andere ondertitelkandidaat met een consistent resultaat voorrang krijgt.
+        n_anchors = 1 if desc.startswith("ruis") else len(anchors)
         jumps = 1 if desc.startswith("sprong") else 0
     print(f"sync model: {desc}")
 
