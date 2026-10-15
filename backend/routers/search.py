@@ -664,6 +664,39 @@ async def search_tv(q: str = Query(..., min_length=1), page: int = 1):
         "total_results": data.get("total_results", 0),
     }
 
+@router.get("/suggest")
+async def suggest(q: str = Query(..., min_length=1)):
+    """Snelle live-suggesties tijdens het typen: één TMDB-pagina i.p.v. de 5 pagina's van
+    /multi. Titels die met de getypte tekst beginnen (of waarvan een woord ermee begint)
+    komen eerst ("super" -> Superman, Super Mario...), daarna op populariteit."""
+    data = await tmdb_get("/search/multi", {"query": q, "page": 1, "include_adult": "false"})
+    results = [r for r in (data.get("results") or []) if isinstance(r, dict)]
+    needle = _norm_text(q)
+
+    def rank(it: dict) -> tuple:
+        name = _norm_text(it.get("title") or it.get("name") or "")
+        words = name.split()
+        starts = name.startswith(needle)
+        word_start = any(w.startswith(needle) for w in words)
+        return (0 if starts else 1 if word_start else 2, -(it.get("popularity") or 0))
+
+    titles = [r for r in results if r.get("media_type") in ("movie", "tv")]
+    titles = _filter_items(titles, media_type=None, suggestion_mode=False, allow_kids=True)
+    titles = [t for t in titles if t.get("poster_path") or t.get("backdrop_path")]
+    titles.sort(key=rank)
+    people = [
+        r for r in results
+        if r.get("media_type") == "person" and r.get("profile_path") and (r.get("popularity") or 0) > 3
+    ][:2]
+    return {
+        "items": [
+            {k: t.get(k) for k in ("id", "media_type", "title", "name", "poster_path", "backdrop_path",
+                                   "release_date", "first_air_date", "vote_average", "overview")}
+            for t in titles[:7]
+        ],
+        "people": [{k: p.get(k) for k in ("id", "name", "profile_path", "known_for_department")} for p in people],
+    }
+
 @router.get("/multi")
 async def search_multi(q: str = Query(..., min_length=1), page: int = 1):
     import asyncio

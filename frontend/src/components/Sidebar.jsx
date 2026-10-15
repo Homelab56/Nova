@@ -53,6 +53,8 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode }) {
   const [query, setQuery] = useState("");
   const [activeGenre, setActiveGenre] = useState(null);
   const searchInputRef = useRef(null);
+  const [suggest, setSuggest] = useState({ items: [], people: [] });
+  const [activeIdx, setActiveIdx] = useState(-1);
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem("nova.sidebarCollapsed") === "1"; } catch { return false; }
   });
@@ -69,6 +71,48 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode }) {
   useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus();
   }, [searchOpen]);
+
+  // Live suggesties tijdens het typen (debounced, vorige aanvraag wordt afgebroken).
+  useEffect(() => {
+    const q = query.trim();
+    setActiveIdx(-1);
+    if (!searchOpen || q.length < 2) { setSuggest({ items: [], people: [] }); return; }
+    const ac = new AbortController();
+    const t = setTimeout(() => {
+      fetch(`/api/search/suggest?q=${encodeURIComponent(q)}`, { signal: ac.signal })
+        .then(r => (r.ok ? r.json() : null))
+        .then(d => { if (d) setSuggest({ items: d.items || [], people: d.people || [] }); })
+        .catch(() => {});
+    }, 220);
+    return () => { clearTimeout(t); ac.abort(); };
+  }, [query, searchOpen]);
+
+  const flat = [
+    ...suggest.items.map(item => ({ kind: "title", item })),
+    ...suggest.people.map(item => ({ kind: "person", item })),
+  ];
+
+  function openSuggestion(entry) {
+    setSearchOpen(false);
+    setQuery("");
+    if (entry.kind === "person") navigate("/person", { state: { person: entry.item } });
+    else navigate("/watch", { state: { media: entry.item } });
+  }
+
+  function handleSearchKey(e) {
+    if (e.key === "ArrowDown" && flat.length) {
+      e.preventDefault();
+      setActiveIdx(i => (i + 1) % flat.length);
+    } else if (e.key === "ArrowUp" && flat.length) {
+      e.preventDefault();
+      setActiveIdx(i => (i <= 0 ? flat.length - 1 : i - 1));
+    } else if (e.key === "Enter" && activeIdx >= 0 && flat[activeIdx]) {
+      e.preventDefault();
+      openSuggestion(flat[activeIdx]);
+    } else if (e.key === "Escape") {
+      setSearchOpen(false);
+    }
+  }
 
   function handleSubmit(e) {
     e.preventDefault();
@@ -215,16 +259,68 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode }) {
 
     {searchOpen && (
       <div className="fixed inset-0 z-[60] flex items-start justify-center pt-28 bg-black/60 backdrop-blur-sm p-4" onClick={() => setSearchOpen(false)}>
-        <form onSubmit={handleSubmit} onClick={(e) => e.stopPropagation()} className="bg-nova-card border border-gray-700 rounded-2xl shadow-2xl p-3 w-full max-w-md flex gap-2">
-          <input
-            ref={searchInputRef}
-            className="flex-1 bg-black/30 border border-gray-700 rounded-lg px-4 py-3 text-base text-white outline-none focus:border-nova-accent"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Zoeken..."
-          />
-          <button type="submit" className="px-5 rounded-lg bg-nova-accent text-white text-sm font-semibold">Ga</button>
-        </form>
+        <div className="w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+          <form onSubmit={handleSubmit} className="bg-nova-card border border-gray-700 rounded-2xl shadow-2xl p-3 flex gap-2">
+            <input
+              ref={searchInputRef}
+              className="flex-1 bg-black/30 border border-gray-700 rounded-lg px-4 py-3 text-base text-white outline-none focus:border-nova-accent"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={handleSearchKey}
+              placeholder="Zoeken..."
+              autoComplete="off"
+            />
+            <button type="submit" className="px-5 rounded-lg bg-nova-accent text-white text-sm font-semibold">Ga</button>
+          </form>
+
+          {flat.length > 0 && (
+            <div className="mt-2 bg-nova-card border border-gray-700 rounded-2xl shadow-2xl overflow-hidden py-1 max-h-[60vh] overflow-y-auto">
+              {flat.map((entry, i) => {
+                const it = entry.item;
+                const active = i === activeIdx;
+                if (entry.kind === "person") {
+                  return (
+                    <button
+                      key={`p${it.id}`}
+                      onClick={() => openSuggestion(entry)}
+                      onMouseEnter={() => setActiveIdx(i)}
+                      className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${active ? "bg-white/10" : "hover:bg-white/5"}`}
+                    >
+                      <img src={`https://image.tmdb.org/t/p/w92${it.profile_path}`} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold truncate">{it.name}</p>
+                        <p className="text-xs text-gray-500">{it.known_for_department === "Acting" ? "Acteur" : "Persoon"}</p>
+                      </div>
+                    </button>
+                  );
+                }
+                const name = it.title || it.name;
+                const year = (it.release_date || it.first_air_date || "").slice(0, 4);
+                return (
+                  <button
+                    key={`${it.media_type}${it.id}`}
+                    onClick={() => openSuggestion(entry)}
+                    onMouseEnter={() => setActiveIdx(i)}
+                    className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${active ? "bg-white/10" : "hover:bg-white/5"}`}
+                  >
+                    {it.poster_path ? (
+                      <img src={`https://image.tmdb.org/t/p/w92${it.poster_path}`} alt="" className="w-10 h-14 rounded-md object-cover flex-shrink-0" />
+                    ) : (
+                      <div className="w-10 h-14 rounded-md bg-black/30 flex-shrink-0" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold truncate">{name}</p>
+                      <p className="text-xs text-gray-500">
+                        {[year, it.media_type === "tv" ? "Serie" : "Film"].filter(Boolean).join(" · ")}
+                      </p>
+                    </div>
+                    {it.vote_average > 0 && <span className="text-xs text-yellow-400 flex-shrink-0">★ {it.vote_average.toFixed(1)}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     )}
 
