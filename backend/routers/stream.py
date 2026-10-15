@@ -1447,7 +1447,7 @@ _OS_USER_AGENT = "Nova v1.0"
 # parameters, referentie-venster, kandidaat-selectie, ...), anders blijven
 # oude, met de vorige logica gesynchroniseerde resultaten hangen.
 _SUB_CACHE_DIR = "/app/data/subtitles_cache"
-_SUB_CACHE_VERSION = "v12"
+_SUB_CACHE_VERSION = "v13"
 
 
 def _subtitle_cache_path(cache_key: str) -> str:
@@ -1923,16 +1923,59 @@ async def _extract_sub_window(input_value: str, t0: float, win: float, idx: int,
     return [[c[0] + t0, c[1] + t0, c[2]] for c in cues]
 
 
+def _text_grams(text: str) -> set[str]:
+    """Karakter-trigrammen van de woorden (>=3 letters): Engels en Nederlands delen veel
+    eigennamen, cijfers en verwante woorden (calibration/kalibratie, data/datacentrum)."""
+    t = re.sub(r"[^a-z0-9 ]", "", (text or "").lower().replace("\n", " "))
+    grams: set[str] = set()
+    for w in t.split():
+        if len(w) < 3:
+            continue
+        w = f"^{w}$"
+        grams.update(w[i:i + 3] for i in range(len(w) - 2))
+    return grams
+
+
+def _text_sim_scan(ref_cues: list[list], cues: list[list], t0: float, win: float, max_off: float, step: float = 0.25):
+    """Score per offset (-max_off..max_off): som van de tekstovereenkomst van regelparen
+    (referentie vs. te synchroniseren ondertitel) die na verschuiving binnen ~2s van elkaar
+    beginnen. Anders dan alleen ritme (onsets) kijkt dit naar de INHOUD - dat onderscheidt de
+    juiste piek van een zijpiek één regel verderop. Geeft (offsets, scores) of None."""
+    import numpy as np
+
+    lo, hi = t0 - max_off - 10, t0 + win + max_off + 10
+    near = [(c[0], _text_grams(c[2])) for c in cues if lo <= c[0] <= hi]
+    pairs = []
+    for r in ref_cues:
+        rg = _text_grams(r[2])
+        if len(rg) < 4:
+            continue
+        for ns, ng in near:
+            if abs(r[0] - ns) <= max_off + 8 and ng:
+                sim = 2 * len(rg & ng) / (len(rg) + len(ng))
+                if sim >= 0.30:  # alleen duidelijk verwante paren
+                    pairs.append((r[0] - ns, sim))  # impliciete offset van dit paar
+    if len(pairs) < 3:
+        return None
+    offs = np.arange(-max_off, max_off + step / 2, step)
+    scores = np.zeros(len(offs), dtype=np.float32)
+    for o_pair, sim in pairs:
+        # paar draagt bij rond zijn eigen offset (gauss, sigma 0.8s, +-2s)
+        d = (offs - o_pair)
+        mask = np.abs(d) <= 2.0
+        scores[mask] += sim * np.exp(-0.5 * (d[mask] / 0.8) ** 2)
+    return offs, scores
+
+
 def _ref_offset_candidates(
     ref_cues: list[list], cues: list[list], t0: float, win: float, center: float, max_off: float, n_best: int = 4
 ) -> list[tuple[float, float]]:
-    """Kandidaat-offsets (referentietijd - ondertitel-tijd, relatieve score 0..1) via
-    kruiscorrelatie van de BEGINMOMENTEN (en deels de eindmomenten) van de ondertitelregels
-    van de referentie in [t0, t0+win] en van de te synchroniseren ondertitel, binnen
-    center +- max_off. Beginmomenten zijn veel scherper dan 'er staat tekst' (twee talen
-    segmenteren verschillend, maar laten een zin op vrijwel hetzelfde moment beginnen).
-    Ritmische dialoog geeft sterke zijpieken (~3s verderop) - daarom meerdere kandidaten;
-    de keuze gebeurt over alle vensters heen (zie _pick_offset_path)."""
+    """Kandidaat-offsets (referentietijd - ondertitel-tijd, score 0..2) voor één venster.
+    Kandidaten komen uit kruiscorrelatie van de BEGINMOMENTEN van de ondertitelregels
+    (scherp, maar ritmische dialoog geeft zijpieken ~3s verderop); de score combineert die
+    piekhoogte met de inhoudelijke tekstovereenkomst bij die offset (_text_sim_scan), zodat
+    de juiste piek wint. De uiteindelijke keuze gebeurt over alle vensters heen
+    (_pick_offset_path)."""
     import numpy as np
 
     dt = 0.1
@@ -1971,7 +2014,24 @@ def _ref_offset_candidates(
             picks.append((int(idx), float(corr[idx])))
         if len(picks) >= n_best:
             break
-    return [((t0 - t_s) - k * dt, v / top) for k, v in picks]
+    cands = [((t0 - t_s) - k * dt, v / top) for k, v in picks]
+
+    scan = _text_sim_scan(ref_cues, cues, t0, win, max_off + abs(center))
+    if scan is not None:
+        offs, sc = scan
+        smax = float(sc.max())
+        if smax >= 0.8:  # genoeg inhoudelijk bewijs; anders neutraal (alleen ritme)
+            out = []
+            for o, base in cands:
+                m = np.abs(offs - o) <= 0.75
+                sim_rel = float(sc[m].max()) / smax if m.any() else 0.0
+                out.append((o, base + 1.0 * sim_rel))
+            # ook de sterkste inhoudelijke piek zelf als kandidaat (ritme kan 'm missen)
+            j = int(np.argmax(sc))
+            if all(abs(offs[j] - o) > 1.2 for o, _ in out):
+                out.append((float(offs[j]), 0.6 + 1.0))
+            return sorted(out, key=lambda x: -x[1])[:n_best + 1]
+    return cands
 
 
 def _pick_offset_path(windows: list[tuple[float, list[tuple[float, float]]]]) -> list[tuple[float, float]]:
@@ -1980,7 +2040,7 @@ def _pick_offset_path(windows: list[tuple[float, list[tuple[float, float]]]]) ->
     tussen opeenvolgende vensters vloeiend verloopt (echte drift is traag; een zijpiek
     springt ~3s heen en weer). Sprongen blijven mogelijk (begrensde straf) voor echte
     montageverschillen."""
-    lam, cap = 0.12, 8.0
+    lam, cap = 0.04, 6.0
     ws = [w for w in windows if w[1]]
     if not ws:
         return []
