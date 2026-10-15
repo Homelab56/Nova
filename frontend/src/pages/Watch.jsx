@@ -72,7 +72,7 @@ export default function Watch() {
 
   const { toggleWatchlist, isInList, saveProgress, progress, progressMap } = useUserData();
   const inList = isInList(mediaId);
-  const savedProgress = progress.find(p => p.id === mediaId);
+  const savedProgress = progress.find(p => String(p.id) === String(mediaId) && p.media_type !== "tv_episode");
 
   const title = media?.title || media?.name;
   const year = (media?.release_date || media?.first_air_date || "").slice(0, 4);
@@ -307,14 +307,14 @@ export default function Watch() {
 
   if (!media) { navigate("/"); return null; }
 
-  const episodeKey = (seasonNumber, episodeNumber) => `tv:${mediaId}:S${seasonNumber}E${episodeNumber}`;
+  const episodeKey = (seasonNumber, episodeNumber) => `tv:${mediaId}:${seasonNumber}:${episodeNumber}`;
   const getEpisodeProgress = (seasonNumber, episodeNumber) => progressMap?.[episodeKey(seasonNumber, episodeNumber)] || null;
 
   const getLatestEpisode = () => {
     if (isMovie) return null;
     const eps = progress.filter(p => p.show_id === mediaId && p.media_type === "tv_episode");
     if (eps.length === 0) return null;
-    const latest = eps[eps.length - 1]; // Assume last is the most recent
+    const latest = eps.reduce((a, b) => (Date.parse(b.last_watched_at || 0) > Date.parse(a.last_watched_at || 0) ? b : a));
     if ((latest.current_time / latest.duration) >= 0.95) {
       // Return next episode theoretically, but we don't know it here without seasonData.
       // So let's just return it or nothing.
@@ -737,7 +737,7 @@ export default function Watch() {
   const playBusy = loading || requestBusy;
 
   return (
-    <div className={`min-h-screen bg-nova-bg ${streamUrl ? "" : "pl-20 md:pl-60"}`}>
+    <div className={`min-h-screen bg-nova-bg ${streamUrl ? "" : "pl-[var(--sbw)] transition-[padding-left] duration-200"}`}>
       {!streamUrl && (
         <Sidebar
           onSearch={(q) => navigate(`/?mode=all&q=${encodeURIComponent(q)}`)}
@@ -759,7 +759,7 @@ export default function Watch() {
       )}
 
       {!streamUrl && (
-        <div className="fixed top-0 bottom-0 right-0 left-20 md:left-60 z-0 pointer-events-none bg-black">
+        <div className="fixed top-0 bottom-0 right-0 left-[var(--sbw)] z-0 pointer-events-none bg-black">
           {media.backdrop_path && (
             <img
               src={`https://image.tmdb.org/t/p/w1280${media.backdrop_path}`}

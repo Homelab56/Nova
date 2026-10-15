@@ -58,7 +58,7 @@ export default function Person() {
   const sorted = sortCredits(credits, sortKey);
 
   return (
-    <div className="min-h-screen bg-nova-bg pl-20 md:pl-60">
+    <div className="min-h-screen bg-nova-bg pl-[var(--sbw)] transition-[padding-left] duration-200">
       <Sidebar
         onSearch={(q) => navigate(`/?mode=all&q=${encodeURIComponent(q)}`)}
         onClear={() => navigate("/")}

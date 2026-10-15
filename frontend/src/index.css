@@ -2,6 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Breedte van de zijbalk: ingeklapt 5rem, uitgeklapt 15rem (op smalle schermen altijd 5rem) */
+:root { --sbw: 15rem; }
+html.sb-collapsed { --sbw: 5rem; }
+@media (max-width: 767px) { :root, html.sb-collapsed { --sbw: 5rem; } }
+
 body {
   background-color: #0a0a0f;
   color: white;

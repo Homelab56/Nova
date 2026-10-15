@@ -160,33 +160,33 @@ export default function Home() {
   const initFromUrlRef = useRef(false);
 
   const { watchlist, progress, progressMap, suggestions } = useUserData();
-  const inProgressRaw = progress.filter(p => {
-    const t = Number(p?.current_time) || 0;
-    const d = Number(p?.duration) || 0;
-    if (t <= 10) return false;
-    if (d > 0) return (t / d) < 0.95;
-    return true;
-  });
-  const inProgressMap = new Map();
-  // Reverse to ensure newer overwrites older (if multiple episodes of same show are present)
-  [...inProgressRaw].reverse().forEach(p => {
-    if (p.media_type === "tv_episode") {
-      if (p.show_id && !inProgressMap.has(p.show_id)) {
-        inProgressMap.set(p.show_id, {
-          ...p,
-          id: p.show_id,
-          media_type: "tv",
-          name: p.title.split(" S")[0],
-          title: undefined
-        });
-      }
-    } else {
-      if (!inProgressMap.has(p.id)) {
-        inProgressMap.set(p.id, p);
-      }
+  // "Verder kijken": nieuwste eerst, één kaart per serie (de laatst bekeken aflevering) en
+  // geen titels die (bijna) uit zijn. Sorteren gebeurt expliciet op last_watched_at - de
+  // volgorde uit de database is niet gegarandeerd.
+  const inProgress = (() => {
+    const when = (p) => Date.parse(p?.last_watched_at || 0) || 0;
+    const sorted = progress
+      .filter(p => {
+        const t = Number(p?.current_time) || 0;
+        const d = Number(p?.duration) || 0;
+        if (t <= 10) return false;
+        if (d > 0) return (t / d) < 0.95;
+        return true;
+      })
+      .sort((a, b) => when(b) - when(a));
+    const seen = new Set();
+    const out = [];
+    for (const p of sorted) {
+      const isEp = p.media_type === "tv_episode";
+      const key = isEp ? `tv:${p.show_id}` : `${p.media_type}:${p.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(isEp
+        ? { ...p, id: p.show_id, media_type: "tv", name: (p.title || "").split(" S")[0], title: undefined }
+        : p);
     }
-  });
-  const inProgress = Array.from(inProgressMap.values()).reverse();
+    return out;
+  })();
 
   useEffect(() => {
     if (initFromUrlRef.current) return;
@@ -486,7 +486,7 @@ export default function Home() {
   // Watchlist pagina
   if (mode === "watchlist") {
     return (
-      <div className="min-h-screen bg-nova-bg pl-20 md:pl-60">
+      <div className="min-h-screen bg-nova-bg pl-[var(--sbw)] transition-[padding-left] duration-200">
         <Sidebar onSearch={handleSearch} onClear={handleClear} onGenre={handleGenre} mode={mode} onMode={handleMode} />
         <div className="pt-8 px-4 md:px-10 pb-16">
           <h1 className="text-2xl md:text-3xl font-black mb-2">Mijn Watchlist</h1>
@@ -508,7 +508,7 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-nova-bg pl-20 md:pl-60">
+    <div className="min-h-screen bg-nova-bg pl-[var(--sbw)] transition-[padding-left] duration-200">
       <Sidebar onSearch={handleSearch} onClear={handleClear} onGenre={handleGenre} mode={mode} onMode={handleMode} />
 
       {sortBar}

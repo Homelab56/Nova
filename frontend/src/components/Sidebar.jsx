@@ -53,6 +53,18 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode }) {
   const [query, setQuery] = useState("");
   const [activeGenre, setActiveGenre] = useState(null);
   const searchInputRef = useRef(null);
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem("nova.sidebarCollapsed") === "1"; } catch { return false; }
+  });
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("sb-collapsed", collapsed);
+    try { localStorage.setItem("nova.sidebarCollapsed", collapsed ? "1" : "0"); } catch {}
+  }, [collapsed]);
+
+  // Klassen die afhangen van in-/uitgeklapt: labels weg en icoon gecentreerd als ingeklapt.
+  const lbl = collapsed ? "hidden" : "hidden md:inline";
+  const just = collapsed ? "justify-center" : "${just}";
 
   useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus();
@@ -78,13 +90,20 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode }) {
 
   return (
     <>
-    <nav className="fixed left-0 top-0 bottom-0 z-50 w-20 md:w-60 bg-nova-card/95 backdrop-blur border-r border-gray-800 flex flex-col">
+    <nav className="fixed left-0 top-0 bottom-0 z-50 w-[var(--sbw)] transition-[width] duration-200 bg-nova-card/95 backdrop-blur border-r border-gray-800 flex flex-col">
       {/* Logo (gepind, scrollt niet mee) */}
       <div
         onClick={() => { onClear(); setActiveGenre(null); onMode("all"); navigate("/"); }}
-        className="cursor-pointer select-none flex items-center justify-center md:justify-start px-2 md:px-5 py-7 shrink-0"
+        className={`cursor-pointer select-none flex items-center ${just} px-2 ${collapsed ? "" : "md:px-5"} py-7 shrink-0`}
       >
-        <img src="/logo.png" alt="Streamify" className="h-12 md:h-16 w-auto drop-shadow-[0_0_14px_rgba(0,180,216,0.5)]" />
+        {collapsed ? (
+          <img src="/favicon.png" alt="Streamify" className="h-11 w-11 rounded-xl drop-shadow-[0_0_14px_rgba(0,180,216,0.5)]" />
+        ) : (
+          <>
+            <img src="/favicon.png" alt="Streamify" className="md:hidden h-11 w-11 rounded-xl" />
+            <img src="/logo.png" alt="Streamify" className="hidden md:block h-16 w-auto drop-shadow-[0_0_14px_rgba(0,180,216,0.5)]" />
+          </>
+        )}
       </div>
 
       {/* Navigatie (scrollt indien nodig in de resterende ruimte) */}
@@ -93,64 +112,74 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode }) {
           <button
             key={item.key}
             onClick={() => handleMode(item.key)}
-            className={`w-full flex items-center justify-center md:justify-start gap-3 px-2 md:px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+            className={`w-full flex items-center ${just} gap-3 px-2 md:px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
               mode === item.key ? "bg-nova-accent text-white" : "text-gray-400 hover:text-white hover:bg-white/5"
             }`}
           >
             {item.icon}
-            <span className="hidden md:inline">{item.label}</span>
+            <span className={`${lbl}`}>{item.label}</span>
           </button>
         ))}
 
         <div className="relative pt-2">
           <button
             onClick={() => setGenreOpen((v) => !v)}
-            className={`w-full flex items-center justify-center md:justify-start gap-3 px-2 md:px-3 py-2.5 rounded-xl text-sm font-medium transition-all border ${
+            className={`w-full flex items-center ${just} gap-3 px-2 md:px-3 py-2.5 rounded-xl text-sm font-medium transition-all border ${
               genreOpen || activeGenre ? "border-nova-accent text-nova-accent bg-nova-accent/10" : "border-transparent text-gray-400 hover:text-white hover:bg-white/5"
             }`}
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" />
             </svg>
-            <span className="hidden md:inline truncate">{activeGenre ? activeGenre.name : "Genres"}</span>
+            <span className={`${lbl} truncate`}>{activeGenre ? activeGenre.name : "Genres"}</span>
           </button>
         </div>
 
         <div>
           <button
             onClick={() => setSearchOpen(true)}
-            className={`w-full flex items-center justify-center md:justify-start gap-3 px-2 md:px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${searchOpen ? "text-nova-accent" : "text-gray-400 hover:text-white hover:bg-white/5"}`}
+            className={`w-full flex items-center ${just} gap-3 px-2 md:px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${searchOpen ? "text-nova-accent" : "text-gray-400 hover:text-white hover:bg-white/5"}`}
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <circle cx="11" cy="11" r="7" /><line x1="16.5" y1="16.5" x2="22" y2="22" />
             </svg>
-            <span className="hidden md:inline">Zoeken</span>
+            <span className={`${lbl}`}>Zoeken</span>
           </button>
         </div>
       </div>
 
       {/* Profiel + instellingen (gepind onderaan) */}
       <div className="shrink-0 border-t border-gray-800 px-2 md:px-3 py-3 space-y-1">
+        <button
+          onClick={() => setCollapsed((v) => !v)}
+          title={collapsed ? "Menu uitklappen" : "Menu inklappen"}
+          className={`hidden md:flex w-full items-center ${collapsed ? "justify-center" : "justify-start"} gap-3 px-2 md:px-3 py-2.5 rounded-xl text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-all`}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className={`w-5 h-5 shrink-0 transition-transform duration-200 ${collapsed ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+          </svg>
+          {!collapsed && <span>Inklappen</span>}
+        </button>
         <button onClick={() => navigate("/settings")}
-          className="w-full flex items-center justify-center md:justify-start gap-3 px-2 md:px-3 py-2.5 rounded-xl text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-all">
+          className={`w-full flex items-center ${just} gap-3 px-2 md:px-3 py-2.5 rounded-xl text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-all`}>
           <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
-          <span className="hidden md:inline">Instellingen</span>
+          <span className={`${lbl}`}>Instellingen</span>
         </button>
 
         {selectedProfile && (
           <div>
             <button
               onClick={() => setProfileOpen((v) => !v)}
-              className="w-full flex items-center justify-center md:justify-start gap-2 px-1 md:px-2 py-2 rounded-xl hover:bg-white/5 transition-colors"
+              className={`w-full flex items-center ${just} gap-2 px-1 md:px-2 py-2 rounded-xl hover:bg-white/5 transition-colors`}
             >
               <div className="w-8 h-8 shrink-0 rounded-md flex items-center justify-center text-sm font-bold text-white"
                 style={{ backgroundColor: selectedProfile.avatar_color_hex || "#1E88E5" }}>
                 {(selectedProfile.name || "?").charAt(0).toUpperCase()}
               </div>
-              <span className="hidden md:inline text-sm text-gray-300 truncate">{selectedProfile.name}</span>
+              <span className={`${lbl} text-sm text-gray-300 truncate`}>{selectedProfile.name}</span>
             </button>
           </div>
         )}
@@ -203,7 +232,7 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode }) {
     {profileOpen && selectedProfile && (
       <div className="fixed inset-0 z-[60] bg-transparent" onClick={() => setProfileOpen(false)}>
         <div
-          className="absolute bottom-20 left-24 md:left-64 ml-2 bg-nova-card border border-gray-700 rounded-xl shadow-2xl py-2 w-48"
+          className="absolute bottom-20 left-[calc(var(--sbw)+0.5rem)] bg-nova-card border border-gray-700 rounded-xl shadow-2xl py-2 w-48"
           onClick={(e) => e.stopPropagation()}
         >
           <button onClick={() => { setProfileOpen(false); clearSelectedProfile(); }}

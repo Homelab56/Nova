@@ -175,6 +175,7 @@ async def add_to_watchlist(profile_id: str, item: WatchlistItem, ctx: UserContex
         "release_info": item.release_date or item.first_air_date or None,
         "imdb_rating": item.vote_average or None,
         "added_at": _iso_now(),
+        "deleted_at": None,
     }
     ctx.client.table(LIBRARY_TABLE).upsert(
         row, on_conflict="profile_id,content_id,content_type"
@@ -214,6 +215,7 @@ async def get_all_progress(profile_id: str, ctx: UserContext = Depends(get_user_
         .eq("profile_id", profile_id)
         .eq("user_id", ctx.user_id)
         .is_("deleted_at", "null")
+        .order("last_watched_at", desc=True)
         .execute()
     )
     return [_progress_row_to_item(r) for r in res.data]
@@ -243,6 +245,7 @@ async def save_progress(profile_id: str, item: ProgressItem, ctx: UserContext = 
         "progress_percent": (item.current_time / item.duration) if item.duration > 0 else None,
         "source": "web",
         "last_watched_at": _iso_now(),
+        "deleted_at": None,
     }
     ctx.client.table(PROGRESS_TABLE).upsert(
         row, on_conflict="profile_id,content_id,season,episode"
@@ -270,8 +273,11 @@ def _progress_row_to_item(row: dict) -> dict:
     season = row.get("season", -1)
     episode = row.get("episode", -1)
     is_episode = season is not None and season >= 0
+    cid = row["content_id"]
+    # Films: numeriek id (net als de watchlist) - de frontend vergelijkt met een number-id;
+    # een string "969681" !== 969681 liet 'Hervatten' en voortgang nooit matchen.
     synthetic_id = (
-        f"tv:{row['content_id']}:{season}:{episode}" if is_episode else row["content_id"]
+        f"tv:{cid}:{season}:{episode}" if is_episode else (int(cid) if str(cid).isdigit() else cid)
     )
     # Mirror back Nova's own "tv_episode" distinction (see save_progress) so the frontend's
     # existing media_type === "tv_episode" filters keep working, even though the shared
@@ -283,6 +289,7 @@ def _progress_row_to_item(row: dict) -> dict:
         "poster_path": row.get("poster") or "",
         "backdrop_path": row.get("backdrop") or "",
         "media_type": media_type,
+        "last_watched_at": row.get("last_watched_at"),
         "current_time": (row.get("position_ms") or 0) / 1000.0,
         "duration": (row.get("duration_ms") or 0) / 1000.0,
         "show_id": int(row["content_id"]) if is_episode and str(row["content_id"]).isdigit() else None,
@@ -315,6 +322,7 @@ async def set_rating(profile_id: str, item: RatingItem, ctx: UserContext = Depen
         "media_type": item.media_type,
         "stars": item.stars,
         "rated_at": _iso_now(),
+        "deleted_at": None,
     }
     ctx.client.table(RATINGS_TABLE).upsert(row, on_conflict="profile_id,tmdb_id,media_type").execute()
     return {"ok": True}
