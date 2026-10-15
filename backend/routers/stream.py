@@ -1447,7 +1447,7 @@ _OS_USER_AGENT = "Nova v1.0"
 # parameters, referentie-venster, kandidaat-selectie, ...), anders blijven
 # oude, met de vorige logica gesynchroniseerde resultaten hangen.
 _SUB_CACHE_DIR = "/app/data/subtitles_cache"
-_SUB_CACHE_VERSION = "v13"
+_SUB_CACHE_VERSION = "v15"
 
 
 def _subtitle_cache_path(cache_key: str) -> str:
@@ -2067,93 +2067,97 @@ def _pick_offset_path(windows: list[tuple[float, list[tuple[float, float]]]]) ->
     return path
 
 
-def _robust_line(anchors: list[tuple[float, float]], duration: float, tol: float = 1.8):
-    """RANSAC-achtige lijn door (ondertitel-tijd, offset): kies de lijn met de meeste ankers
-    binnen [tol] seconden en fit die opnieuw op die ankers. Uitschieters (valse pieken) vallen
-    zo af. Geeft (offset_functie, beschrijving, n_inliers) of None."""
-    n = len(anchors)
-    if n < 3:
-        return None
-    best = None
-    for i in range(n):
-        for j in range(i + 1, n):
-            k0, o0 = anchors[i]
-            k1, o1 = anchors[j]
-            if k1 - k0 < 300:
+def _pair_samples(
+    refs: list[tuple[float, list[list]]], cues: list[list], off_at_ref
+) -> list[tuple[float, float]]:
+    """Dichte meetpunten (ondertitel-tijd, offset): voor elke referentieregel met voldoende
+    tekst de ondubbelzinnig overeenkomende regel in de te synchroniseren ondertitel (zelfde
+    zin in beide talen: namen, cijfers, verwante woorden), gezocht rond de verwachte plek
+    volgens het grove pad. Elk paar is een bijna exacte meting (~0.3s) van de lokale offset."""
+    grams = [(c[0], _text_grams(c[2])) for c in cues]
+    samples: list[tuple[float, float]] = []
+    for _t0, ref in refs:
+        for r in (ref or [])[1:]:  # eerste regel van een venster kan door het knippen afgekapt zijn
+            rg = _text_grams(r[2])
+            if len(rg) < 6:
                 continue
-            slope = (o1 - o0) / (k1 - k0)
-            if abs(slope) > 0.05:      # >5% tempoverschil is geen realistische drift
+            expected = r[0] - off_at_ref(r[0])
+            scored = []
+            for ns, ng in grams:
+                if abs(ns - expected) <= 3.5 and ng:
+                    scored.append((2 * len(rg & ng) / (len(rg) + len(ng)), ns))
+            scored.sort(reverse=True)
+            if not scored or scored[0][0] < 0.5:
                 continue
-            icpt = o0 - slope * k0
-            inl = [a for a in anchors if abs(a[1] - (icpt + slope * a[0])) <= tol]
-            if best is None or len(inl) > len(best):
-                best = inl
-    if best is None or len(best) < max(3, int(0.6 * n + 0.5)):
-        return None
-    ks = [a[0] for a in best]
-    os_ = [a[1] for a in best]
-    m = len(best)
-    mk, mo = sum(ks) / m, sum(os_) / m
-    var = sum((k - mk) ** 2 for k in ks)
-    slope = sum((k - mk) * (o - mo) for k, o in zip(ks, os_)) / var if var > 0 else 0.0
-    icpt = mo - slope * mk
-    span = max(duration, ks[-1])
-    if abs(slope) * span < 2.5:
-        med = sorted(os_)[m // 2]
-        return (lambda t: med), f"constant {med:+.2f}s ({m}/{n} ankers)", m
-    return (lambda t: icpt + slope * t), f"drift {slope * 3600:+.2f}s/uur, start {icpt:+.2f}s ({m}/{n} ankers)", m
+            if len(scored) > 1 and scored[1][0] > 0.7 * scored[0][0]:
+                continue  # niet ondubbelzinnig (herhaalde zin zoals 'Web, stop.')
+            samples.append((scored[0][1], r[0] - scored[0][1]))
+    return samples
 
 
 async def _ref_sync(
     input_value: str, cues: list[list], is_tv: bool, duration: float, ref_sub_idx: int
 ) -> tuple[list[list], int, int] | None:
-    """Sync tegen de ingebakken ondertitel van het bestand zelf: ~11 vensters verspreid over
-    de film, per venster een paar kandidaat-pieken van de onset-correlatie, daarna het meest
-    vloeiende pad door die kandidaten (_pick_offset_path), licht gladgestreken en lineair
-    geïnterpoleerd. Volgt zowel constante offsets als drift of een andere montage."""
-    win = 240.0 if is_tv else 300.0
-    d = duration if duration > 0 else (2700.0 if is_tv else 6600.0)
-    fracs = [0.03, 0.12, 0.21, 0.30, 0.39, 0.48, 0.57, 0.66, 0.75, 0.84, 0.93]
+    """Sync tegen de ingebakken ondertitel van het bestand zelf. Grof: ~11 vensters verspreid
+    over de film, per venster kandidaat-pieken (ritme + tekstovereenkomst), daarna het
+    vloeiendste pad (_pick_offset_path). Fijn: ondubbelzinnige regelparen uit dezelfde vensters
+    geven dichte, nauwkeurige lokale offsets (_pair_samples); de uiteindelijke offset per
+    ondertitelregel is het lokaal gewogen gemiddelde daarvan (valt terug op het grove pad waar
+    te weinig paren zijn). Volgt constante offsets, drift en montageverschillen."""
+    win = 200.0 if is_tv else 240.0
+    fracs = [0.04, 0.15, 0.26, 0.37, 0.48, 0.59, 0.70, 0.81, 0.92]
     starts = _pick_window_starts(duration, is_tv, win, fracs)
-    sem = asyncio.Semaphore(3)
+    sem = asyncio.Semaphore(4)
 
     async def one(t0: float):
         async with sem:
             ref = await _extract_sub_window(input_value, t0, win, ref_sub_idx)
             if ref is None:
-                return t0, []
-            return t0, _ref_offset_candidates(ref, cues, t0, win, 0.0, 120.0)
+                return t0, [], []
+            return t0, _ref_offset_candidates(ref, cues, t0, win, 0.0, 120.0), ref
 
-    results = sorted(await asyncio.gather(*[one(t) for t in starts]))
-    # 'sub-tijd' van een venster ~ midden van het venster min de offset; voor DP volstaat
-    # de venstermidden (offsets verschillen slechts seconden t.o.v. vensters van minuten).
-    windows = [(t0 + win / 2, cands) for t0, cands in results]
+    results = sorted(await asyncio.gather(*[one(t) for t in starts]), key=lambda x: x[0])
+    windows = [(t0 + win / 2, cands) for t0, cands, _ in results]
     n_valid = sum(1 for _, c in windows if c)
     path = _pick_offset_path(windows)
     if n_valid < 3 or len(path) < 3:
         return None
-    # lichte gladstrijking (mediaan van 3) tegen eenzame foute vensters
     offs = [o for _, o in path]
     smooth = [offs[0]] + [sorted(offs[i - 1:i + 2])[1] for i in range(1, len(offs) - 1)] + [offs[-1]]
-    anchors = [(t - o, o_s) for (t, _), o, o_s in zip(path, offs, smooth)]  # (ondertitel-tijd, offset)
-    anchors.sort()
-    print("sync ref-pad (sub-tijd s, offset s): " + ", ".join(f"({k:.0f}, {o:+.1f})" for k, o in anchors))
+    ref_ks = [t for t, _ in path]  # sleutel: referentietijd (vensterdmidden)
+    print("sync ref-pad (venstermidden s, offset s): " + ", ".join(f"({k:.0f}, {o:+.1f})" for k, o in zip(ref_ks, smooth)))
 
-    ks = [a[0] for a in anchors]
-    os_ = [a[1] for a in anchors]
-
-    def offset_at(t: float) -> float:
+    def interp(ks, vs, t):
         if t <= ks[0]:
-            return os_[0]
+            return vs[0]
         if t >= ks[-1]:
-            return os_[-1]
+            return vs[-1]
         for i in range(len(ks) - 1):
             if ks[i] <= t <= ks[i + 1]:
-                span = ks[i + 1] - ks[i]
-                return os_[i] + (os_[i + 1] - os_[i]) * ((t - ks[i]) / span if span > 0 else 0.0)
-        return os_[-1]
+                sp = ks[i + 1] - ks[i]
+                return vs[i] + (vs[i + 1] - vs[i]) * ((t - ks[i]) / sp if sp > 0 else 0.0)
+        return vs[-1]
 
-    jumps = sum(1 for i in range(len(os_) - 1) if abs(os_[i + 1] - os_[i]) > 4.0)
+    off_at_ref = lambda t: interp(ref_ks, smooth, t)
+    sub_ks = [t - o for t, o in zip(ref_ks, smooth)]
+    coarse_at = lambda t: interp(sub_ks, smooth, t)
+
+    samples = _pair_samples([(t0, ref) for t0, _, ref in results], cues, off_at_ref)
+    # uitschieters t.o.v. het grove pad weg (verkeerd gekoppelde regels)
+    samples = [(k, o) for k, o in samples if abs(o - coarse_at(k)) <= 2.5]
+    print(f"sync fijn: {len(samples)} ondubbelzinnige regelparen")
+
+    def offset_at(t: float) -> float:
+        w_sum, o_sum = 0.5, 0.5 * coarse_at(t)  # het grove pad als zwakke prior
+        for k, o in samples:
+            dk = k - t
+            if abs(dk) <= 240.0:
+                w = math.exp(-0.5 * (dk / 70.0) ** 2)
+                w_sum += w
+                o_sum += w * o
+        return o_sum / w_sum
+
+    jumps = sum(1 for i in range(len(smooth) - 1) if abs(smooth[i + 1] - smooth[i]) > 4.0)
     shifted = []
     for st_, en, tx in cues:
         o = offset_at(st_)
