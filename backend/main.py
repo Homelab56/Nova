@@ -11,6 +11,12 @@ app = FastAPI(title="Nova API", version="1.1.0")
 # zetten via NOVA_DEBUG=1 als het nodig is om iets te onderzoeken.
 _DEBUG = os.environ.get("NOVA_DEBUG") == "1"
 
+@app.on_event("startup")
+async def _warm_suggest_pool():
+    # Populaire-titels-lijst voor de zoeksuggesties alvast opbouwen (op de achtergrond).
+    import asyncio
+    asyncio.create_task(search._build_pool())
+
 @app.get("/version")
 async def get_version():
     return {"version": "1.1.0", "status": "stable", "features": ["semaphores", "aiostreams", "no-local-search"]}
