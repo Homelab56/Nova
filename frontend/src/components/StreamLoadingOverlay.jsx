@@ -8,14 +8,14 @@ const TMDB_LOGO = "https://image.tmdb.org/t/p/w500";
 // gecentreerd clear-logo dat zacht inzoomt/pulseert en de statusmelding eronder. Extra: de
 // backdrop zoomt langzaam (Ken Burns) en - als er een trailer is - speelt die stil en
 // gedimd op de achtergrond: de "licht geanimeerde versie van de film" tijdens het laden.
-export default function StreamLoadingOverlay({ backdropPath, logoPath, title, message, trailerKey, onCancel }) {
+export default function StreamLoadingOverlay({ backdropPath, logoPath, title, message, trailerKey, onCancel, leaving = false }) {
   const [trailerReady, setTrailerReady] = useState(false);
   const [trailerFailed, setTrailerFailed] = useState(false);
   const [logoFailed, setLogoFailed] = useState(false);
   const showTrailer = trailerKey && !trailerFailed;
 
   return (
-    <div className="fixed inset-0 z-[80] bg-black animate-[nova-fade-in_250ms_ease-out]">
+    <div className={`fixed inset-0 z-[80] bg-black animate-[nova-fade-in_250ms_ease-out] transition-opacity duration-300 ${leaving ? "opacity-0 pointer-events-none" : ""}`}>
       {backdropPath && (
         <img
           src={`${TMDB_BACKDROP}${backdropPath}`}

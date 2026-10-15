@@ -236,6 +236,14 @@ export default function Watch() {
   const heroActive = !streamUrl && !resolving;
   const overlayVisible = resolving || (!!streamUrl && !playerStarted);
 
+  // Laadscherm eerst zachtjes wegfaden voor het ontkoppeld wordt.
+  const [overlayMounted, setOverlayMounted] = useState(false);
+  useEffect(() => {
+    if (overlayVisible) { setOverlayMounted(true); return; }
+    const t = setTimeout(() => setOverlayMounted(false), 350);
+    return () => clearTimeout(t);
+  }, [overlayVisible]);
+
   useEffect(() => {
     setPlayerStarted(false);
     if (streamUrl) window.scrollTo({ top: 0, behavior: "smooth" });
@@ -747,8 +755,9 @@ export default function Watch() {
           onMode={(m) => navigate(`/?mode=${encodeURIComponent(m)}`)}
         />
       )}
-      {overlayVisible && (
+      {overlayMounted && (
         <StreamLoadingOverlay
+          leaving={!overlayVisible}
           backdropPath={media.backdrop_path}
           logoPath={extras?.logo_path}
           title={title}

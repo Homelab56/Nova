@@ -507,6 +507,36 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playing, immersive]);
 
+  // Meldt zo vroeg mogelijk dat het beeld echt loopt (laadscherm weg). Los van de overige
+  // video-listeners (die her-registreren bij elke render) en op meerdere signalen: 'playing',
+  // een gevorderde currentTime, of het eerste daadwerkelijk getoonde videoframe.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !url) return;
+    let fired = false;
+    let rvfc = null;
+    const fire = () => {
+      if (fired) return;
+      fired = true;
+      onReadyRef.current?.();
+    };
+    const check = () => {
+      if (!v.paused && v.currentTime > 0.05 && v.readyState >= 2) fire();
+    };
+    v.addEventListener("playing", fire);
+    ["timeupdate", "loadeddata", "canplay", "seeked"].forEach(e => v.addEventListener(e, check));
+    if (typeof v.requestVideoFrameCallback === "function") {
+      rvfc = v.requestVideoFrameCallback(() => { if (!v.paused || v.currentTime > 0) fire(); });
+    }
+    return () => {
+      v.removeEventListener("playing", fire);
+      ["timeupdate", "loadeddata", "canplay", "seeked"].forEach(e => v.removeEventListener(e, check));
+      if (rvfc != null && typeof v.cancelVideoFrameCallback === "function") {
+        try { v.cancelVideoFrameCallback(rvfc); } catch {}
+      }
+    };
+  }, [url, startAt]);
+
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !url) return;
