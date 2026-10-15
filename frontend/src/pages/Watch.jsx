@@ -4,12 +4,25 @@ import Sidebar from "../components/Sidebar";
 import StarRating from "../components/StarRating";
 import Player from "../components/Player";
 import Row from "../components/Row";
+import TrailerFrame from "../components/TrailerFrame";
+import StreamLoadingOverlay from "../components/StreamLoadingOverlay";
 import { useUserData } from "../context/UserDataContext";
 
 const TMDB_POSTER = "https://image.tmdb.org/t/p/w342";
 const TMDB_PROFILE = "https://image.tmdb.org/t/p/w185";
 const TMDB_BACKDROP = "https://image.tmdb.org/t/p/original";
 const TMDB_STILL = "https://image.tmdb.org/t/p/w300";
+
+const STATUS_NL = {
+  Released: "Uitgebracht",
+  "Returning Series": "Lopend",
+  Ended: "Afgelopen",
+  Canceled: "Geannuleerd",
+  "In Production": "In productie",
+  "Post Production": "Postproductie",
+  Planned: "Gepland",
+  Rumored: "Gerucht",
+};
 
 const SEERR_LOCKS_KEY = "nova_seerr_request_locks_v6";
 const SEERR_LOCK_TTL_MS = 2 * 60 * 60 * 1000;
@@ -33,6 +46,14 @@ export default function Watch() {
   const [similar, setSimilar] = useState([]);
   const [detail, setDetail] = useState(null);
   const [isAvailable, setIsAvailable] = useState(null); // null = checking, true/false = result
+  const [extras, setExtras] = useState(null); // { logo_path, trailer_key, certification, directors }
+  const [trailerPlaying, setTrailerPlaying] = useState(false);
+  const [trailerReady, setTrailerReady] = useState(false);
+  const [playerStarted, setPlayerStarted] = useState(false);
+  const [scrolledPast, setScrolledPast] = useState(false);
+  const [synopsisOpen, setSynopsisOpen] = useState(false);
+  const [logoFailed, setLogoFailed] = useState(false);
+  const trailerPlayedRef = useRef(false);
 
   // Serie: seizoen/aflevering
   const [selectedSeason, setSelectedSeason] = useState(1);
@@ -133,6 +154,7 @@ export default function Watch() {
     fetch(`/api/search/${type}/${mediaId}/credits`).then(r => r.json()).then(setCast).catch(() => {});
     fetch(`/api/search/${type}/${mediaId}/similar`).then(r => r.json()).then(setSimilar).catch(() => {});
     fetch(`/api/search/${type}/${mediaId}`).then(r => r.json()).then(setDetail).catch(() => {});
+    fetch(`/api/search/extras/${type}/${mediaId}`).then(r => (r.ok ? r.json() : {})).then(setExtras).catch(() => setExtras({}));
     
     // Check RD availability
     const searchTitle = `${title} ${year}`;
@@ -162,6 +184,12 @@ export default function Watch() {
     setStartAt(0);
     setDurationHint(0);
     setProgressItem(null);
+    setExtras(null);
+    setTrailerPlaying(false);
+    setTrailerReady(false);
+    setSynopsisOpen(false);
+    setLogoFailed(false);
+    trailerPlayedRef.current = false;
     if (!isMovie) {
       setSelectedSeason(1);
       setSelectedEpisode(null);
@@ -203,6 +231,76 @@ export default function Watch() {
       })
       .catch(() => {});
   }, [streamUrl]);
+
+  const resolving = loading || requestStatus === "loading" || requestStatus === "waiting";
+  const heroActive = !streamUrl && !resolving;
+  const overlayVisible = resolving || (!!streamUrl && !playerStarted);
+
+  useEffect(() => { setPlayerStarted(false); }, [streamUrl]);
+
+  useEffect(() => {
+    const onScroll = () => setScrolledPast(window.scrollY > window.innerHeight * 0.5);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // Trailer start na 7s zonder interactie (zoals op de tv): stil, één keer per bezoek.
+  useEffect(() => {
+    if (!heroActive || !extras?.trailer_key || trailerPlayedRef.current || trailerPlaying) return;
+    let timer;
+    const arm = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        trailerPlayedRef.current = true;
+        setTrailerReady(false);
+        setTrailerPlaying(true);
+      }, 7000);
+    };
+    arm();
+    const evs = ["keydown", "mousedown", "wheel", "scroll", "touchstart"];
+    evs.forEach(e => window.addEventListener(e, arm, { passive: true }));
+    return () => {
+      clearTimeout(timer);
+      evs.forEach(e => window.removeEventListener(e, arm));
+    };
+  }, [heroActive, extras?.trailer_key, trailerPlaying]);
+
+  // Elke interactie sluit de trailer (met korte respijt zodat de klik die 'm startte niet meteen sluit).
+  useEffect(() => {
+    if (!trailerPlaying) return;
+    const stop = () => { setTrailerPlaying(false); setTrailerReady(false); };
+    const evs = ["keydown", "mousedown", "wheel", "scroll", "touchstart"];
+    const armTimer = setTimeout(() => evs.forEach(e => window.addEventListener(e, stop, { passive: true })), 600);
+    return () => {
+      clearTimeout(armTimer);
+      evs.forEach(e => window.removeEventListener(e, stop));
+    };
+  }, [trailerPlaying]);
+
+  useEffect(() => {
+    if (!heroActive && trailerPlaying) { setTrailerPlaying(false); setTrailerReady(false); }
+  }, [heroActive]);
+
+  function cancelLoading() {
+    if (pollRef.current) clearInterval(pollRef.current);
+    if (searchAbortRef.current) searchAbortRef.current.abort();
+    requestKeyRef.current = null;
+    setLoading(false);
+    setRequestStatus(null);
+    setRequestMessage("");
+    setStatus("");
+    setStreamUrl(null);
+    setStartAt(0);
+    setDurationHint(0);
+  }
+
+  useEffect(() => {
+    if (!overlayVisible) return;
+    const onKey = (e) => { if (e.key === "Escape") cancelLoading(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [overlayVisible]);
 
   if (!media) { navigate("/"); return null; }
 
@@ -644,16 +742,61 @@ export default function Watch() {
         mode={type}
         onMode={(m) => navigate(`/?mode=${encodeURIComponent(m)}`)}
       />
-      {backdrop && !streamUrl && (
-        <div className="relative w-full h-[45vh] md:h-[55vh] overflow-hidden">
-          <img src={backdrop} alt={title} className="w-full h-full object-cover object-top" />
-          <div className="absolute inset-0 bg-gradient-to-t from-nova-bg via-nova-bg/40 to-black/30" />
-          <div className="absolute inset-0 bg-gradient-to-r from-nova-bg/60 to-transparent" />
+      {overlayVisible && (
+        <StreamLoadingOverlay
+          backdropPath={media.backdrop_path}
+          logoPath={extras?.logo_path}
+          title={title}
+          trailerKey={extras?.trailer_key}
+          message={requestMessage || status || (resolving ? "Stream zoeken…" : "Stream starten…")}
+          onCancel={cancelLoading}
+        />
+      )}
+
+      {!streamUrl && (
+        <div className="fixed top-0 bottom-0 right-0 left-20 md:left-60 z-0 pointer-events-none bg-black">
+          {media.backdrop_path && (
+            <img
+              src={`https://image.tmdb.org/t/p/w1280${media.backdrop_path}`}
+              alt=""
+              className={`absolute inset-0 w-full h-full object-cover object-right-top transition-opacity duration-[800ms] ${
+                trailerPlaying && trailerReady ? "opacity-0" : scrolledPast ? "opacity-[0.15]" : "opacity-100"
+              }`}
+            />
+          )}
+          {trailerPlaying && extras?.trailer_key && (
+            <TrailerFrame
+              videoKey={extras.trailer_key}
+              visible={trailerReady}
+              onPlaying={() => setTrailerReady(true)}
+              onEnded={() => { setTrailerPlaying(false); setTrailerReady(false); }}
+              onError={() => { setTrailerPlaying(false); setTrailerReady(false); }}
+            />
+          )}
+          <div
+            className="absolute inset-y-0 left-0 w-[78%] transition-opacity duration-[800ms]"
+            style={{
+              opacity: (trailerPlaying && trailerReady) || scrolledPast ? 0 : 1,
+              background:
+                "linear-gradient(to right, rgba(8,12,20,1) 0%, rgba(8,12,20,.95) 10%, rgba(8,12,20,.84) 22%, rgba(8,12,20,.70) 36%, rgba(8,12,20,.52) 52%, rgba(8,12,20,.34) 66%, rgba(8,12,20,.18) 78%, rgba(8,12,20,.07) 90%, rgba(8,12,20,0) 100%)",
+            }}
+          />
+          <div
+            className="absolute inset-x-0 bottom-0 top-[38%] transition-opacity duration-[800ms]"
+            style={{
+              opacity: (trailerPlaying && trailerReady) || scrolledPast ? 0 : 1,
+              background:
+                "linear-gradient(to bottom, rgba(8,12,20,0) 0%, rgba(8,12,20,.05) 10%, rgba(8,12,20,.18) 22%, rgba(8,12,20,.38) 36%, rgba(8,12,20,.60) 52%, rgba(8,12,20,.78) 66%, rgba(8,12,20,.91) 78%, rgba(8,12,20,.97) 90%, rgba(8,12,20,1) 100%)",
+            }}
+          />
         </div>
       )}
 
-      <div className={`px-4 md:px-10 pb-20 pt-24 ${streamUrl ? "" : "-mt-32 relative z-10"}`}>
-        <button onClick={() => navigate(-1)} className="text-gray-400 hover:text-white text-sm mb-6 flex items-center gap-1">
+      <div className={streamUrl ? "relative z-10 px-4 md:px-10 pb-20 pt-24" : "relative z-10 px-4 md:px-12 pb-20"}>
+        <button
+          onClick={() => navigate(-1)}
+          className={`text-gray-300 hover:text-white text-sm flex items-center gap-1 ${streamUrl ? "mb-6" : "absolute top-6 left-4 md:left-12 z-20"}`}
+        >
           ← Terug
         </button>
 
@@ -665,7 +808,7 @@ export default function Watch() {
                   {progressItem?.title || title}
                 </h1>
               </div>
-              <Player url={streamUrl} media={progressItem || media} startAt={startAt} durationHint={durationHint} onProgress={(t, d) => saveProgress(progressItem || media, t, d)} onEnded={handleEnded} onNext={hasNext ? handleNext : null} />
+              <Player url={streamUrl} media={progressItem || media} startAt={startAt} durationHint={durationHint} onProgress={(t, d) => saveProgress(progressItem || media, t, d)} onEnded={handleEnded} onNext={hasNext ? handleNext : null} onReady={() => setPlayerStarted(true)} />
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-4">
               <button onClick={() => { setStreamUrl(null); setStatus(""); setStartAt(0); setDurationHint(0); }} className="text-sm text-gray-500 hover:text-white flex items-center gap-1">
@@ -761,27 +904,30 @@ export default function Watch() {
         {/* Info sectie */}
         {!streamUrl && (
           <>
-            <div className="flex gap-5 md:gap-8 mb-10">
-              {media.poster_path && (
-                <img src={`${TMDB_POSTER}${media.poster_path}`} alt={title} className="w-28 md:w-40 rounded-xl flex-shrink-0 shadow-2xl" />
-              )}
-              <div className="flex-1 min-w-0">
-                <h1 className="text-2xl md:text-4xl font-black mb-2 leading-tight">{title}</h1>
-                <div className="flex flex-wrap items-center gap-2 md:gap-3 mb-4 text-sm text-gray-400">
-                  {year && <span className="text-gray-300">{year}</span>}
-                  {rating && <span className="text-yellow-400 font-semibold">★ {rating}</span>}
-                  {runtime && <span>{runtime}</span>}
-                  {seasons.length > 0 && (
-                    <span className="text-gray-300">{seasons.length} seizoen{seasons.length > 1 ? "en" : ""}</span>
-                  )}
-                  {detail?.genres?.map(g => (
-                    <span key={g.id} className="border border-gray-600 px-2 py-0.5 rounded-full text-xs text-gray-300">{g.name}</span>
-                  ))}
-                </div>
-                <p className="text-gray-300 text-sm md:text-base leading-relaxed mb-6 max-w-2xl">{media.overview}</p>
+            <section className="relative min-h-[82vh] flex flex-col justify-end pb-10 pt-24">
+              {/* Clear-logo (of titel) - krimpt tijdens de trailer, zoals op de tv */}
+              <div
+                className={`mb-5 transition-all duration-[600ms] ${
+                  extras?.logo_path && !logoFailed
+                    ? (trailerPlaying && trailerReady ? "h-[60px] max-w-[25%]" : "h-[80px] md:h-[100px] max-w-[60%] md:max-w-[40%]")
+                    : extras === null ? "h-[80px] md:h-[100px]" : ""
+                }`}
+              >
+                {extras?.logo_path && !logoFailed ? (
+                  <img
+                    src={`https://image.tmdb.org/t/p/w500${extras.logo_path}`}
+                    alt={title}
+                    onError={() => setLogoFailed(true)}
+                    className="h-full max-w-full object-contain object-left drop-shadow-[0_4px_20px_rgba(0,0,0,0.6)]"
+                  />
+                ) : extras === null ? null : (
+                  <h1 className="text-3xl md:text-5xl font-bold leading-tight drop-shadow-[0_4px_20px_rgba(0,0,0,0.6)]">{title}</h1>
+                )}
+              </div>
 
-                {/* Knoppen voor films en series */}
-                <div className="flex flex-wrap gap-3 items-center">
+              <div className={`transition-opacity duration-[400ms] ${trailerPlaying && trailerReady ? "opacity-0 pointer-events-none" : "opacity-100"}`}>
+                {/* Knoppen: afspelen (pil) + ronde icoonknoppen + sterren */}
+                <div className="flex flex-wrap gap-3 items-center mb-5">
                   {(isMovie || getLatestEpisode()) && (
                     <button
                       onClick={() => {
@@ -797,18 +943,40 @@ export default function Watch() {
                         }
                       }}
                       disabled={playBusy}
-                      className={`flex items-center gap-3 font-bold px-8 py-3 rounded-xl transition-all disabled:opacity-60 ${isAvailable || !isMovie ? "bg-nova-accent text-white shadow-lg shadow-nova-accent/20" : "bg-white text-black hover:bg-gray-200"}`}
+                      className="flex items-center gap-2.5 bg-white text-black font-semibold px-6 py-3.5 rounded-full hover:bg-neutral-200 transition-colors disabled:opacity-60"
                     >
-                      {playBusy ? <span className="animate-spin">⟳</span> : "▶"}
-                      {playBusy ? "Laden..." : (isMovie ? (savedProgress ? "Hervatten" : "Afspelen") : `Hervatten S${getLatestEpisode()?.season_number}E${getLatestEpisode()?.episode_number}`)}
+                      {playBusy ? <span className="animate-spin">⟳</span> : <span className="text-lg leading-none">▶</span>}
+                      {playBusy ? "Laden..." : (isMovie ? (savedProgress ? "Hervatten" : "Afspelen") : `Hervatten S${getLatestEpisode()?.season_number} E${getLatestEpisode()?.episode_number}`)}
+                    </button>
+                  )}
+                  {!isMovie && !getLatestEpisode() && seasonData?.episodes?.length > 0 && (
+                    <button
+                      onClick={() => { const ep = seasonData.episodes[0]; setSelectedEpisode(ep); handlePlay(ep); }}
+                      disabled={playBusy}
+                      className="flex items-center gap-2.5 bg-white text-black font-semibold px-6 py-3.5 rounded-full hover:bg-neutral-200 transition-colors disabled:opacity-60"
+                    >
+                      {playBusy ? <span className="animate-spin">⟳</span> : <span className="text-lg leading-none">▶</span>}
+                      {playBusy ? "Laden..." : `Speel S${selectedSeason} E${seasonData.episodes[0].episode_number}`}
                     </button>
                   )}
                   <button
                     onClick={() => toggleWatchlist(media)}
-                    className={`flex items-center gap-2 px-5 py-3 rounded-xl font-semibold border transition-colors ${inList ? "bg-nova-accent/20 border-nova-accent text-nova-accent" : "bg-nova-card border-gray-600 text-white hover:border-white"}`}
+                    title={inList ? "Verwijder uit watchlist" : "Toevoegen aan watchlist"}
+                    className={`w-12 h-12 rounded-full flex items-center justify-center text-xl border-2 border-transparent transition-all hover:border-white hover:bg-neutral-100 hover:text-neutral-900 ${inList ? "bg-white text-neutral-900" : "bg-[#222] text-white"}`}
                   >
-                    {inList ? "✓ In watchlist" : "+ Watchlist"}
+                    {inList ? "✓" : "+"}
                   </button>
+                  {extras?.trailer_key && (
+                    <button
+                      onClick={() => { trailerPlayedRef.current = true; setTrailerReady(false); setTrailerPlaying(true); }}
+                      title="Trailer afspelen"
+                      className="w-12 h-12 rounded-full flex items-center justify-center bg-[#222] text-white border-2 border-transparent transition-all hover:border-white hover:bg-neutral-100 hover:text-neutral-900"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="5" width="18" height="14" rx="2" /><path d="M10 9l5 3-5 3z" fill="currentColor" />
+                      </svg>
+                    </button>
+                  )}
                   <StarRating item={media} />
                   {isMovie && savedProgress && (
                     <span className="text-sm text-gray-400">
@@ -816,16 +984,57 @@ export default function Watch() {
                     </span>
                   )}
                 </div>
-                
+
+                {/* Regisseur / maker */}
+                {(() => {
+                  const names = isMovie ? (extras?.directors || []) : (detail?.created_by || []).map(c => c.name).filter(Boolean);
+                  return names.length > 0 ? (
+                    <p className="text-sm text-[#B3B3B3] mb-3 md:max-w-[60%]">{isMovie ? "Regisseur" : "Maker"}: {names.join(", ")}</p>
+                  ) : null;
+                })()}
+
+                {/* Synopsis */}
+                {media.overview && (
+                  <div className="mb-4 md:max-w-[60%]">
+                    <p className={`text-sm md:text-[15px] text-white leading-relaxed ${synopsisOpen ? "" : "line-clamp-6"}`}>{media.overview}</p>
+                    {!synopsisOpen && media.overview.length > 320 && (
+                      <button onClick={() => setSynopsisOpen(true)} className="mt-1 text-sm text-[#B3B3B3] hover:text-white">Lees meer</button>
+                    )}
+                  </div>
+                )}
+
+                {/* Meta-rij 1: genres • jaar • score */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[#B3B3B3] mb-2">
+                  {detail?.genres?.length > 0 && <span>{detail.genres.map(g => g.name).join(" • ")}</span>}
+                  {year && <><span className="text-[#808080]">•</span><span>{year}</span></>}
+                  {rating && <><span className="text-[#808080]">•</span><span className="text-yellow-400 font-semibold">★ {rating}</span></>}
+                  {seasons.length > 0 && <><span className="text-[#808080]">•</span><span>{seasons.length} seizoen{seasons.length > 1 ? "en" : ""}</span></>}
+                </div>
+
+                {/* Meta-rij 2: badges + speelduur, land, taal */}
+                <div className="flex flex-wrap items-center gap-2 text-xs text-white mb-4">
+                  {extras?.certification && (
+                    <span className="border border-white/55 rounded-md px-2 py-1 text-white/90">{extras.certification}</span>
+                  )}
+                  {detail?.status && STATUS_NL[detail.status] && (
+                    <span className="border border-white/55 rounded-md px-2 py-1 text-white/90">{STATUS_NL[detail.status]}</span>
+                  )}
+                  {runtime && <span>{runtime}</span>}
+                  {(detail?.production_countries?.[0]?.iso_3166_1 || detail?.origin_country?.[0]) && (
+                    <span className="text-[#B3B3B3]">{detail?.production_countries?.[0]?.iso_3166_1 || detail?.origin_country?.[0]}</span>
+                  )}
+                  {detail?.original_language && <span className="text-[#B3B3B3] uppercase">{detail.original_language}</span>}
+                </div>
+
                 {isMovie && isAvailable !== null && (
-                  <div className={`mt-4 flex flex-col gap-3 text-sm`}>
+                  <div className="mt-2 flex flex-col gap-3 text-sm">
                     <div className={`flex items-center gap-2 ${isAvailable ? "text-nova-accent" : "text-orange-400"}`}>
                       <span>{isAvailable ? "✓" : "!"}</span>
                       <span>{isAvailable ? "Beschikbaar in je Real-Debrid bibliotheek" : "Niet gevonden in je bibliotheek."}</span>
                     </div>
                     {requestMessage && (
                       <p className={`text-xs p-2 rounded bg-nova-card border ${
-                        requestStatus === "done" ? "text-green-400 border-green-900/50" : 
+                        requestStatus === "done" ? "text-green-400 border-green-900/50" :
                         requestStatus === "error" ? "text-red-400 border-red-900/50" : "text-gray-400 border-gray-800"
                       }`}>
                         {requestMessage}
@@ -835,7 +1044,11 @@ export default function Watch() {
                 )}
                 {status && <p className="text-sm text-nova-accent animate-pulse mt-3">{status}</p>}
               </div>
-            </div>
+
+              {trailerPlaying && trailerReady && (
+                <p className="text-xs text-[#808080] animate-[nova-fade-in_600ms_ease-out]">Druk op een toets of klik om de trailer te sluiten</p>
+              )}
+            </section>
 
             {/* Seizoenen & afleveringen */}
             {!isMovie && seasons.length > 0 && (

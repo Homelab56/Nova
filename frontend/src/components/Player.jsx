@@ -36,7 +36,9 @@ function shiftVtt(text, shift) {
   return out.join("\n");
 }
 
-export default function Player({ url, media, onProgress, startAt = 0, durationHint = 0, onEnded, onNext }) {
+export default function Player({ url, media, onProgress, startAt = 0, durationHint = 0, onEnded, onNext, onReady }) {
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
   const containerRef = useRef(null);
   const videoRef = useRef(null);
   const trackElRef = useRef(null);
@@ -798,6 +800,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     const onPlaying = () => {
       clearTimeout(bufferingTimerRef.current);
       setBuffering(false);
+      onReadyRef.current?.();
     };
     const onStalled = () => maybeBuffering();
     const onSeeking = () => maybeBuffering();
@@ -811,6 +814,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
       setBuffering(false);
     };
     const onErr = () => {
+      onReadyRef.current?.();
       const code = v?.error?.code;
       setError(code ? `Video fout (code ${code}).` : "Video fout.");
     };

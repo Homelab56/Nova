@@ -758,6 +758,73 @@ async def tv_season(tmdb_id: int, season_number: int):
     return await tmdb_get(f"/tv/{tmdb_id}/season/{season_number}")
 
 
+# --- Detailpagina-extra's: clear-logo, trailer, leeftijdsclassificatie, regisseur ---
+# Zelfde TMDB-bronnen als de tv-app (TmdbMetadataService): /images (logo), /videos
+# (YouTube-trailer), release_dates / content_ratings (certificering), credits (regie).
+
+async def _safe_tmdb(path: str, params: dict | None = None) -> dict:
+    try:
+        return await tmdb_get(path, params or {})
+    except Exception:
+        return {}
+
+def _pick_logo(images: dict) -> str | None:
+    logos = [l for l in (images.get("logos") or []) if l.get("file_path") and not str(l["file_path"]).endswith(".svg")]
+    if not logos:
+        return None
+    # Engels/neutraal eerst (zoals de tv-app), dan Nederlands; binnen een taal de best beoordeelde.
+    rank = {"en": 0, None: 1, "nl": 2}
+    logos.sort(key=lambda l: (rank.get(l.get("iso_639_1"), 3), -(l.get("vote_average") or 0)))
+    return logos[0]["file_path"]
+
+def _pick_trailer(videos: dict) -> str | None:
+    vids = [v for v in (videos.get("results") or []) if v.get("site") == "YouTube" and v.get("key")]
+    if not vids:
+        return None
+    lang_rank = {"nl": 0, "en": 1}
+    def key(v):
+        return (
+            0 if v.get("type") == "Trailer" else 1 if v.get("type") == "Teaser" else 2,
+            0 if v.get("official") else 1,
+            lang_rank.get(v.get("iso_639_1"), 2),
+        )
+    vids.sort(key=key)
+    return vids[0]["key"]
+
+@router.get("/extras/{media_type}/{tmdb_id}")
+async def detail_extras(media_type: str, tmdb_id: int):
+    if media_type not in ("movie", "tv"):
+        raise HTTPException(status_code=404, detail="Onbekend type")
+    cert_path = f"/{media_type}/{tmdb_id}/" + ("release_dates" if media_type == "movie" else "content_ratings")
+    images, videos, certs, credits = await asyncio.gather(
+        _safe_tmdb(f"/{media_type}/{tmdb_id}/images", {"include_image_language": "en,nl,null"}),
+        _safe_tmdb(f"/{media_type}/{tmdb_id}/videos", {"include_video_language": "nl,en,null"}),
+        _safe_tmdb(cert_path),
+        _safe_tmdb(f"/{media_type}/{tmdb_id}/credits"),
+    )
+    certification = None
+    by_country = {r.get("iso_3166_1"): r for r in (certs.get("results") or [])}
+    for cc in ("NL", "BE", "GB", "US"):
+        r = by_country.get(cc)
+        if not r:
+            continue
+        if media_type == "movie":
+            certification = next((x.get("certification") for x in (r.get("release_dates") or []) if x.get("certification")), None)
+        else:
+            certification = r.get("rating") or None
+        if certification:
+            if cc in ("NL", "BE") and certification.isdigit():
+                certification = f"{certification}+"
+            break
+    directors = [c.get("name") for c in (credits.get("crew") or []) if c.get("job") == "Director" and c.get("name")][:2]
+    return {
+        "logo_path": _pick_logo(images),
+        "trailer_key": _pick_trailer(videos),
+        "certification": certification,
+        "directors": directors,
+    }
+
+
 # --- Personen (acteurs/actrices) ---
 
 @router.get("/person")
