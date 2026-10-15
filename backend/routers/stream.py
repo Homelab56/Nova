@@ -1924,41 +1924,48 @@ async def _extract_sub_window(input_value: str, t0: float, win: float, idx: int,
 
 
 def _ref_offset(ref_cues: list[list], cues: list[list], t0: float, win: float, center: float, max_off: float) -> float | None:
-    """Offset (referentietijd - ondertitel-tijd) via kruiscorrelatie van de 'er staat een
-    ondertitel'-signalen (10 Hz) van de referentie in [t0, t0+win] en de te synchroniseren
-    ondertitel, binnen center +- max_off. Werkt op alle cues in het venster i.p.v. op ruis."""
+    """Offset (referentietijd - ondertitel-tijd) via kruiscorrelatie van de BEGINMOMENTEN
+    (en deels de eindmomenten) van de ondertitelregels van de referentie in [t0, t0+win]
+    en van de te synchroniseren ondertitel, binnen center +- max_off. Beginmomenten zijn
+    veel scherper dan 'er staat tekst' (die twee talen segmenteren verschillend, maar
+    laten een zin op vrijwel hetzelfde moment beginnen): ~0.3s nauwkeurig i.p.v. enkele
+    seconden. Een reeks onsets is bovendien bijna een vingerafdruk - zeldzaam vals-positief."""
     import numpy as np
 
     dt = 0.1
-    if len(ref_cues) < 6:
+    if len(ref_cues) < 8:
         return None
+    sigma = 0.4
+    kx = np.arange(-1.5, 1.5 + dt / 2, dt)
+    kernel = np.exp(-0.5 * (kx / sigma) ** 2).astype(np.float32)
+
+    def signal(events, t_start, n):
+        sig = np.zeros(n, dtype=np.float32)
+        for t, w in events:
+            i = int(round((t - t_start) / dt))
+            if 0 <= i < n:
+                sig[i] += w
+        return np.convolve(sig, kernel, mode="same")
+
     n_ref = int(win / dt)
-    ref = np.zeros(n_ref, dtype=np.float32)
-    for st_, en, _ in ref_cues:
-        a, b = int((st_ - t0) / dt), int((en - t0) / dt)
-        if b > 0 and a < n_ref:
-            ref[max(0, a):min(n_ref, b + 1)] = 1.0
-    if ref.sum() < 20:
+    ref = signal([(c[0], 1.0) for c in ref_cues] + [(c[1], 0.5) for c in ref_cues], t0, n_ref)
+    if float(ref.sum()) < 10:
         return None
 
     t_s = t0 - (center + max_off)
     t_e = t0 + win - (center - max_off)
     n_d = int((t_e - t_s) / dt) + 2
-    dut = np.zeros(n_d, dtype=np.float32)
-    for st_, en, _ in cues:
-        a, b = int((st_ - t_s) / dt), int((en - t_s) / dt)
-        if b >= 0 and a < n_d:
-            dut[max(0, a):min(n_d, b + 1)] = 1.0
     if n_d <= n_ref:
         return None
+    dut = signal([(c[0], 1.0) for c in cues] + [(c[1], 0.5) for c in cues], t_s, n_d)
     corr = np.correlate(dut, ref, mode="valid")  # corr[k] = sum_i dut[k+i] * ref[i]
     k = int(np.argmax(corr))
     peak = float(corr[k])
-    # betrouwbaarheid: duidelijke piek t.o.v. de rest, en een groot deel van de referentie gedekt
-    others = np.concatenate([corr[:max(0, k - 20)], corr[k + 21:]])
-    base = float(np.median(others)) if others.size else 0.0
-    coverage = peak / float(ref.sum())
-    if coverage < 0.45 or peak < 1.35 * max(base, 1.0):
+    guard = int(3.0 / dt)
+    others = np.concatenate([corr[:max(0, k - guard)], corr[k + guard + 1:]])
+    second = float(others.max()) if others.size else 0.0
+    # duidelijke, unieke piek: minstens 25% hoger dan de beste 'andere' piek
+    if peak <= 0 or peak < 1.25 * second:
         return None
     return (t0 - t_s) - k * dt
 
