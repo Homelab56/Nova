@@ -11,6 +11,22 @@ app = FastAPI(title="Nova API", version="1.1.0")
 # zetten via NOVA_DEBUG=1 als het nodig is om iets te onderzoeken.
 _DEBUG = os.environ.get("NOVA_DEBUG") == "1"
 
+try:
+    from postgrest.exceptions import APIError as _PostgrestAPIError
+    from fastapi.responses import JSONResponse
+
+    @app.exception_handler(_PostgrestAPIError)
+    async def _postgrest_error(request: Request, exc: _PostgrestAPIError):
+        # Een verlopen/ongeldig token kwam eerder als kale 500 terug, die de frontend als
+        # 'geen gegevens' las. Nu 401 (de frontend ververst dan de sessie en probeert opnieuw).
+        msg = str(getattr(exc, "message", None) or exc)
+        print(f"Postgrest-fout op {request.url.path}: {msg[:200]}")
+        status = 401 if ("jwt" in msg.lower() or "expired" in msg.lower()) else 502
+        return JSONResponse(status_code=status, content={"detail": msg[:300]})
+except Exception as _e:  # pragma: no cover
+    print(f"Postgrest-foutafhandeling niet beschikbaar: {_e}")
+
+
 @app.on_event("startup")
 async def _warm_suggest_pool():
     # Populaire-titels-lijst voor de zoeksuggesties alvast opbouwen (op de achtergrond).

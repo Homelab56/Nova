@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { useAuth } from "./AuthContext";
+import { supabase } from "../lib/supabaseClient";
 
 const ProfileContext = createContext(null);
 const STORAGE_KEY = "nova.selectedProfileId";
@@ -10,16 +11,28 @@ export function ProfileProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [selectedProfileId, setSelectedProfileId] = useState(() => localStorage.getItem(STORAGE_KEY));
 
+  // Gebruikt steeds het ACTUELE token: supabase.auth.getSession() ververst een verlopen
+  // token zelf. Het token uit de render waarin deze functie ooit gemaakt werd raakt anders
+  // verlopen in langlopende closures (een film van >1u, een tabblad dat lang openstaat,
+  // timers) waardoor opslaan/ophalen stil mislukte en de lijsten leeg leken. Bij een 401
+  // wordt de sessie expliciet ververst en de aanvraag één keer herhaald.
   const authedFetch = useCallback(
-    (path, options = {}) => {
-      if (!session) return Promise.reject(new Error("Niet ingelogd"));
-      return fetch(`/api${path}`, {
-        ...options,
-        headers: {
-          ...(options.headers || {}),
-          Authorization: `Bearer ${session.access_token}`,
-        },
-      });
+    async (path, options = {}) => {
+      const send = (token) =>
+        fetch(`/api${path}`, {
+          ...options,
+          headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` },
+        });
+      const { data } = await supabase.auth.getSession();
+      const token = data?.session?.access_token || session?.access_token;
+      if (!token) throw new Error("Niet ingelogd");
+      let res = await send(token);
+      if (res.status === 401) {
+        const { data: refreshed } = await supabase.auth.refreshSession();
+        const fresh = refreshed?.session?.access_token;
+        if (fresh && fresh !== token) res = await send(fresh);
+      }
+      return res;
     },
     [session]
   );

@@ -9,6 +9,8 @@ export function UserDataProvider({ children }) {
   const [progress, setProgress] = useState([]);
   const [ratings, setRatings] = useState({});
   const [suggestions, setSuggestions] = useState({ movies: [], tv: [] });
+  const [failed, setFailed] = useState({});
+  const markFailed = (key, v) => setFailed((f) => (f[key] === v ? f : { ...f, [key]: v }));
 
   const refreshWatchlist = useCallback(() => {
     if (!selectedProfileId) {
@@ -16,9 +18,11 @@ export function UserDataProvider({ children }) {
       return;
     }
     authedFetch(`/profiles/${selectedProfileId}/watchlist`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then(setWatchlist)
-      .catch(() => setWatchlist([]));
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (Array.isArray(data)) { setWatchlist(data); markFailed("watchlist", false); } else markFailed("watchlist", true);
+      })
+      .catch(() => markFailed("watchlist", true));
   }, [selectedProfileId, authedFetch]);
 
   // Een trage, oudere respons mag een nieuwere nooit overschrijven (de lijst sprong anders
@@ -34,9 +38,10 @@ export function UserDataProvider({ children }) {
     authedFetch(`/profiles/${selectedProfileId}/progress`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (seq === progressSeq.current && Array.isArray(data)) setProgress(data);
+        if (seq !== progressSeq.current) return;
+        if (Array.isArray(data)) { setProgress(data); markFailed("progress", false); } else markFailed("progress", true);
       })
-      .catch(() => {});
+      .catch(() => markFailed("progress", true));
   }, [selectedProfileId, authedFetch]);
 
   const progressRefreshTimer = useRef(null);
@@ -51,9 +56,11 @@ export function UserDataProvider({ children }) {
       return;
     }
     authedFetch(`/profiles/${selectedProfileId}/ratings`)
-      .then((r) => (r.ok ? r.json() : {}))
-      .then(setRatings)
-      .catch(() => setRatings({}));
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && typeof data === "object" && !Array.isArray(data)) { setRatings(data); markFailed("ratings", false); } else markFailed("ratings", true);
+      })
+      .catch(() => markFailed("ratings", true));
   }, [selectedProfileId, authedFetch]);
 
   const refreshSuggestions = useCallback(() => {
@@ -62,9 +69,11 @@ export function UserDataProvider({ children }) {
       return;
     }
     authedFetch(`/profiles/${selectedProfileId}/suggestions`)
-      .then((r) => (r.ok ? r.json() : { movies: [], tv: [] }))
-      .then(setSuggestions)
-      .catch(() => setSuggestions({ movies: [], tv: [] }));
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && Array.isArray(data.movies)) { setSuggestions(data); markFailed("suggestions", false); } else markFailed("suggestions", true);
+      })
+      .catch(() => markFailed("suggestions", true));
   }, [selectedProfileId, authedFetch]);
 
   useEffect(() => {
@@ -76,12 +85,15 @@ export function UserDataProvider({ children }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProfileId]);
 
-  // Terug op het tabblad (bv. na kijken op de tv): voortgang opnieuw ophalen.
+  // Terug op het tabblad (bv. na kijken op de tv): alles opnieuw ophalen.
+  const reloadAll = () => { refreshWatchlist(); refreshProgress(); refreshRatings(); refreshSuggestions(); };
+  const reloadAllRef = useRef(reloadAll);
+  reloadAllRef.current = reloadAll;
   useEffect(() => {
-    const onVis = () => { if (!document.hidden) refreshProgress(); };
+    const onVis = () => { if (!document.hidden) reloadAllRef.current(); };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, [refreshProgress]);
+  }, []);
 
   async function toggleWatchlist(item) {
     if (!selectedProfileId) return;
@@ -254,6 +266,14 @@ export function UserDataProvider({ children }) {
       }}
     >
       {children}
+      {Object.values(failed).some(Boolean) && selectedProfileId && (
+        <div className="fixed bottom-4 right-4 z-[90] flex items-center gap-3 bg-nova-card border border-orange-500/40 text-sm text-orange-200 rounded-xl px-4 py-3 shadow-2xl">
+          <span>Je gegevens (kijkgeschiedenis/sterren) konden niet worden geladen.</span>
+          <button onClick={reloadAll} className="px-3 py-1 rounded-lg bg-orange-500/20 hover:bg-orange-500/30 text-orange-100 font-semibold">
+            Opnieuw
+          </button>
+        </div>
+      )}
     </UserDataContext.Provider>
   );
 }
