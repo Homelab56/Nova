@@ -811,8 +811,11 @@ async def _ffprobe_streams(input_value: str, is_path: bool) -> dict:
         input_value,
     ]
     if _is_http_url(input_value):
-        args.insert(4, "5000000")
-        args.insert(4, "-rw_timeout")
+        # Moet NA "-v error" (index 3) - op index 4 stond de optie midden tussen
+        # "-show_entries" en zijn waarde, waardoor ffprobe voor elke http-bron faalde
+        # (lege probe -> hoogte 0 en geen audio-keuze).
+        args.insert(3, "5000000")
+        args.insert(3, "-rw_timeout")
     if is_path:
         args[-1] = input_value
 
