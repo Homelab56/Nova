@@ -502,7 +502,7 @@ export default function Watch() {
                 nextProgressItem = media;
               }
 
-              const doResume = resumeTime > 10;
+              const doResume = resumeTime > 10 && !(resumeDuration > 0 && resumeTime / resumeDuration >= 0.95);
               const urlWithStart = doResume
                 ? `${finalUrl}${finalUrl.includes("?") ? "&" : "?"}start=${encodeURIComponent(resumeTime)}`
                 : finalUrl;
@@ -579,7 +579,7 @@ export default function Watch() {
         nextProgressItem = media;
       }
 
-      const doResume = resumeTime > 10;
+      const doResume = resumeTime > 10 && !(resumeDuration > 0 && resumeTime / resumeDuration >= 0.95);
       const urlWithStart = doResume
         ? `${finalUrl}${finalUrl.includes("?") ? "&" : "?"}start=${encodeURIComponent(resumeTime)}`
         : finalUrl;
@@ -673,10 +673,23 @@ export default function Watch() {
 
   const handleNext = async () => {
     if (isMovie) return;
+    try {
+      await handleNextInner();
+    } catch (e) {
+      console.error("[volgende aflevering]", e);
+      setStatus("Volgende aflevering starten mislukte. Probeer het opnieuw.");
+      setLoading(false);
+    }
+  };
 
-    const currentSeasonNum = progressItem?.season_number ?? selectedSeason;
+  const handleNextInner = async () => {
+    const currentSeasonNum = progressItem?.season_number ?? selectedEpisode?.season_number ?? selectedSeason;
     const currentEpisodeNum = progressItem?.episode_number ?? selectedEpisode?.episode_number;
-    if (!currentSeasonNum || !currentEpisodeNum) return;
+    if (!currentSeasonNum || !currentEpisodeNum) {
+      console.warn("[volgende aflevering] onbekende huidige aflevering", { progressItem, selectedEpisode, selectedSeason });
+      setStatus("Kon de volgende aflevering niet bepalen.");
+      return;
+    }
 
     let activeSeasonData = seasonData;
     if (!activeSeasonData?.episodes?.length || selectedSeason !== currentSeasonNum) {
@@ -691,9 +704,12 @@ export default function Watch() {
       }
     }
 
-    if (!activeSeasonData?.episodes?.length) return;
+    if (!activeSeasonData?.episodes?.length) {
+      setStatus("Kon de afleveringen van dit seizoen niet laden.");
+      return;
+    }
 
-    const currentIdx = activeSeasonData.episodes.findIndex(ep => ep.episode_number === currentEpisodeNum);
+    const currentIdx = activeSeasonData.episodes.findIndex(ep => Number(ep.episode_number) === Number(currentEpisodeNum));
     if (currentIdx >= 0 && currentIdx < activeSeasonData.episodes.length - 1) {
       const nextEp = activeSeasonData.episodes[currentIdx + 1];
       setSelectedSeason(currentSeasonNum);
@@ -818,7 +834,13 @@ export default function Watch() {
 
         {streamUrl && (
           <div className="mb-10">
-            <div className="-mx-4 md:-mx-10 h-screen bg-black">
+            <div className="-mx-4 md:-mx-10 h-screen bg-black relative">
+              {status && !resolving && (
+                <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[60] max-w-[90%] flex items-center gap-3 bg-black/80 border border-white/15 text-white text-sm rounded-xl px-4 py-3 shadow-2xl animate-[nova-fade-in_250ms_ease-out]">
+                  <span>{status}</span>
+                  <button onClick={() => setStatus("")} className="text-white/60 hover:text-white">✕</button>
+                </div>
+              )}
               <Player
                 url={streamUrl}
                 media={progressItem || media}
