@@ -63,7 +63,7 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   const [buffering, setBuffering] = useState(false);
   const [absTime, setAbsTime] = useState(0);
   const [dragValue, setDragValue] = useState(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(() => typeof document !== "undefined" && !!document.fullscreenElement);
   const [showControls, setShowControls] = useState(true);
   const immersive = isFullscreen || immersiveProp;
   const [flashIcon, setFlashIcon] = useState(null);
@@ -969,8 +969,11 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
     };
   }, []);
 
+  // Fullscreen op de hele pagina i.p.v. alleen de speler: zo blijft het laadscherm
+  // (bv. bij "volgende aflevering") zichtbaar en blijft fullscreen actief terwijl de
+  // speler voor de nieuwe aflevering opnieuw wordt opgebouwd.
   const toggleFullscreen = async () => {
-    const el = containerRef.current;
+    const el = immersiveProp ? document.documentElement : containerRef.current;
     if (!el) return;
     try {
       if (document.fullscreenElement) {

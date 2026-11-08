@@ -673,6 +673,13 @@ export default function Watch() {
 
   const handleNext = async () => {
     if (isMovie) return;
+    // Meteen reageren: huidige aflevering stoppen en het laadscherm tonen terwijl de
+    // volgende aflevering gezocht wordt (dat zoeken kan even duren).
+    if (pollRef.current) clearInterval(pollRef.current);
+    if (searchAbortRef.current) searchAbortRef.current.abort();
+    setLoading(true);
+    setStatus("Volgende aflevering laden…");
+    setStreamUrl(null);
     try {
       await handleNextInner();
     } catch (e) {
@@ -688,6 +695,7 @@ export default function Watch() {
     if (!currentSeasonNum || !currentEpisodeNum) {
       console.warn("[volgende aflevering] onbekende huidige aflevering", { progressItem, selectedEpisode, selectedSeason });
       setStatus("Kon de volgende aflevering niet bepalen.");
+      setLoading(false);
       return;
     }
 
@@ -706,6 +714,7 @@ export default function Watch() {
 
     if (!activeSeasonData?.episodes?.length) {
       setStatus("Kon de afleveringen van dit seizoen niet laden.");
+      setLoading(false);
       return;
     }
 
@@ -721,7 +730,8 @@ export default function Watch() {
     const nextSeasonNum = currentSeasonNum + 1;
     const hasNextSeason = seasons.some(s => s.season_number === nextSeasonNum);
     if (!hasNextSeason) {
-      setStreamUrl(null);
+      setStatus("");
+      setLoading(false);
       return;
     }
 
@@ -736,10 +746,12 @@ export default function Watch() {
         setSelectedEpisode(nextEp);
         handlePlay(nextEp, nextSeasonNum);
       } else {
-        setStreamUrl(null);
+        setStatus("Geen volgende aflevering gevonden.");
+        setLoading(false);
       }
     } catch (e) {
-      setStreamUrl(null);
+      setStatus("Kon het volgende seizoen niet laden.");
+      setLoading(false);
     }
   };
 
