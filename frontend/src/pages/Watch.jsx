@@ -69,6 +69,11 @@ export default function Watch() {
   const searchAbortRef = useRef(null);
   const requestKeyRef = useRef(null);
   const seerrInFlightRef = useRef(new Set());
+  // Laatst gerapporteerde duur per item, en items die via "volgende aflevering" als
+  // uitgekeken gemarkeerd zijn (de speler meldt bij het sluiten nog z'n echte positie;
+  // die mag de markering niet overschrijven).
+  const lastDurationRef = useRef({});
+  const markedWatchedRef = useRef(new Set());
 
   const { toggleWatchlist, isInList, saveProgress, progress, progressMap } = useUserData();
   const inList = isInList(mediaId);
@@ -514,6 +519,7 @@ export default function Watch() {
                 setStartAt(doResume ? resumeTime : 0);
                 setDurationHint(resumeDuration || 0);
                 setStreamUrl(urlWithStart);
+                markedWatchedRef.current.delete(String(nextProgressItem?.id));
                 setProgressItem(nextProgressItem);
                 setStatus("");
                 setLoading(false);
@@ -589,7 +595,8 @@ export default function Watch() {
       setStartAt(doResume ? resumeTime : 0);
       setDurationHint(resumeDuration || 0);
       setStreamUrl(urlWithStart);
-      setProgressItem(nextProgressItem);
+      markedWatchedRef.current.delete(String(nextProgressItem?.id));
+                setProgressItem(nextProgressItem);
       setStatus("");
     } catch (e) {
       console.error(e);
@@ -677,6 +684,14 @@ export default function Watch() {
     // volgende aflevering gezocht wordt (dat zoeken kan even duren).
     if (pollRef.current) clearInterval(pollRef.current);
     if (searchAbortRef.current) searchAbortRef.current.abort();
+    // Huidige aflevering als uitgekeken markeren.
+    const cur = progressItem;
+    if (cur?.media_type === "tv_episode") {
+      const key = String(cur.id);
+      const dur = lastDurationRef.current[key] || durationHint || getEpisodeProgress(cur.season_number, cur.episode_number)?.duration || 0;
+      markedWatchedRef.current.add(key);
+      if (dur > 0) saveProgress(cur, dur, dur);
+    }
     setLoading(true);
     setStatus("Volgende aflevering laden…");
     setStreamUrl(null);
@@ -858,7 +873,12 @@ export default function Watch() {
                 media={progressItem || media}
                 startAt={startAt}
                 durationHint={durationHint}
-                onProgress={(t, d) => saveProgress(progressItem || media, t, d)}
+                onProgress={(t, d) => {
+                  const it = progressItem || media;
+                  if (markedWatchedRef.current.has(String(it.id))) return;
+                  if (d > 0) lastDurationRef.current[String(it.id)] = d;
+                  saveProgress(it, t, d);
+                }}
                 onEnded={handleEnded}
                 onNext={hasNext ? handleNext : null}
                 onReady={() => setPlayerStarted(true)}
