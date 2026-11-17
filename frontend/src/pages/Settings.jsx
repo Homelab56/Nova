@@ -303,6 +303,20 @@ function ProfileEditor({ profile, isNew, canDelete, onSave, onDelete, onCancel }
   );
 }
 
+const ROW_BTN = "px-4 py-2 rounded-lg border border-gray-700 text-sm text-gray-200 hover:text-white hover:border-gray-500 hover:bg-white/5 whitespace-nowrap transition-colors";
+
+function Badge({ accent, children }) {
+  return (
+    <span
+      className={`inline-flex items-center whitespace-nowrap leading-none text-[11px] font-semibold px-2.5 py-1 rounded-full ${
+        accent ? "bg-nova-accent/15 text-nova-accent" : "bg-white/10 text-gray-300"
+      }`}
+    >
+      {children}
+    </span>
+  );
+}
+
 function PinSection({ profile }) {
   const { locks, adminProfile, askPin, askAdminPin, setProfilePin, clearProfilePin } = useProfile();
   const [msg, setMsg] = useState({ text: "", ok: true });
@@ -382,87 +396,92 @@ function ProfileSettings() {
   const [editing, setEditing] = useState(null); // profiel-id of "new"
   const canManage = !!selectedProfile?.is_admin;
 
+  const renderEditor = (id) => {
+    const target = id === "new" ? null : profiles.find(p => p.id === id);
+    return (
+      <ProfileEditor
+        key={id}
+        isNew={id === "new"}
+        profile={target}
+        canDelete={!!target && !target.is_admin && profiles.length > 1}
+        onCancel={() => setEditing(null)}
+        onSave={async (changes) => {
+          if (id === "new") await createProfile(changes.name, changes.avatar_color_hex);
+          else await updateProfile(id, changes);
+          setEditing(null);
+        }}
+        onDelete={async () => {
+          await deleteProfile(id);
+          setEditing(null);
+        }}
+      />
+    );
+  };
+
   return (
     <>
       <Section
         title="Profielen"
         subtitle="Dezelfde profielen als op de tv: wijzigingen zie je daar ook. Elk profiel heeft z'n eigen kijkgeschiedenis, sterren en taalinstellingen."
       >
-        <div className="grid sm:grid-cols-2 gap-3">
+        <div className="flex flex-col gap-3">
           {profiles.map(p => {
             const active = p.id === selectedProfileId;
+            const isEditing = editing === p.id;
             return (
-              <div
-                key={p.id}
-                className={`flex items-center gap-4 p-3 rounded-xl border transition-colors ${
-                  editing === p.id ? "border-nova-accent bg-nova-accent/5" : "border-gray-800 hover:border-gray-600"
-                }`}
-              >
-                <Avatar profile={p} />
-                <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-white truncate">{p.name}</div>
-                  <div className="flex gap-1.5 mt-1">
-                    {active && <span className="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full bg-nova-accent/15 text-nova-accent">Actief</span>}
-                    {p.is_admin && <span className="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full bg-white/10 text-gray-300">Hoofdprofiel</span>}
-                    {locks[p.id] && <span className="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full bg-white/10 text-gray-300">🔒 Pincode</span>}
+              <div key={p.id}>
+                <div
+                  className={`flex flex-wrap items-center gap-x-4 gap-y-3 p-4 rounded-xl border transition-colors ${
+                    isEditing ? "border-nova-accent bg-nova-accent/5" : "border-gray-800 hover:border-gray-700"
+                  }`}
+                >
+                  <Avatar profile={p} />
+                  <div className="flex-1 min-w-[10rem]">
+                    <div className="font-semibold text-white text-base truncate">{p.name}</div>
+                    {(active || p.is_admin || locks[p.id]) && (
+                      <div className="flex flex-wrap gap-1.5 mt-1.5">
+                        {active && <Badge accent>Actief</Badge>}
+                        {p.is_admin && <Badge>Hoofdprofiel</Badge>}
+                        {locks[p.id] && <Badge>🔒 Pincode</Badge>}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex gap-2 flex-shrink-0">
+                    {!active && (
+                      <button onClick={() => openProfile(p.id)} className={ROW_BTN}>
+                        Wissel naar
+                      </button>
+                    )}
+                    {canManage && (
+                      <button onClick={() => setEditing(isEditing ? null : p.id)} className={ROW_BTN}>
+                        {isEditing ? "Sluiten" : "Bewerken"}
+                      </button>
+                    )}
                   </div>
                 </div>
-                <div className="flex flex-col sm:flex-row gap-1">
-                  {!active && (
-                    <button onClick={() => openProfile(p.id)} className="px-3 py-1.5 text-xs rounded-lg text-gray-300 hover:text-white hover:bg-white/10">
-                      Wissel
-                    </button>
-                  )}
-                  {canManage && (
-                    <button
-                      onClick={() => setEditing(editing === p.id ? null : p.id)}
-                      className="px-3 py-1.5 text-xs rounded-lg text-gray-300 hover:text-white hover:bg-white/10"
-                    >
-                      Bewerk
-                    </button>
-                  )}
-                </div>
+                {canManage && isEditing && renderEditor(p.id)}
               </div>
             );
           })}
 
           {canManage && profiles.length < 10 && (
-            <button
-              onClick={() => setEditing(editing === "new" ? null : "new")}
-              className={`flex items-center gap-4 p-3 rounded-xl border-2 border-dashed transition-colors text-left ${
-                editing === "new" ? "border-nova-accent text-nova-accent" : "border-gray-700 text-gray-400 hover:border-nova-accent hover:text-nova-accent"
-              }`}
-            >
-              <div className="w-14 h-14 rounded-xl border border-current flex items-center justify-center text-2xl">+</div>
-              <span className="font-semibold">Profiel toevoegen</span>
-            </button>
+            <div>
+              <button
+                onClick={() => setEditing(editing === "new" ? null : "new")}
+                className={`w-full flex items-center gap-4 p-4 rounded-xl border-2 border-dashed transition-colors text-left ${
+                  editing === "new" ? "border-nova-accent text-nova-accent" : "border-gray-700 text-gray-400 hover:border-nova-accent hover:text-nova-accent"
+                }`}
+              >
+                <div className="w-14 h-14 rounded-xl border border-current flex items-center justify-center text-2xl">+</div>
+                <span className="font-semibold">Profiel toevoegen</span>
+              </button>
+              {editing === "new" && renderEditor("new")}
+            </div>
           )}
         </div>
 
         {!canManage && (
           <p className="text-sm text-gray-500 mt-4">Alleen het hoofdprofiel kan profielen en pincodes beheren.</p>
-        )}
-
-        {canManage && editing && (
-          <ProfileEditor
-            key={editing}
-            isNew={editing === "new"}
-            profile={editing === "new" ? null : profiles.find(p => p.id === editing)}
-            canDelete={(() => {
-              const p = profiles.find(x => x.id === editing);
-              return p && !p.is_admin && profiles.length > 1;
-            })()}
-            onCancel={() => setEditing(null)}
-            onSave={async (changes) => {
-              if (editing === "new") await createProfile(changes.name, changes.avatar_color_hex);
-              else await updateProfile(editing, changes);
-              setEditing(null);
-            }}
-            onDelete={async () => {
-              await deleteProfile(editing);
-              setEditing(null);
-            }}
-          />
         )}
       </Section>
 
