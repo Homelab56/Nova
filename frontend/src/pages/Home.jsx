@@ -389,6 +389,8 @@ export default function Home() {
   }
 
   function handleGenre(genre) {
+    // Vanuit de Watchlist (of Kids-modus): genre tonen over alle films en series.
+    if (mode !== "all" && mode !== "movie" && mode !== "tv") setMode("all");
     return loadOverlay(genre, (mode === "movie" || mode === "tv") ? sortKey : "");
   }
 
@@ -495,7 +497,7 @@ export default function Home() {
   if (mode === "watchlist") {
     return (
       <div className="min-h-screen bg-nova-bg pl-[var(--sbw)] transition-[padding-left] duration-200">
-        <Sidebar onSearch={handleSearch} onClear={handleClear} onGenre={handleGenre} mode={mode} onMode={handleMode} />
+        <Sidebar onSearch={handleSearch} onClear={handleClear} onGenre={handleGenre} mode={mode} onMode={handleMode} genre={activeGenre} />
         <div className="pt-8 px-4 md:px-10 pb-16">
           <h1 className="text-2xl md:text-3xl font-black mb-2">Mijn Watchlist</h1>
           <p className="text-gray-500 text-sm mb-8">{watchlist.length} {watchlist.length === 1 ? "titel" : "titels"}</p>
@@ -517,7 +519,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-nova-bg pl-[var(--sbw)] transition-[padding-left] duration-200">
-      <Sidebar onSearch={handleSearch} onClear={handleClear} onGenre={handleGenre} mode={mode} onMode={handleMode} />
+      <Sidebar onSearch={handleSearch} onClear={handleClear} onGenre={handleGenre} mode={mode} onMode={handleMode} genre={activeGenre} />
 
       {sortBar}
       {showOverlay ? (

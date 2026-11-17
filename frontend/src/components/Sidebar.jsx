@@ -43,7 +43,9 @@ const NAV_ITEMS = [
   )},
 ];
 
-export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode }) {
+// `genre` = het actieve genre van Home (alleen Home geeft het door); het menu toont dus altijd
+// wat de pagina echt laat zien, ook na het wisselen van pagina.
+export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode, genre = null }) {
   const navigate = useNavigate();
   const { selectedProfile, clearSelectedProfile } = useProfile();
   const { signOut } = useAuth();
@@ -51,7 +53,8 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode }) {
   const onSearchPage = location.pathname === "/search";
   const [genreOpen, setGenreOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [activeGenre, setActiveGenre] = useState(null);
+  const activeGenre = genre;
+  const onSettingsPage = location.pathname === "/settings";
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem("nova.sidebarCollapsed") === "1"; } catch { return false; }
   });
@@ -71,24 +74,27 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode }) {
   const onHome = location.pathname === "/";
 
   function handleMode(key) {
-    setActiveGenre(null);
     if (key === "kids") { navigate("/kids"); return; }
     if (onHome) { onClear(); onMode(key); }
     else navigate(`/?mode=${encodeURIComponent(key)}`);
   }
 
   function handleGenre(genre) {
-    setActiveGenre(genre); setGenreOpen(false);
+    setGenreOpen(false);
     if (onHome) onGenre(genre);
     else navigate("/", { state: { genre } });
   }
+
+  // Home ("all") niet oplichten zolang er een genre gekozen is: dan is het genre de selectie.
+  // Bij Films/Series blijft die wel aan (genre binnen Films of Series).
+  const navActive = (key) => mode === key && !(key === "all" && activeGenre);
 
   return (
     <>
     <nav className="fixed left-0 top-0 bottom-0 z-50 w-[var(--sbw)] transition-[width] duration-200 bg-nova-card/95 backdrop-blur border-r border-gray-800 flex flex-col">
       {/* Logo (gepind, scrollt niet mee) */}
       <div
-        onClick={() => { onClear(); setActiveGenre(null); onMode("all"); navigate("/"); }}
+        onClick={() => handleMode("all")}
         className={`cursor-pointer select-none flex items-center ${just} px-2 ${collapsed ? "" : "md:px-5"} py-7 shrink-0`}
       >
         {collapsed ? (
@@ -108,7 +114,7 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode }) {
             key={item.key}
             onClick={() => handleMode(item.key)}
             className={`w-full flex items-center ${just} gap-3 px-2 md:px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
-              mode === item.key ? "bg-nova-accent text-white" : "text-gray-400 hover:text-white hover:bg-white/5"
+              navActive(item.key) ? "bg-nova-accent text-white" : "text-gray-400 hover:text-white hover:bg-white/5"
             }`}
           >
             {item.icon}
@@ -155,7 +161,7 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode }) {
           </svg>
         </button>
         <button onClick={() => navigate("/settings")}
-          className={`w-full flex items-center ${just} gap-3 px-2 md:px-3 py-2.5 rounded-xl text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-all`}>
+          className={`w-full flex items-center ${just} gap-3 px-2 md:px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${onSettingsPage ? "bg-nova-accent text-white" : "text-gray-400 hover:text-white hover:bg-white/5"}`}>
           <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -199,7 +205,7 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode }) {
             ))}
           </div>
           {activeGenre && (
-            <button onClick={() => { setActiveGenre(null); onClear(); setGenreOpen(false); }}
+            <button onClick={() => { onClear(); setGenreOpen(false); }}
               className="mt-4 w-full text-xs text-gray-500 hover:text-white text-center py-1">
               ✕ Filter wissen
             </button>
