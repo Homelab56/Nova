@@ -110,14 +110,28 @@ async def delete_progress(item_id: str):
     await save(data)
     return {"ok": True}
 
+# Taalvoorkeuren - per profiel (profile_id), met de oude globale voorkeuren als terugval.
+def _pid_ok(pid: str | None) -> str | None:
+    pid = (pid or "").strip()
+    return pid if pid and len(pid) <= 64 and all(c.isalnum() or c == "-" for c in pid) else None
+
 @router.get("/prefs")
-async def get_prefs():
+async def get_prefs(profile_id: str | None = None):
     data = await load()
-    return data.get("prefs") or {}
+    base = UserPrefs().dict()
+    base.update(data.get("prefs") or {})
+    pid = _pid_ok(profile_id)
+    if pid:
+        base.update((data.get("profile_prefs") or {}).get(pid) or {})
+    return base
 
 @router.post("/prefs")
-async def save_prefs(prefs: UserPrefs):
+async def save_prefs(prefs: UserPrefs, profile_id: str | None = None):
     data = await load()
-    data["prefs"] = prefs.dict()
+    pid = _pid_ok(profile_id)
+    if pid:
+        data.setdefault("profile_prefs", {})[pid] = prefs.dict()
+    else:
+        data["prefs"] = prefs.dict()
     await save(data)
     return {"ok": True}

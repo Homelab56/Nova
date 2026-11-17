@@ -92,6 +92,16 @@ export function ProfileProvider({ children }) {
     await refreshProfiles();
   }
 
+  async function updateProfile(profileId, changes) {
+    const res = await authedFetch(`/profiles/${profileId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(changes),
+    });
+    if (!res.ok) throw new Error("Profiel opslaan mislukt");
+    await refreshProfiles();
+  }
+
   async function deleteProfile(profileId) {
     await authedFetch(`/profiles/${profileId}`, { method: "DELETE" });
     if (selectedProfileId === profileId) clearSelectedProfile();
@@ -110,6 +120,7 @@ export function ProfileProvider({ children }) {
         selectProfile,
         clearSelectedProfile,
         createProfile,
+        updateProfile,
         deleteProfile,
         refreshProfiles,
         authedFetch,

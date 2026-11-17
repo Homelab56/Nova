@@ -39,8 +39,9 @@ class ProfileCreate(BaseModel):
 
 
 class ProfileUpdate(BaseModel):
-    name: str
-    avatar_color_hex: str = "#1E88E5"
+    # Alleen meegestuurde velden worden aangepast (zo blijft bv. de tv-avatar staan).
+    name: str | None = None
+    avatar_color_hex: str | None = None
     avatar_id: str | None = None
 
 
@@ -118,16 +119,21 @@ async def create_profile(profile: ProfileCreate, ctx: UserContext = Depends(get_
     return res.data[0]
 
 
+def _profile_changes(profile: ProfileUpdate) -> dict:
+    changes = profile.model_dump(exclude_unset=True)
+    if "name" in changes:
+        name = (changes["name"] or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Naam mag niet leeg zijn")
+        changes["name"] = name[:40]
+    return changes
+
+
 @router.put("/{profile_id}")
 async def update_profile(profile_id: str, profile: ProfileUpdate, ctx: UserContext = Depends(get_user_context)):
     res = (
         ctx.client.table(PROFILES_TABLE)
-        .update({
-            "name": profile.name,
-            "avatar_color_hex": profile.avatar_color_hex,
-            "avatar_id": profile.avatar_id,
-            "updated_at": _iso_now(),
-        })
+        .update({**_profile_changes(profile), "updated_at": _iso_now()})
         .eq("id", profile_id)
         .eq("user_id", ctx.user_id)
         .execute()

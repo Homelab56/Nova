@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Hls from "hls.js";
+import { useProfile } from "../context/ProfileContext";
 
 function formatTime(sec) {
   const s = Math.max(0, Math.floor(sec || 0));
@@ -37,6 +38,7 @@ function shiftVtt(text, shift) {
 }
 
 export default function Player({ url, media, onProgress, startAt = 0, durationHint = 0, onEnded, onNext, onReady, immersive: immersiveProp = false, title: playerTitle, onBack }) {
+  const { selectedProfileId } = useProfile();
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
   const containerRef = useRef(null);
@@ -113,14 +115,15 @@ export default function Player({ url, media, onProgress, startAt = 0, durationHi
   }, []);
 
   useEffect(() => {
-    fetch("/api/user/prefs")
+    const pid = selectedProfileId ? `?profile_id=${encodeURIComponent(selectedProfileId)}` : "";
+    fetch(`/api/user/prefs${pid}`)
       .then(r => (r.ok ? r.json() : null))
       .then(data => {
         if (!data || typeof data !== "object") return;
         setPrefs(p => ({ ...p, ...data }));
       })
       .catch(() => {});
-  }, []);
+  }, [selectedProfileId]);
 
   useEffect(() => {
     try {
