@@ -63,19 +63,24 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode }) {
 
   // Klassen die afhangen van in-/uitgeklapt: labels weg en icoon gecentreerd als ingeklapt.
   const lbl = collapsed ? "hidden" : "hidden md:inline";
-  const just = collapsed ? "justify-center" : "${just}";
+  const just = collapsed ? "justify-center" : "";
+
+  // Op Home zelf wisselt de pagina gewoon van modus/genre. Vanaf een andere pagina (Kids,
+  // Zoeken, Instellingen, ...) gaat de keuze mee in de navigatie naar Home; anders
+  // overschreef die pagina 'm meteen weer met een kale "/" en belandde je op Home.
+  const onHome = location.pathname === "/";
 
   function handleMode(key) {
     setActiveGenre(null);
-    onClear();
-    if (key === "kids") navigate("/kids");
-    else { navigate("/"); onMode(key); }
+    if (key === "kids") { navigate("/kids"); return; }
+    if (onHome) { onClear(); onMode(key); }
+    else navigate(`/?mode=${encodeURIComponent(key)}`);
   }
 
   function handleGenre(genre) {
     setActiveGenre(genre); setGenreOpen(false);
-    navigate("/");
-    onGenre(genre);
+    if (onHome) onGenre(genre);
+    else navigate("/", { state: { genre } });
   }
 
   return (

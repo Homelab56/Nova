@@ -196,6 +196,13 @@ export default function Home() {
       const m = (params.get("mode") || "").toLowerCase().trim();
       const q = (params.get("q") || "").trim();
       if (m && ["all", "movie", "tv", "watchlist"].includes(m)) setMode(m);
+      // Genre gekozen in het menu op een andere pagina.
+      const g = location.state?.genre;
+      if (g) {
+        navigate("/", { replace: true, state: null });
+        handleGenre(g);
+        return;
+      }
       if (q) {
         navigate(`/search?q=${encodeURIComponent(q)}`, { replace: true });
         return;
