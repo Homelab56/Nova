@@ -7,6 +7,7 @@ import Person from "./pages/Person";
 import Search from "./pages/Search";
 import Login from "./pages/Login";
 import ProfileSelect from "./pages/ProfileSelect";
+import TvLogin from "./pages/TvLogin";
 import { useAuth } from "./context/AuthContext";
 import { useProfile } from "./context/ProfileContext";
 
@@ -20,6 +21,9 @@ function FullScreenSpinner() {
 
 export default function App() {
   const { status } = useAuth();
+
+  // Koppelpagina voor de tv (QR-code): eigen inlogflow, los van profielkeuze.
+  if (window.location.pathname === "/tv-login") return <TvLogin />;
 
   if (status === "loading") return <FullScreenSpinner />;
   if (status === "signedOut") return <Login />;
