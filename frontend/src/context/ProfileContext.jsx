@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { useAuth } from "./AuthContext";
 import { supabase } from "../lib/supabaseClient";
+import PinDialog from "../components/PinDialog";
 
 const ProfileContext = createContext(null);
 const STORAGE_KEY = "nova.selectedProfileId";
@@ -10,6 +11,8 @@ export function ProfileProvider({ children }) {
   const [profiles, setProfiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedProfileId, setSelectedProfileId] = useState(() => localStorage.getItem(STORAGE_KEY));
+  const [locks, setLocks] = useState({}); // profiel-id -> true als het met een pincode vergrendeld is
+  const [pinRequest, setPinRequest] = useState(null);
 
   // Gebruikt steeds het ACTUELE token: supabase.auth.getSession() ververst een verlopen
   // token zelf. Het token uit de render waarin deze functie ooit gemaakt werd raakt anders
@@ -45,9 +48,13 @@ export function ProfileProvider({ children }) {
     }
     setLoading(true);
     try {
-      const res = await authedFetch("/profiles/");
+      const [res, lockRes] = await Promise.all([
+        authedFetch("/profiles/"),
+        authedFetch("/profiles/locks/all").catch(() => null),
+      ]);
       const data = res.ok ? await res.json() : [];
       setProfiles(data);
+      if (lockRes?.ok) setLocks(await lockRes.json());
       // Een geselecteerd profiel dat niet (meer) bestaat (verwijderd, of van een
       // ander account na uitloggen/inloggen) telt niet mee als een geldige keuze.
       if (selectedProfileId && !data.some((p) => p.id === selectedProfileId)) {
@@ -92,6 +99,82 @@ export function ProfileProvider({ children }) {
     await refreshProfiles();
   }
 
+  async function apiError(res, fallback) {
+    let msg = fallback;
+    try { msg = (await res.json())?.detail || fallback; } catch {}
+    return new Error(msg);
+  }
+
+  // Vraagt een pincode via het venster. `submit(pin)` mag een fout gooien (blijft dan open).
+  function askPin({ title, subtitle, profile, submit }) {
+    return new Promise((resolve) => {
+      setPinRequest({
+        id: Date.now() + Math.random(),
+        title, subtitle, profile,
+        onSubmit: async (pin) => { await submit(pin); setPinRequest(null); resolve(pin); },
+        onCancel: () => { setPinRequest(null); resolve(null); },
+      });
+    });
+  }
+
+  async function verifyPin(profileId, pin) {
+    const res = await authedFetch(`/profiles/${profileId}/unlock`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin }),
+    });
+    if (!res.ok) throw await apiError(res, "Verkeerde pincode");
+  }
+
+  // Profiel openen: vraagt eerst de pincode als het vergrendeld is.
+  async function openProfile(profileId) {
+    const profile = profiles.find((p) => p.id === profileId);
+    if (locks[profileId]) {
+      const ok = await askPin({
+        title: profile?.name || "Profiel",
+        subtitle: "Voer de pincode in",
+        profile,
+        submit: (pin) => verifyPin(profileId, pin),
+      });
+      if (!ok) return false;
+    }
+    selectProfile(profileId);
+    return true;
+  }
+
+  const adminProfile = profiles.find((p) => p.is_admin) || null;
+
+  // Pincode van het hoofdprofiel vragen (nodig om pincodes te beheren), of null als die er niet is.
+  async function askAdminPin(reason) {
+    if (!adminProfile || !locks[adminProfile.id]) return "";
+    return askPin({
+      title: `Pincode van ${adminProfile.name}`,
+      subtitle: reason,
+      profile: adminProfile,
+      submit: (pin) => verifyPin(adminProfile.id, pin),
+    });
+  }
+
+  async function setProfilePin(profileId, pin, adminPin) {
+    const res = await authedFetch(`/profiles/${profileId}/pin`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin, admin_pin: adminPin || null }),
+    });
+    if (!res.ok) throw await apiError(res, "Pincode instellen mislukt");
+    await refreshProfiles();
+  }
+
+  async function clearProfilePin(profileId, adminPin) {
+    const res = await authedFetch(`/profiles/${profileId}/pin`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ admin_pin: adminPin || null }),
+    });
+    if (!res.ok) throw await apiError(res, "Pincode verwijderen mislukt");
+    await refreshProfiles();
+  }
+
   async function updateProfile(profileId, changes) {
     const res = await authedFetch(`/profiles/${profileId}`, {
       method: "PUT",
@@ -121,12 +204,29 @@ export function ProfileProvider({ children }) {
         clearSelectedProfile,
         createProfile,
         updateProfile,
+        locks,
+        adminProfile,
+        openProfile,
+        askPin,
+        askAdminPin,
+        setProfilePin,
+        clearProfilePin,
         deleteProfile,
         refreshProfiles,
         authedFetch,
       }}
     >
       {children}
+      {pinRequest && (
+        <PinDialog
+          key={pinRequest.id}
+          title={pinRequest.title}
+          subtitle={pinRequest.subtitle}
+          profile={pinRequest.profile}
+          onSubmit={pinRequest.onSubmit}
+          onCancel={pinRequest.onCancel}
+        />
+      )}
     </ProfileContext.Provider>
   );
 }

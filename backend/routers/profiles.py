@@ -148,6 +148,9 @@ async def delete_profile(profile_id: str, ctx: UserContext = Depends(get_user_co
     ctx.client.table(PROFILES_TABLE).update({"deleted_at": _iso_now()}).eq("id", profile_id).eq(
         "user_id", ctx.user_id
     ).execute()
+    data, pins = await _pins()
+    if pins.pop(profile_id, None) is not None:
+        await userdata.save(data)
     return {"ok": True}
 
 
@@ -398,3 +401,144 @@ async def get_suggestions(profile_id: str, ctx: UserContext = Depends(get_user_c
     movies = [it for it in all_items if it.get("media_type") == "movie"][:MAX_SUGGESTION_ITEMS]
     tv = [it for it in all_items if it.get("media_type") == "tv"][:MAX_SUGGESTION_ITEMS]
     return {"movies": movies, "tv": tv}
+
+
+# --- Pincode-vergrendeling per profiel ---
+# Bewaard op de server (data-volume), gehasht met PBKDF2 + salt. Alleen het hoofdprofiel
+# (is_admin) mag pincodes instellen/verwijderen, en daarvoor is z'n eigen pincode nodig.
+# Na 5 foute pogingen volgt een korte wachttijd tegen raden.
+import hashlib
+import hmac
+import secrets
+import time
+
+from . import userdata
+
+_PIN_ITER = 200_000
+_PIN_FAILS: dict[str, list[float]] = {}  # profile_id -> tijdstippen van foute pogingen
+_PIN_MAX_FAILS = 5
+_PIN_WINDOW = 60.0
+
+
+class PinBody(BaseModel):
+    pin: str | None = None
+    admin_pin: str | None = None
+
+
+def _valid_pin(pin: str | None) -> bool:
+    return bool(pin) and pin.isdigit() and len(pin) == 4
+
+
+def _hash_pin(pin: str, salt: bytes) -> str:
+    return hashlib.pbkdf2_hmac("sha256", pin.encode(), salt, _PIN_ITER).hex()
+
+
+async def _pins() -> tuple[dict, dict]:
+    data = await userdata.load()
+    return data, data.setdefault("profile_pins", {})
+
+
+def _check_pin(entry: dict | None, pin: str | None) -> bool:
+    if not entry or not pin:
+        return False
+    try:
+        salt = bytes.fromhex(entry["salt"])
+    except Exception:
+        return False
+    return hmac.compare_digest(_hash_pin(pin, salt), entry.get("hash", ""))
+
+
+def _rate_limited(profile_id: str) -> int:
+    now = time.monotonic()
+    fails = [t for t in _PIN_FAILS.get(profile_id, []) if now - t < _PIN_WINDOW]
+    _PIN_FAILS[profile_id] = fails
+    if len(fails) >= _PIN_MAX_FAILS:
+        return int(_PIN_WINDOW - (now - fails[0])) + 1
+    return 0
+
+
+def _verify_or_count(profile_id: str, entry: dict | None, pin: str | None) -> None:
+    wait = _rate_limited(profile_id)
+    if wait:
+        raise HTTPException(status_code=429, detail=f"Te veel foute pogingen. Probeer over {wait} s opnieuw.")
+    if not _check_pin(entry, pin):
+        _PIN_FAILS.setdefault(profile_id, []).append(time.monotonic())
+        raise HTTPException(status_code=403, detail="Verkeerde pincode")
+    _PIN_FAILS.pop(profile_id, None)
+
+
+def _own_profiles(ctx: UserContext) -> list[dict]:
+    res = (
+        ctx.client.table(PROFILES_TABLE)
+        .select("id,is_admin")
+        .eq("user_id", ctx.user_id)
+        .is_("deleted_at", "null")
+        .execute()
+    )
+    return res.data or []
+
+
+def _require_admin(ctx: UserContext, pins: dict, admin_pin: str | None) -> dict:
+    """Controleert de pincode van het hoofdprofiel; geeft het hoofdprofiel terug."""
+    admin = next((p for p in _own_profiles(ctx) if p.get("is_admin")), None)
+    if not admin:
+        raise HTTPException(status_code=403, detail="Geen hoofdprofiel gevonden")
+    _verify_or_count(admin["id"], pins.get(admin["id"]), admin_pin)
+    return admin
+
+
+@router.get("/locks/all")
+async def get_locks(ctx: UserContext = Depends(get_user_context)):
+    _, pins = await _pins()
+    return {p["id"]: True for p in _own_profiles(ctx) if p["id"] in pins}
+
+
+@router.post("/{profile_id}/unlock")
+async def unlock_profile(profile_id: str, body: PinBody, ctx: UserContext = Depends(get_user_context)):
+    own = {p["id"] for p in _own_profiles(ctx)}
+    if profile_id not in own:
+        raise HTTPException(status_code=404, detail="Profiel niet gevonden")
+    _, pins = await _pins()
+    if profile_id not in pins:
+        return {"ok": True}
+    _verify_or_count(profile_id, pins[profile_id], body.pin)
+    return {"ok": True}
+
+
+@router.put("/{profile_id}/pin")
+async def set_profile_pin(profile_id: str, body: PinBody, ctx: UserContext = Depends(get_user_context)):
+    if not _valid_pin(body.pin):
+        raise HTTPException(status_code=400, detail="Pincode moet uit 4 cijfers bestaan")
+    profiles = _own_profiles(ctx)
+    target = next((p for p in profiles if p["id"] == profile_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Profiel niet gevonden")
+    data, pins = await _pins()
+    admin = next((p for p in profiles if p.get("is_admin")), None)
+    if not admin:
+        raise HTTPException(status_code=403, detail="Geen hoofdprofiel gevonden")
+    if admin["id"] in pins:
+        _require_admin(ctx, pins, body.admin_pin)
+    elif profile_id != admin["id"]:
+        raise HTTPException(status_code=409, detail="Stel eerst een pincode in voor het hoofdprofiel.")
+    salt = secrets.token_bytes(16)
+    pins[profile_id] = {"salt": salt.hex(), "hash": _hash_pin(body.pin, salt)}
+    await userdata.save(data)
+    return {"ok": True}
+
+
+@router.delete("/{profile_id}/pin")
+async def clear_profile_pin(profile_id: str, body: PinBody, ctx: UserContext = Depends(get_user_context)):
+    data, pins = await _pins()
+    if profile_id not in pins:
+        return {"ok": True}
+    admin = _require_admin(ctx, pins, body.admin_pin)
+    own = {p["id"] for p in _own_profiles(ctx)}
+    if profile_id == admin["id"] and any(pid != admin["id"] and pid in own for pid in pins):
+        raise HTTPException(
+            status_code=409,
+            detail="Verwijder eerst de pincodes van de andere profielen; anders kan iedereen ze aanpassen.",
+        )
+    pins.pop(profile_id, None)
+    await userdata.save(data)
+    return {"ok": True}

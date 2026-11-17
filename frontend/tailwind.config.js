@@ -17,6 +17,11 @@ export default {
           "0%, 100%": { transform: "scale(1)" },
           "50%": { transform: "scale(1.04)" },
         },
+        "nova-shake": {
+          "0%, 100%": { transform: "translateX(0)" },
+          "20%, 60%": { transform: "translateX(-8px)" },
+          "40%, 80%": { transform: "translateX(8px)" },
+        },
       },
     },
   },

@@ -5,7 +5,7 @@ import { useAuth } from "../context/AuthContext";
 const COLORS = ["#1E88E5", "#E53935", "#43A047", "#FB8C00", "#8E24AA", "#00897B"];
 
 export default function ProfileSelect() {
-  const { profiles, loading, selectProfile, createProfile } = useProfile();
+  const { profiles, loading, openProfile, createProfile, locks } = useProfile();
   const { signOut } = useAuth();
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
@@ -41,14 +41,17 @@ export default function ProfileSelect() {
         {profiles.map((p) => (
           <button
             key={p.id}
-            onClick={() => selectProfile(p.id)}
+            onClick={() => openProfile(p.id)}
             className="flex flex-col items-center gap-2 group"
           >
             <div
-              className="w-24 h-24 rounded-xl flex items-center justify-center text-3xl font-bold text-white group-hover:ring-4 ring-nova-accent transition-all"
+              className="relative w-24 h-24 rounded-xl flex items-center justify-center text-3xl font-bold text-white group-hover:ring-4 ring-nova-accent transition-all"
               style={{ backgroundColor: p.avatar_color_hex || "#1E88E5" }}
             >
               {(p.name || "?").charAt(0).toUpperCase()}
+              {locks[p.id] && (
+                <span className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full bg-nova-bg border border-white/15 flex items-center justify-center text-sm" title="Vergrendeld met pincode">🔒</span>
+              )}
             </div>
             <span className="text-gray-300 text-sm">{p.name}</span>
           </button>

@@ -297,13 +297,90 @@ function ProfileEditor({ profile, isNew, canDelete, onSave, onDelete, onCancel }
           )}
         </div>
       )}
+
+      {!isNew && profile && <PinSection profile={profile} />}
     </form>
   );
 }
 
+function PinSection({ profile }) {
+  const { locks, adminProfile, askPin, askAdminPin, setProfilePin, clearProfilePin } = useProfile();
+  const [msg, setMsg] = useState({ text: "", ok: true });
+  const locked = !!locks[profile.id];
+  const isAdmin = profile.id === adminProfile?.id;
+  const adminLocked = adminProfile && !!locks[adminProfile.id];
+  const blocked = !isAdmin && !adminLocked;
+
+  async function setPin() {
+    setMsg({ text: "", ok: true });
+    const adminPin = await askAdminPin("Bevestig met jouw pincode om pincodes te beheren.");
+    if (adminPin === null) return;
+    let first = null;
+    const p1 = await askPin({
+      title: locked ? "Nieuwe pincode" : "Kies een pincode",
+      subtitle: `4 cijfers voor ${profile.name}`,
+      profile,
+      submit: async (pin) => { first = pin; },
+    });
+    if (!p1) return;
+    const p2 = await askPin({
+      title: "Herhaal de pincode",
+      subtitle: `Ter bevestiging voor ${profile.name}`,
+      profile,
+      submit: async (pin) => { if (pin !== first) throw new Error("Pincodes komen niet overeen"); },
+    });
+    if (!p2) return;
+    try {
+      await setProfilePin(profile.id, first, adminPin);
+      setMsg({ text: locked ? "Pincode gewijzigd." : "Profiel is nu vergrendeld met een pincode.", ok: true });
+    } catch (e) {
+      setMsg({ text: e.message, ok: false });
+    }
+  }
+
+  async function removePin() {
+    setMsg({ text: "", ok: true });
+    const adminPin = await askAdminPin("Bevestig met jouw pincode om de vergrendeling op te heffen.");
+    if (adminPin === null) return;
+    try {
+      await clearProfilePin(profile.id, adminPin);
+      setMsg({ text: "Pincode verwijderd.", ok: true });
+    } catch (e) {
+      setMsg({ text: e.message, ok: false });
+    }
+  }
+
+  return (
+    <div className="mt-5 pt-5 border-t border-white/10">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex-1 min-w-[12rem]">
+          <div className="text-sm font-semibold text-white">{locked ? "🔒 Vergrendeld met pincode" : "Pincode"}</div>
+          <div className="text-xs text-gray-400 mt-0.5">
+            {blocked
+              ? `Stel eerst een pincode in voor ${adminProfile?.name || "het hoofdprofiel"}; anders kan iedereen de pincodes aanpassen.`
+              : locked
+                ? "Bij het openen van dit profiel wordt de pincode gevraagd."
+                : "Niemand heeft een pincode nodig om dit profiel te openen."}
+          </div>
+        </div>
+        <button type="button" onClick={setPin} disabled={blocked} className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-sm text-white disabled:opacity-40">
+          {locked ? "Pincode wijzigen" : "Pincode instellen"}
+        </button>
+        {locked && (
+          <button type="button" onClick={removePin} className="px-4 py-2 rounded-lg text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10">
+            Pincode verwijderen
+          </button>
+        )}
+      </div>
+      {msg.text && <p className={`text-sm mt-3 ${msg.ok ? "text-green-400" : "text-red-400"}`}>{msg.text}</p>}
+    </div>
+  );
+}
+
 function ProfileSettings() {
-  const { profiles, selectedProfileId, selectProfile, clearSelectedProfile, createProfile, updateProfile, deleteProfile } = useProfile();
+  const { profiles, selectedProfileId, selectedProfile, openProfile, clearSelectedProfile, createProfile, updateProfile, deleteProfile, locks } = useProfile();
   const [editing, setEditing] = useState(null); // profiel-id of "new"
+  const canManage = !!selectedProfile?.is_admin;
 
   return (
     <>
@@ -327,26 +404,29 @@ function ProfileSettings() {
                   <div className="flex gap-1.5 mt-1">
                     {active && <span className="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full bg-nova-accent/15 text-nova-accent">Actief</span>}
                     {p.is_admin && <span className="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full bg-white/10 text-gray-300">Hoofdprofiel</span>}
+                    {locks[p.id] && <span className="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full bg-white/10 text-gray-300">🔒 Pincode</span>}
                   </div>
                 </div>
                 <div className="flex flex-col sm:flex-row gap-1">
                   {!active && (
-                    <button onClick={() => selectProfile(p.id)} className="px-3 py-1.5 text-xs rounded-lg text-gray-300 hover:text-white hover:bg-white/10">
+                    <button onClick={() => openProfile(p.id)} className="px-3 py-1.5 text-xs rounded-lg text-gray-300 hover:text-white hover:bg-white/10">
                       Wissel
                     </button>
                   )}
-                  <button
-                    onClick={() => setEditing(editing === p.id ? null : p.id)}
-                    className="px-3 py-1.5 text-xs rounded-lg text-gray-300 hover:text-white hover:bg-white/10"
-                  >
-                    Bewerk
-                  </button>
+                  {canManage && (
+                    <button
+                      onClick={() => setEditing(editing === p.id ? null : p.id)}
+                      className="px-3 py-1.5 text-xs rounded-lg text-gray-300 hover:text-white hover:bg-white/10"
+                    >
+                      Bewerk
+                    </button>
+                  )}
                 </div>
               </div>
             );
           })}
 
-          {profiles.length < 10 && (
+          {canManage && profiles.length < 10 && (
             <button
               onClick={() => setEditing(editing === "new" ? null : "new")}
               className={`flex items-center gap-4 p-3 rounded-xl border-2 border-dashed transition-colors text-left ${
@@ -359,7 +439,11 @@ function ProfileSettings() {
           )}
         </div>
 
-        {editing && (
+        {!canManage && (
+          <p className="text-sm text-gray-500 mt-4">Alleen het hoofdprofiel kan profielen en pincodes beheren.</p>
+        )}
+
+        {canManage && editing && (
           <ProfileEditor
             key={editing}
             isNew={editing === "new"}
