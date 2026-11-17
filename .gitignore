@@ -14,3 +14,4 @@ backend/.ruff_cache/
 
 .vscode/
 *.log
+supabase/.temp/
