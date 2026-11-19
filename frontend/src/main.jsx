@@ -18,3 +18,10 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     </AuthProvider>
   </BrowserRouter>
 );
+
+// Service worker: nodig om Streamify als app te kunnen installeren (werkt alleen via HTTPS).
+if ("serviceWorker" in navigator && window.isSecureContext) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
+}

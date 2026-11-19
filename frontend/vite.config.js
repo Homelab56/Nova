@@ -9,6 +9,8 @@ const devProxyTarget =
 export default defineConfig({
   plugins: [react()],
   server: {
+    // Ook bereikbaar via de HTTPS-naam achter Caddy (nodig om als app te installeren).
+    allowedHosts: [".the-private-bay.com"],
     proxy: {
       "/api": {
         target: devProxyTarget,
