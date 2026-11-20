@@ -13,7 +13,7 @@ function Card({ item, progressPct, dismissable }) {
   const inList = isInList(item.id);
 
   return (
-    <div className="relative flex-shrink-0 w-36 sm:w-40 md:w-44 cursor-pointer group">
+    <div className="relative flex-shrink-0 w-28 sm:w-40 md:w-44 cursor-pointer group">
       {/* Poster */}
       <div
         onClick={() => navigate("/watch", { state: { media: item } })}
@@ -124,7 +124,7 @@ export default function Row({ title, items = [], loading = false, progressMap = 
         >
           {loading
             ? Array.from({ length: 8 }).map((_, i) => (
-                <div key={i} className="flex-shrink-0 w-36 sm:w-40 md:w-44 aspect-[2/3] rounded-xl bg-nova-card animate-pulse" />
+                <div key={i} className="flex-shrink-0 w-28 sm:w-40 md:w-44 aspect-[2/3] rounded-xl bg-nova-card animate-pulse" />
               ))
             : <>
                 {visibleItems.map((item) => (
@@ -137,8 +137,8 @@ export default function Row({ title, items = [], loading = false, progressMap = 
                 ))}
                 {loadingMore && (
                   <>
-                    <div className="flex-shrink-0 w-36 sm:w-40 md:w-44 aspect-[2/3] rounded-xl bg-nova-card animate-pulse" />
-                    <div className="flex-shrink-0 w-36 sm:w-40 md:w-44 aspect-[2/3] rounded-xl bg-nova-card animate-pulse" />
+                    <div className="flex-shrink-0 w-28 sm:w-40 md:w-44 aspect-[2/3] rounded-xl bg-nova-card animate-pulse" />
+                    <div className="flex-shrink-0 w-28 sm:w-40 md:w-44 aspect-[2/3] rounded-xl bg-nova-card animate-pulse" />
                   </>
                 )}
               </>}

@@ -91,7 +91,7 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode, genr
 
   return (
     <>
-    <nav className="fixed left-0 top-0 bottom-0 z-50 w-[var(--sbw)] transition-[width] duration-200 bg-nova-card/95 backdrop-blur border-r border-gray-800 flex flex-col">
+    <nav className="hidden md:flex fixed left-0 top-0 bottom-0 z-50 w-[var(--sbw)] transition-[width] duration-200 bg-nova-card/95 backdrop-blur border-r border-gray-800 flex-col">
       {/* Logo (gepind, scrollt niet mee) */}
       <div
         onClick={() => handleMode("all")}
@@ -186,6 +186,21 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode, genr
       </div>
     </nav>
 
+    {/* Gsm: menubalk onderaan (de zijbalk is daar verborgen) */}
+    <MobileNav
+      navActive={navActive}
+      onMode={handleMode}
+      onSearchPage={onSearchPage}
+      onSettingsPage={onSettingsPage}
+      mode={mode}
+      activeGenre={activeGenre}
+      openGenres={() => setGenreOpen(true)}
+      navigate={navigate}
+      profile={selectedProfile}
+      switchProfile={clearSelectedProfile}
+      signOut={signOut}
+    />
+
     {/* Popouts worden buiten <nav> gerenderd: backdrop-blur op <nav> maakt er anders zelf een
         "containing block" van, waardoor fixed-positioned kinderen beperkt blijven tot de smalle
         zijbalk-breedte i.p.v. het volledige scherm - dat veroorzaakte eerder horizontaal scrollen. */}
@@ -231,6 +246,113 @@ export default function Sidebar({ onSearch, onClear, onGenre, mode, onMode, genr
         </div>
       </div>
     )}
+    </>
+  );
+}
+
+const SEARCH_ICON = (
+  <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <circle cx="11" cy="11" r="7" /><line x1="16.5" y1="16.5" x2="22" y2="22" />
+  </svg>
+);
+const MORE_ICON = (
+  <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+  </svg>
+);
+const GENRE_ICON = (
+  <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" />
+  </svg>
+);
+
+// Menubalk onderaan voor de gsm (zoals in de meeste apps), met "Meer" voor de rest.
+function MobileNav({ navActive, onMode, onSearchPage, onSettingsPage, mode, activeGenre, openGenres, navigate, profile, switchProfile, signOut }) {
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  // Ruimte onderaan de pagina vrijhouden zodat de balk niets bedekt.
+  useEffect(() => {
+    document.documentElement.classList.add("has-bottom-nav");
+    return () => document.documentElement.classList.remove("has-bottom-nav");
+  }, []);
+
+  const tab = (key) => NAV_ITEMS.find((i) => i.key === key);
+  const items = [
+    { ...tab("all"), active: navActive("all"), onClick: () => onMode("all") },
+    { ...tab("movie"), active: navActive("movie"), onClick: () => onMode("movie") },
+    { ...tab("tv"), active: navActive("tv"), onClick: () => onMode("tv") },
+    { ...tab("watchlist"), active: navActive("watchlist"), onClick: () => onMode("watchlist") },
+    { key: "search", label: "Zoeken", icon: SEARCH_ICON, active: onSearchPage, onClick: () => navigate("/search") },
+    {
+      key: "more", label: "Meer", icon: MORE_ICON,
+      active: moreOpen || mode === "kids" || onSettingsPage || (!!activeGenre && mode === "all"),
+      onClick: () => setMoreOpen((v) => !v),
+    },
+  ];
+
+  const go = (fn) => () => { setMoreOpen(false); fn(); };
+  const row = "w-full flex items-center gap-4 px-5 py-4 text-left text-base text-gray-200 active:bg-white/10";
+
+  return (
+    <>
+      <div
+        className="md:hidden fixed bottom-0 inset-x-0 z-50 bg-nova-card/95 backdrop-blur border-t border-gray-800 grid grid-cols-6"
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      >
+        {items.map((it) => (
+          <button
+            key={it.key}
+            onClick={it.onClick}
+            className={`flex flex-col items-center justify-center gap-1 h-16 text-[11px] font-medium transition-colors ${
+              it.active ? "text-nova-accent" : "text-gray-400 active:text-white"
+            }`}
+          >
+            {it.icon}
+            <span className="leading-none">{it.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {moreOpen && (
+        <div className="md:hidden fixed inset-0 z-[45] bg-black/60" onClick={() => setMoreOpen(false)}>
+          <div
+            className="absolute inset-x-0 bottom-0 bg-nova-card border-t border-gray-700 rounded-t-2xl pt-2 animate-[nova-fade-in_150ms_ease-out]"
+            style={{ paddingBottom: "calc(4rem + env(safe-area-inset-bottom))" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-10 h-1 rounded-full bg-gray-600 mx-auto mb-2" />
+            {profile && (
+              <div className="flex items-center gap-3 px-5 py-3 border-b border-white/5">
+                <div className="w-9 h-9 rounded-lg flex items-center justify-center font-bold text-white" style={{ backgroundColor: profile.avatar_color_hex || "#1E88E5" }}>
+                  {(profile.name || "?").charAt(0).toUpperCase()}
+                </div>
+                <span className="font-semibold text-white">{profile.name}</span>
+              </div>
+            )}
+            <button className={row} onClick={go(() => onMode("kids"))}>{tab("kids").icon}Kids</button>
+            <button className={row} onClick={go(openGenres)}>{GENRE_ICON}{activeGenre ? `Genre: ${activeGenre.name}` : "Genres"}</button>
+            <button className={row} onClick={go(() => navigate("/settings"))}>
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              Instellingen
+            </button>
+            <button className={row} onClick={go(switchProfile)}>
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4M16 17H4m0 0l4 4m-4-4l4-4" />
+              </svg>
+              Wissel van profiel
+            </button>
+            <button className={`${row} text-gray-400`} onClick={go(signOut)}>
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+              Uitloggen
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 }

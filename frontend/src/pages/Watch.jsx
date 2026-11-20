@@ -924,15 +924,15 @@ export default function Watch() {
                         <div
                           key={ep.id}
                           onClick={() => { setSelectedEpisode(ep); handlePlay(ep); }}
-                          className={`flex gap-4 p-3 rounded-xl cursor-pointer transition-all border group ${
+                          className={`flex gap-3 sm:gap-4 p-2 sm:p-3 rounded-xl cursor-pointer transition-all border group ${
                             selectedEpisode?.id === ep.id ? "border-nova-accent bg-nova-accent/10" : "border-transparent hover:border-gray-700 hover:bg-nova-card"
                           } ${watched ? "opacity-70" : ""}`}
                         >
-                          <div className={`flex-shrink-0 w-10 flex items-center justify-center font-bold text-lg group-hover:text-white transition-colors ${watched ? "text-green-400" : "text-gray-500"}`}>
+                          <div className={`hidden sm:flex flex-shrink-0 w-10 items-center justify-center font-bold text-lg group-hover:text-white transition-colors ${watched ? "text-green-400" : "text-gray-500"}`}>
                             {watched ? "✓" : ep.episode_number}
                           </div>
 
-                          <div className="flex-shrink-0 w-36 aspect-video rounded-lg overflow-hidden bg-nova-bg relative">
+                          <div className="flex-shrink-0 w-28 sm:w-36 aspect-video rounded-lg overflow-hidden bg-nova-bg relative">
                             {ep.still_path ? (
                               <img src={`${TMDB_STILL}${ep.still_path}`} alt={ep.name} className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${watched ? "grayscale" : ""}`} />
                             ) : (
@@ -952,13 +952,13 @@ export default function Watch() {
 
                           <div className="flex-1 min-w-0 py-1">
                             <div className="flex items-start justify-between gap-2 mb-1">
-                              <p className="font-semibold text-sm leading-tight">{ep.name}</p>
+                              <p className="font-semibold text-sm leading-tight"><span className="sm:hidden text-gray-400">{watched ? "✓ " : `${ep.episode_number}. `}</span>{ep.name}</p>
                               {ep.runtime && <span className="flex-shrink-0 text-xs text-gray-500">{ep.runtime}m</span>}
                             </div>
                             <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">{ep.overview}</p>
                           </div>
 
-                          <div className="flex-shrink-0 flex items-center pr-1">
+                          <div className="hidden sm:flex flex-shrink-0 items-center pr-1">
                             <div className="w-9 h-9 rounded-full bg-white/0 group-hover:bg-nova-accent/20 border border-transparent group-hover:border-nova-accent flex items-center justify-center transition-all">
                               <span className="text-white/0 group-hover:text-nova-accent text-sm transition-colors">▶</span>
                             </div>
@@ -1161,15 +1161,15 @@ export default function Watch() {
                       <div
                         key={ep.id}
                         onClick={() => { setSelectedEpisode(ep); handlePlay(ep); }}
-                        className={`flex gap-4 p-3 rounded-xl cursor-pointer transition-all border group ${selectedEpisode?.id === ep.id ? "border-nova-accent bg-nova-accent/10" : "border-transparent hover:border-gray-700 hover:bg-nova-card"} ${watched ? "opacity-70" : ""}`}
+                        className={`flex gap-3 sm:gap-4 p-2 sm:p-3 rounded-xl cursor-pointer transition-all border group ${selectedEpisode?.id === ep.id ? "border-nova-accent bg-nova-accent/10" : "border-transparent hover:border-gray-700 hover:bg-nova-card"} ${watched ? "opacity-70" : ""}`}
                       >
                         {/* Nummer */}
-                        <div className={`flex-shrink-0 w-10 flex items-center justify-center font-bold text-lg group-hover:text-white transition-colors ${watched ? "text-green-400" : "text-gray-500"}`}>
+                        <div className={`hidden sm:flex flex-shrink-0 w-10 items-center justify-center font-bold text-lg group-hover:text-white transition-colors ${watched ? "text-green-400" : "text-gray-500"}`}>
                           {watched ? "✓" : ep.episode_number}
                         </div>
 
                         {/* Thumbnail */}
-                        <div className="flex-shrink-0 w-36 aspect-video rounded-lg overflow-hidden bg-nova-bg relative">
+                        <div className="flex-shrink-0 w-28 sm:w-36 aspect-video rounded-lg overflow-hidden bg-nova-bg relative">
                           {ep.still_path ? (
                             <img src={`${TMDB_STILL}${ep.still_path}`} alt={ep.name} className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${watched ? "grayscale" : ""}`} />
                           ) : (
@@ -1190,14 +1190,14 @@ export default function Watch() {
                         {/* Info */}
                         <div className="flex-1 min-w-0 py-1">
                           <div className="flex items-start justify-between gap-2 mb-1">
-                            <p className="font-semibold text-sm leading-tight">{ep.name}</p>
+                            <p className="font-semibold text-sm leading-tight"><span className="sm:hidden text-gray-400">{watched ? "✓ " : `${ep.episode_number}. `}</span>{ep.name}</p>
                             {ep.runtime && <span className="flex-shrink-0 text-xs text-gray-500">{ep.runtime}m</span>}
                           </div>
                           <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">{ep.overview}</p>
                         </div>
 
                         {/* Play knop */}
-                        <div className="flex-shrink-0 flex items-center pr-1">
+                        <div className="hidden sm:flex flex-shrink-0 items-center pr-1">
                           <div className="w-9 h-9 rounded-full bg-white/0 group-hover:bg-nova-accent/20 border border-transparent group-hover:border-nova-accent flex items-center justify-center transition-all">
                             <span className="text-white/0 group-hover:text-nova-accent text-sm transition-colors">▶</span>
                           </div>
